@@ -700,16 +700,36 @@ export class FloatingWidget {
           </div>
         ` : ''}
 
-        <!-- Live Broadcaster Banner if Active -->
+        <!-- Multi-Broadcaster Live Streams List -->
         ${isLive ? `
-          <div style="background:linear-gradient(135deg, rgba(239, 68, 68, 0.25), rgba(139, 92, 246, 0.2));border-bottom:1px solid rgba(239, 68, 68, 0.35);padding:6px 12px;display:flex;align-items:center;justify-content:space-between;font-size:11px;color:#fca5a5;">
-            <div style="display:flex;align-items:center;gap:6px;">
-              <span class="live-dot"></span>
-              <span><strong>${tutorName}</strong> broadcasting ${broadcastType}</span>
+          <div style="background:linear-gradient(135deg, rgba(239, 68, 68, 0.22), rgba(139, 92, 246, 0.18));border-bottom:1px solid rgba(239, 68, 68, 0.35);padding:6px 10px;display:flex;flex-direction:column;gap:5px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;font-size:10px;color:#fca5a5;">
+              <div style="display:flex;align-items:center;gap:5px;font-weight:700;">
+                <span class="live-dot"></span>
+                <span>LIVE STREAMS (${(this.liveStage.activeStreams && this.liveStage.activeStreams.length) || 1}):</span>
+              </div>
+              <button id="nb-live-tunein" style="background:#ef4444;color:#fff;border:none;padding:2px 8px;border-radius:4px;font-size:9px;font-weight:700;cursor:pointer;">
+                Open Side Panel 📺
+              </button>
             </div>
-            <button id="nb-live-tunein" style="background:#ef4444;color:#fff;border:none;padding:3px 8px;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer;">
-              Watch 📺
-            </button>
+
+            <div style="display:flex;gap:4px;overflow-x:auto;padding-bottom:2px;">
+              ${((this.liveStage.activeStreams && this.liveStage.activeStreams.length > 0)
+                ? this.liveStage.activeStreams
+                : [{
+                    broadcasterIdentity: this.liveStage.tutorIdentity || { nickname: tutorName, avatar: '👑' },
+                    title: `${tutorName}'s Walkthrough`,
+                    broadcastType: this.liveStage.broadcastType || 'screen',
+                  }]
+              ).map((s: any) => `
+                <div style="display:flex;align-items:center;gap:4px;padding:3px 6px;border-radius:4px;background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.1);font-size:10px;color:#f8fafc;white-space:nowrap;">
+                  <span>${s.broadcasterIdentity?.avatar || '👤'}</span>
+                  <span style="font-weight:600;">${s.broadcasterIdentity?.nickname || 'Streamer'}:</span>
+                  <span style="color:#c7d2fe;max-width:110px;overflow:hidden;text-overflow:ellipsis;">${this.escapeHtml(s.title || 'Live Stream')}</span>
+                  <span style="font-size:8px;padding:1px 4px;border-radius:3px;background:rgba(239,68,68,0.3);color:#fca5a5;text-transform:uppercase;">${s.broadcastType || 'live'}</span>
+                </div>
+              `).join('')}
+            </div>
           </div>
         ` : ''}
 

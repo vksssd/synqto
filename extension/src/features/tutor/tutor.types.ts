@@ -1,4 +1,4 @@
-// ─── Tutor Stage & Cursor Types ───
+// ─── Tutor Stage, Multi-Broadcaster & Cursor Types ───
 
 import { PeerIdentity } from '@/core/network/packet';
 
@@ -33,15 +33,26 @@ export interface HandRaiseRequest {
   requestedAt: number;
 }
 
+export interface ActiveStreamInfo {
+  streamId: string;
+  broadcasterPeerId: string;
+  broadcasterIdentity: PeerIdentity;
+  title: string;
+  broadcastType: BroadcastType;
+  startedAt: number;
+}
+
 export interface TutorStageState {
   isActive: boolean;
   tutorPeerId: string | null;
   tutorIdentity: PeerIdentity | null;
-  guestSpeakers: PeerIdentity[]; // Max 2 interactive guest speakers
+  guestSpeakers: PeerIdentity[]; // Interactive guest speakers
   handRaises: HandRaiseRequest[];
   isMyHandRaised: boolean;
   myRole: StageRole;
   isAudioLive: boolean;
   isVideoLive: boolean;
   broadcastType: BroadcastType;
+  streamTitle?: string;
+  activeStreams: ActiveStreamInfo[]; // All concurrent active streams in room
 }

@@ -1,4 +1,4 @@
-// ─── Live Synchronized Laser Pointer & Click Overlay (Tutor & Stage Speakers Only) ───
+// ─── Live Synchronized Laser Pointer & Click Ripple Overlay (Synqme Stage) ───
 
 interface RemoteCursorData {
   peerId: string;
@@ -17,6 +17,7 @@ interface ClickPulseData {
   xPct: number;
   yPct: number;
   color: string;
+  isTutor?: boolean;
   timestamp: number;
 }
 
@@ -46,9 +47,14 @@ export class CursorOverlay {
   private async loadState() {
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       try {
-        const res = await chrome.storage.local.get(['nerd_buddy_identity', 'nerd_buddy_live_stage']);
-        this.myIdentity = res.nerd_buddy_identity || null;
-        this.liveStage = res.nerd_buddy_live_stage || null;
+        const res = await chrome.storage.local.get([
+          'nerd_buddy_identity',
+          'synqme_identity',
+          'nerd_buddy_live_stage',
+          'synqme_live_stage'
+        ]);
+        this.myIdentity = res.synqme_identity || res.nerd_buddy_identity || null;
+        this.liveStage = res.synqme_live_stage || res.nerd_buddy_live_stage || null;
         if (!this.liveStage || !this.liveStage.isActive) {
           this.clearAllCursors();
         }
@@ -60,11 +66,11 @@ export class CursorOverlay {
     if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) {
       chrome.storage.onChanged.addListener((changes, area) => {
         if (area === 'local') {
-          if (changes.nerd_buddy_identity) {
-            this.myIdentity = changes.nerd_buddy_identity.newValue;
+          if (changes.synqme_identity || changes.nerd_buddy_identity) {
+            this.myIdentity = (changes.synqme_identity || changes.nerd_buddy_identity).newValue;
           }
-          if (changes.nerd_buddy_live_stage) {
-            this.liveStage = changes.nerd_buddy_live_stage.newValue;
+          if (changes.synqme_live_stage || changes.nerd_buddy_live_stage) {
+            this.liveStage = (changes.synqme_live_stage || changes.nerd_buddy_live_stage).newValue;
             if (!this.liveStage || !this.liveStage.isActive) {
               this.clearAllCursors();
             }
@@ -94,7 +100,7 @@ export class CursorOverlay {
     if (!myPeerId) return false;
 
     // Check if Tutor
-    if (this.liveStage.tutorIdentity?.peerId === myPeerId || this.liveStage.myRole === 'tutor') {
+    if (this.liveStage.tutorIdentity?.peerId === myPeerId || this.liveStage.tutorPeerId === myPeerId || this.liveStage.myRole === 'tutor') {
       return true;
     }
 
@@ -112,14 +118,15 @@ export class CursorOverlay {
     const div = document.createElement('div');
     div.id = 'nerd-buddy-cursor-overlay';
     div.style.cssText = `
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100vw;
-      height: 100vh;
-      pointer-events: none;
-      z-index: 2147483640;
-      overflow: hidden;
+      position: fixed !important;
+      top: 0 !important;
+      left: 0 !important;
+      width: 100vw !important;
+      height: 100vh !important;
+      pointer-events: none !important;
+      z-index: 2147483645 !important;
+      overflow: hidden !important;
+      box-sizing: border-box !important;
     `;
     document.body.appendChild(div);
     this.container = div;
@@ -130,8 +137,9 @@ export class CursorOverlay {
       style.id = 'nerd-buddy-cursor-styles';
       style.textContent = `
         @keyframes nb-click-ripple {
-          0% { transform: scale(0.2); opacity: 1; }
-          100% { transform: scale(2.4); opacity: 0; }
+          0% { transform: scale(0.15); opacity: 1; }
+          40% { opacity: 0.9; }
+          100% { transform: scale(2.8); opacity: 0; }
         }
       `;
       document.head.appendChild(style);
@@ -152,24 +160,20 @@ export class CursorOverlay {
 
         if (msg.type === 'NERD_BUDDY_CURSOR_UPDATE' && msg.cursor) {
           const cursor = msg.cursor as RemoteCursorData;
-          // Only render laser cursor if stream is active AND sender is a tutor or on stage
-          if (!this.liveStage || !this.liveStage.isActive) return;
-
+          // Render if sender is a tutor or marked as broadcaster
           const isBroadcaster = cursor.isTutor ||
-            (this.liveStage.tutorIdentity?.peerId === cursor.peerId || this.liveStage.guestSpeakers?.some((g: any) => g.peerId === cursor.peerId));
+            (this.liveStage && (this.liveStage.tutorIdentity?.peerId === cursor.peerId || this.liveStage.tutorPeerId === cursor.peerId || this.liveStage.guestSpeakers?.some((g: any) => g.peerId === cursor.peerId)));
 
-          if (isBroadcaster) {
+          if (isBroadcaster || !this.liveStage) {
             this.renderCursor(cursor);
           }
         } else if (msg.type === 'NERD_BUDDY_CLICK_PULSE' && msg.click) {
           const click = msg.click as ClickPulseData;
-          // Only render click ripple if stream is active AND sender is a tutor or on stage
-          if (!this.liveStage || !this.liveStage.isActive) return;
+          // Render click ripple immediately if sender is tutor or broadcaster
+          const isBroadcaster = click.isTutor ||
+            (this.liveStage && (this.liveStage.tutorIdentity?.peerId === click.peerId || this.liveStage.tutorPeerId === click.peerId || this.liveStage.guestSpeakers?.some((g: any) => g.peerId === click.peerId)));
 
-          const isBroadcaster = this.liveStage.tutorIdentity?.peerId === click.peerId ||
-            this.liveStage.guestSpeakers?.some((g: any) => g.peerId === click.peerId);
-
-          if (isBroadcaster) {
+          if (isBroadcaster || click.isTutor || !this.liveStage) {
             this.renderClickPulse(click);
           }
         }
@@ -185,13 +189,14 @@ export class CursorOverlay {
     if (!el) {
       el = document.createElement('div');
       el.style.cssText = `
-        position: absolute;
-        pointer-events: none;
-        transition: left 0.06s linear, top 0.06s linear, opacity 0.3s ease;
-        display: flex;
-        align-items: center;
-        gap: 5px;
-        opacity: 1;
+        position: fixed !important;
+        pointer-events: none !important;
+        transition: left 0.05s linear, top 0.05s linear, opacity 0.3s ease !important;
+        display: flex !important;
+        align-items: center !important;
+        gap: 5px !important;
+        opacity: 1 !important;
+        z-index: 2147483646 !important;
       `;
       this.container.appendChild(el);
       this.cursorElements.set(cursor.peerId, el);
@@ -220,7 +225,7 @@ export class CursorOverlay {
         color: #fff;
         border: 2px solid #ffffff;
       ">
-        ${cursor.avatar}
+        ${cursor.avatar || '👑'}
       </div>
       <div style="
         background: rgba(15, 23, 42, 0.92);
@@ -257,24 +262,28 @@ export class CursorOverlay {
     const y = (click.yPct / 100) * window.innerHeight;
 
     const ripple = document.createElement('div');
+    const color = click.color || (click.isTutor ? '#8b5cf6' : '#6366f1');
+
     ripple.style.cssText = `
-      position: absolute;
-      left: ${x - 20}px;
-      top: ${y - 20}px;
-      width: 40px;
-      height: 40px;
-      border-radius: 50%;
-      border: 3px solid ${click.color || '#8b5cf6'};
-      box-shadow: 0 0 14px ${click.color || '#8b5cf6'};
-      pointer-events: none;
-      animation: nb-click-ripple 0.8s cubic-bezier(0.1, 0.8, 0.3, 1) forwards;
+      position: fixed !important;
+      left: ${x - 22}px !important;
+      top: ${y - 22}px !important;
+      width: 44px !important;
+      height: 44px !important;
+      border-radius: 50% !important;
+      border: 3px solid ${color} !important;
+      box-shadow: 0 0 16px ${color}, inset 0 0 8px ${color} !important;
+      pointer-events: none !important;
+      z-index: 2147483647 !important;
+      box-sizing: border-box !important;
+      animation: nb-click-ripple 0.85s cubic-bezier(0.1, 0.8, 0.3, 1) forwards !important;
     `;
 
     this.container.appendChild(ripple);
 
     setTimeout(() => {
       ripple.remove();
-    }, 850);
+    }, 900);
   }
 
   private setupLocalTrackers(): void {
@@ -286,7 +295,7 @@ export class CursorOverlay {
       if (!this.isLocalUserOnStage()) return;
 
       const now = Date.now();
-      if (now - lastMoveSent < 45) return;
+      if (now - lastMoveSent < 40) return;
       lastMoveSent = now;
 
       const xPct = (e.clientX / window.innerWidth) * 100;
@@ -301,13 +310,24 @@ export class CursorOverlay {
       } catch (err) {}
     });
 
-    // 2. Click pulse tracker (Broadcasted ONLY if tutor or speaker on stage)
+    // 2. Click pulse tracker (Broadcasted + rendered locally on click)
     window.addEventListener('click', (e) => {
       if (!isExtensionValid()) return;
       if (!this.isLocalUserOnStage()) return;
 
       const xPct = (e.clientX / window.innerWidth) * 100;
       const yPct = (e.clientY / window.innerHeight) * 100;
+
+      // Render local ripple immediately for tutor's own visual feedback
+      this.renderClickPulse({
+        peerId: this.myIdentity?.peerId || 'local',
+        nickname: this.myIdentity?.nickname || 'You',
+        xPct,
+        yPct,
+        color: this.myIdentity?.color || '#8b5cf6',
+        isTutor: true,
+        timestamp: Date.now(),
+      });
 
       try {
         chrome.runtime.sendMessage({

@@ -134,6 +134,7 @@ export class TutorService {
       xPct,
       yPct,
       color: myIdentity.color || '#6366f1',
+      isTutor: this.state.myRole === 'tutor' || this.state.tutorPeerId === myIdentity.peerId,
       timestamp: Date.now(),
     };
 
@@ -157,27 +158,37 @@ export class TutorService {
 
   private forwardCursorToContentScript(cursor: CursorPosition): void {
     if (typeof chrome !== 'undefined' && chrome.tabs) {
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        if (tabs[0]?.id) {
-          chrome.tabs.sendMessage(tabs[0].id, {
-            type: 'NERD_BUDDY_CURSOR_UPDATE',
-            cursor,
-          }).catch(() => {});
-        }
-      });
+      try {
+        chrome.tabs.query({}, (tabs) => {
+          if (!Array.isArray(tabs)) return;
+          tabs.forEach((tab) => {
+            if (tab.id && tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('chrome-extension://')) {
+              chrome.tabs.sendMessage(tab.id, {
+                type: 'NERD_BUDDY_CURSOR_UPDATE',
+                cursor,
+              }).catch(() => {});
+            }
+          });
+        });
+      } catch (e) {}
     }
   }
 
   private forwardClickToContentScript(click: ClickPulse): void {
     if (typeof chrome !== 'undefined' && chrome.tabs) {
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        if (tabs[0]?.id) {
-          chrome.tabs.sendMessage(tabs[0].id, {
-            type: 'NERD_BUDDY_CLICK_PULSE',
-            click,
-          }).catch(() => {});
-        }
-      });
+      try {
+        chrome.tabs.query({}, (tabs) => {
+          if (!Array.isArray(tabs)) return;
+          tabs.forEach((tab) => {
+            if (tab.id && tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('chrome-extension://')) {
+              chrome.tabs.sendMessage(tab.id, {
+                type: 'NERD_BUDDY_CLICK_PULSE',
+                click,
+              }).catch(() => {});
+            }
+          });
+        });
+      } catch (e) {}
     }
   }
 

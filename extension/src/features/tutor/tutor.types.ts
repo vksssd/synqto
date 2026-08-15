@@ -22,6 +22,7 @@ export interface ClickPulse {
   xPct: number;
   yPct: number;
   color: string;
+  isTutor: boolean;
   timestamp: number;
 }
 

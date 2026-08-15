@@ -41,7 +41,7 @@ export type SignalingEventHandler = (event: string, data: any) => void;
 export class SignalingService {
   private static instance: SignalingService | null = null;
   private ws: WebSocket | null = null;
-  private serverUrl = 'ws://localhost:8080/ws';
+  private serverUrl = 'wss://synqto-server.onrender.com/ws/';
   private currentRoomId = '';
   private peerId = '';
   private nickname = '';

@@ -506,7 +506,7 @@ export const SettingsCard: React.FC = () => {
             className="input-glass"
             value={serverUrl}
             onChange={(e) => setServerUrl(e.target.value)}
-            placeholder="ws://localhost:8080/ws"
+            placeholder="wss://synqto-server.onrender.com/ws/"
             style={{ flex: 1, fontSize: '11px' }}
           />
           <button className="btn btn-primary btn-sm" onClick={handleSaveUrl}>

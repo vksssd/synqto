@@ -149,6 +149,7 @@ export interface ChatMessagePayload {
   fileAttachment?: FileAttachmentData;
   mentions?: string[]; // array of peerIds or 'everyone'
   reactions?: Record<string, string[]>; // emoji -> array of peerIds
+  tag?: string; // #tag sub-channel (e.g. '#general', '#doubts')
 }
 
 export interface ChatReactionPayload {
@@ -198,6 +199,7 @@ export interface StoredChatMessage {
   fileAttachment?: FileAttachmentData;
   mentions?: string[];
   reactions?: Record<string, string[]>;
+  tag?: string; // #tag sub-channel
 }
 
 // ─── Presence payload types ───

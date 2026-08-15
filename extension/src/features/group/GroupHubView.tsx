@@ -1,24 +1,25 @@
-// ─── Group & Squads Hub View (With Problem Groups & Squads) ───
+// ─── Group & Squads Hub View (With Synq Button, Info Modal, Welcome Gate) ───
 
 import React, { useState, useEffect } from 'react';
 import { StudyGroup } from './group.types';
 import { GroupService } from './group.service';
 import { RoomService } from '@/features/room/room.service';
 import { RoomContext } from '@/features/room/room-utils';
+import { DiscoveryService } from '@/features/discovery/discovery.service';
+import { IdentityService } from '@/features/identity/identity.service';
 import { GroupCard } from './GroupCard';
 import { CreateGroupModal } from './CreateGroupModal';
 import { PasswordPromptModal } from './PasswordPromptModal';
 import { JoinInviteModal } from './JoinInviteModal';
 import { ShareGroupModal } from './ShareGroupModal';
+import { GroupInfoModal } from './GroupInfoModal';
+import { GroupWelcomeGate } from './GroupWelcomeGate';
 import {
   Users,
   Plus,
   Ticket,
   Search,
   Sparkles,
-  Lock,
-  Globe,
-  Code2,
 } from 'lucide-react';
 
 interface GroupHubViewProps {
@@ -29,22 +30,33 @@ interface GroupHubViewProps {
 export const GroupHubView: React.FC<GroupHubViewProps> = ({ currentRoom, onOpenChat }) => {
   const groupService = GroupService.getInstance();
   const roomService = RoomService.getInstance();
+  const discoveryService = DiscoveryService.getInstance();
+  const identityService = IdentityService.getInstance();
 
   const [groups, setGroups] = useState<StudyGroup[]>([]);
   const [selectedTopic, setSelectedTopic] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
+  const [myPeerId, setMyPeerId] = useState('');
 
   // Modals
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isInviteOpen, setIsInviteOpen] = useState(false);
   const [passwordTargetGroup, setPasswordTargetGroup] = useState<StudyGroup | null>(null);
   const [shareTargetGroup, setShareTargetGroup] = useState<StudyGroup | null>(null);
+  const [infoTargetGroup, setInfoTargetGroup] = useState<StudyGroup | null>(null);
+  const [welcomeGateGroup, setWelcomeGateGroup] = useState<StudyGroup | null>(null);
+  const [isInfoAdmin, setIsInfoAdmin] = useState(false);
+
+  useEffect(() => {
+    identityService.getOrCreateIdentity().then((id) => setMyPeerId(id.peerId));
+  }, []);
 
   useEffect(() => {
     return groupService.onChange((list) => setGroups(list));
   }, []);
 
-  const handleJoinClick = async (group: StudyGroup) => {
+  // ─── Synq: Join as member + enter room ───
+  const handleSynqClick = async (group: StudyGroup) => {
     if (group.isProblemGroup) {
       // Direct problem room join
       await roomService.joinProblemRoom(
@@ -57,26 +69,62 @@ export const GroupHubView: React.FC<GroupHubViewProps> = ({ currentRoom, onOpenC
       return;
     }
 
-    if (group.isPrivate && !group.passwordHash) {
+    if (group.isPrivate && !group.isMember && !group.isCreator && !group.passwordHash) {
       setPasswordTargetGroup(group);
       return;
     }
 
-    const res = await groupService.joinGroup(group);
+    const res = await groupService.synqToGroup(group);
     if (!res.success) {
       setPasswordTargetGroup(group);
-    } else if (onOpenChat) {
-      onOpenChat();
+      return;
     }
+
+    if (res.needsWelcome) {
+      // Show welcome gate before entering chat
+      const updatedGroup = groupService.getGroupById(group.id);
+      if (updatedGroup) {
+        setWelcomeGateGroup(updatedGroup);
+      }
+      return;
+    }
+
+    if (onOpenChat) onOpenChat();
   };
 
-  const handleLeaveClick = () => {
+  // ─── Leave the active signaling room (but stay a member) ───
+  const handleLeaveRoom = () => {
     roomService.leaveCurrentRoom();
   };
 
-  const handleDeleteClick = (groupId: string) => {
-    groupService.deleteGroup(groupId);
+  // ─── Leave group membership permanently ───
+  const handleLeaveGroup = async (groupId: string) => {
+    await groupService.leaveGroup(groupId);
   };
+
+  // ─── Open Group Info Modal ───
+  const handleOpenInfo = async (group: StudyGroup) => {
+    const admin = await groupService.isAdmin(group.id);
+    setIsInfoAdmin(admin);
+    setInfoTargetGroup(group);
+  };
+
+  // ─── Accept welcome gate ───
+  const handleWelcomeAccept = async () => {
+    if (!welcomeGateGroup) return;
+    groupService.markWelcomeRead(welcomeGateGroup.id);
+    await groupService.enterGroupRoom(welcomeGateGroup);
+    setWelcomeGateGroup(null);
+    if (onOpenChat) onOpenChat();
+  };
+
+  // Get online members for the info modal
+  const onlineMembers = discoveryService.getOnlinePeers().map((p) => ({
+    peerId: p.identity.peerId,
+    nickname: p.identity.nickname,
+    avatar: p.identity.avatar,
+    color: p.identity.color,
+  }));
 
   const filteredGroups = groups.filter((g) => {
     let matchesTopic = true;
@@ -91,7 +139,8 @@ export const GroupHubView: React.FC<GroupHubViewProps> = ({ currentRoom, onOpenC
     const matchesSearch =
       g.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (g.description && g.description.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      g.topicTag.toLowerCase().includes(searchQuery.toLowerCase());
+      g.topicTag.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (g.tags && g.tags.some((t) => t.toLowerCase().includes(searchQuery.toLowerCase())));
     return matchesTopic && matchesSearch;
   });
 
@@ -175,7 +224,7 @@ export const GroupHubView: React.FC<GroupHubViewProps> = ({ currentRoom, onOpenC
                 Open Room
               </button>
             )}
-            <button className="btn btn-secondary btn-sm" onClick={handleLeaveClick}>
+            <button className="btn btn-secondary btn-sm" onClick={handleLeaveRoom}>
               Leave
             </button>
           </div>
@@ -193,7 +242,7 @@ export const GroupHubView: React.FC<GroupHubViewProps> = ({ currentRoom, onOpenC
           <input
             type="text"
             className="input-glass"
-            placeholder="Search squads & problems..."
+            placeholder="Search squads, problems, #tags..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             style={{ paddingLeft: '30px', fontSize: '11px' }}
@@ -271,10 +320,11 @@ export const GroupHubView: React.FC<GroupHubViewProps> = ({ currentRoom, onOpenC
                       key={g.id}
                       group={g}
                       isActive={Boolean(currentRoom && currentRoom.roomId === g.roomId)}
-                      onJoin={handleJoinClick}
-                      onLeave={handleLeaveClick}
+                      onSynq={handleSynqClick}
+                      onLeaveRoom={handleLeaveRoom}
+                      onLeaveGroup={handleLeaveGroup}
                       onShare={(group) => setShareTargetGroup(group)}
-                      onDelete={handleDeleteClick}
+                      onOpenInfo={handleOpenInfo}
                     />
                   ))}
               </div>
@@ -293,10 +343,11 @@ export const GroupHubView: React.FC<GroupHubViewProps> = ({ currentRoom, onOpenC
                       key={g.id}
                       group={g}
                       isActive={Boolean(currentRoom && currentRoom.roomId === g.roomId)}
-                      onJoin={handleJoinClick}
-                      onLeave={handleLeaveClick}
+                      onSynq={handleSynqClick}
+                      onLeaveRoom={handleLeaveRoom}
+                      onLeaveGroup={handleLeaveGroup}
                       onShare={(group) => setShareTargetGroup(group)}
-                      onDelete={handleDeleteClick}
+                      onOpenInfo={handleOpenInfo}
                     />
                   ))}
               </div>
@@ -305,7 +356,7 @@ export const GroupHubView: React.FC<GroupHubViewProps> = ({ currentRoom, onOpenC
         )}
       </div>
 
-      {/* Modals */}
+      {/* ─── Modals ─── */}
       <CreateGroupModal
         isOpen={isCreateOpen}
         onClose={() => setIsCreateOpen(false)}
@@ -327,6 +378,24 @@ export const GroupHubView: React.FC<GroupHubViewProps> = ({ currentRoom, onOpenC
         isOpen={Boolean(shareTargetGroup)}
         onClose={() => setShareTargetGroup(null)}
       />
+
+      <GroupInfoModal
+        group={infoTargetGroup}
+        isOpen={Boolean(infoTargetGroup)}
+        onClose={() => setInfoTargetGroup(null)}
+        onLeaveGroup={handleLeaveGroup}
+        onlineMembers={onlineMembers}
+        myPeerId={myPeerId}
+        isAdmin={isInfoAdmin}
+      />
+
+      {/* Welcome Gate for first-time members */}
+      {welcomeGateGroup && (
+        <GroupWelcomeGate
+          group={welcomeGateGroup}
+          onAccept={handleWelcomeAccept}
+        />
+      )}
     </div>
   );
 };

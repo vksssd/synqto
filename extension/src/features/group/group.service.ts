@@ -1,6 +1,6 @@
 // ─── Group & Community Service (Serverless Zero-Knowledge P2P) ───
 
-import { StudyGroup, CreateGroupParams, GroupInvitePayload } from './group.types';
+import { StudyGroup, CreateGroupParams, GroupInvitePayload, GroupSchedule } from './group.types';
 import { RoomService } from '@/features/room/room.service';
 import { IdentityService } from '@/features/identity/identity.service';
 import { fnv1aHash, sha256Hex, uuid } from '@/shared/utils';
@@ -62,6 +62,10 @@ export class GroupService {
         name: 'LeetCode Top 150',
         slug: 'leetcode-top-150',
         description: 'Daily interview prep and algorithmic problem solving',
+        goals: 'Complete all 150 LeetCode problems together. Help each other with approaches and optimizations.',
+        rules: '1. Be respectful\n2. No direct copy-paste solutions\n3. Explain your approach first\n4. Use spoiler tags for solutions',
+        schedule: { openTime: '19:00', closeTime: '21:00', timezone: 'IST', days: ['Mon', 'Wed', 'Fri'] },
+        tags: ['#general', '#doubts', '#solutions', '#resources'],
         avatar: '🚀',
         isPrivate: false,
         topicTag: 'LeetCode',
@@ -74,6 +78,10 @@ export class GroupService {
         name: 'System Design Lounge',
         slug: 'system-design-lounge',
         description: 'Distributed systems, scaling patterns, and architecture discussions',
+        goals: 'Master system design interviews. Weekly mock design sessions.',
+        rules: '1. Share diagrams when possible\n2. Discuss trade-offs\n3. No gatekeeping',
+        schedule: { openTime: '20:00', closeTime: '22:00', timezone: 'IST', days: ['Tue', 'Thu', 'Sat'] },
+        tags: ['#general', '#mock-interviews', '#resources'],
         avatar: '🧠',
         isPrivate: false,
         topicTag: 'System Design',
@@ -89,6 +97,13 @@ export class GroupService {
       await this.loadFromStorage();
     }
     return this.groups;
+  }
+
+  /**
+   * Returns a specific group by ID or roomId.
+   */
+  public getGroupById(groupId: string): StudyGroup | undefined {
+    return this.groups.find((g) => g.id === groupId || g.roomId === groupId);
   }
 
   /**
@@ -118,21 +133,33 @@ export class GroupService {
 
     const identity = await this.identityService.getOrCreateIdentity();
 
+    // Ensure tags always include #general
+    const tags = params.tags && params.tags.length > 0
+      ? params.tags
+      : ['#general'];
+    if (!tags.includes('#general')) tags.unshift('#general');
+
     const newGroup: StudyGroup = {
       id: uuid(),
       name: params.name.trim(),
       slug: cleanSlug || 'squad',
       description: params.description?.trim() || undefined,
+      goals: params.goals?.trim() || undefined,
+      rules: params.rules?.trim() || undefined,
+      schedule: params.schedule,
       avatar: params.avatar || '🚀',
       isPrivate: params.isPrivate,
       passwordHash,
       topicTag: params.topicTag || 'General',
+      tags,
       roomId,
       createdAt: Date.now(),
       creatorPeerId: identity.peerId,
+      adminPeerIds: [identity.peerId],
       isCreator: true,
       isMember: true,
       joinedAt: Date.now(),
+      welcomeMessageRead: true, // creator doesn't need to read welcome
     };
 
     // Prepend to list
@@ -140,22 +167,16 @@ export class GroupService {
     this.saveToStorage();
     this.emitChange();
 
-    // Automatically enter the newly created group
-    await this.roomService.joinGroupRoom({
-      roomId: newGroup.roomId,
-      name: newGroup.name,
-      slug: newGroup.slug,
-      avatar: newGroup.avatar,
-      isPrivate: newGroup.isPrivate,
-      description: newGroup.description,
-      topicTag: newGroup.topicTag,
-    });
+    // Automatically enter the newly created group room
+    await this.enterGroupRoom(newGroup);
 
     return newGroup;
   }
 
   /**
-   * Joins an existing group room and marks the user as a persistent member.
+   * Joins a group as a persistent member WITHOUT switching signaling rooms.
+   * User stays connected to their current rooms (multi-room support).
+   * Use `enterGroupRoom()` to actually connect to the signaling room.
    */
   public async joinGroup(
     group: StudyGroup,
@@ -189,11 +210,13 @@ export class GroupService {
       roomId: targetRoomId,
       isMember: true,
       joinedAt: group.joinedAt || Date.now(),
+      welcomeMessageRead: false, // new member needs to read welcome
     };
 
     // Save group to list and mark as persistent joined member
     const existingIdx = this.groups.findIndex((g) => g.id === group.id || g.roomId === group.roomId);
     if (existingIdx >= 0) {
+      updatedGroup.welcomeMessageRead = this.groups[existingIdx].welcomeMessageRead;
       this.groups[existingIdx] = updatedGroup;
     } else {
       this.groups = [updatedGroup, ...this.groups];
@@ -201,8 +224,16 @@ export class GroupService {
     this.saveToStorage();
     this.emitChange();
 
+    return { success: true };
+  }
+
+  /**
+   * Actually enters a group's signaling room (connects to peers).
+   * This is separate from joinGroup() to support multi-room connections.
+   */
+  public async enterGroupRoom(group: StudyGroup): Promise<void> {
     await this.roomService.joinGroupRoom({
-      roomId: targetRoomId,
+      roomId: group.roomId,
       name: group.name,
       slug: group.slug,
       avatar: group.avatar,
@@ -210,13 +241,39 @@ export class GroupService {
       description: group.description,
       topicTag: group.topicTag,
     });
+  }
 
+  /**
+   * Synq action: joins as member (if not already) AND enters the room.
+   * This is the primary user action from the GroupCard.
+   */
+  public async synqToGroup(
+    group: StudyGroup,
+    password?: string
+  ): Promise<{ success: boolean; error?: string; needsWelcome?: boolean }> {
+    // If not yet a member, join first
+    if (!group.isMember && !group.isCreator) {
+      const joinResult = await this.joinGroup(group, password);
+      if (!joinResult.success) return joinResult;
+
+      // Check if needs welcome gate
+      const updatedGroup = this.getGroupById(group.id);
+      const hasWelcomeContent = Boolean(
+        updatedGroup?.goals || updatedGroup?.rules || updatedGroup?.schedule
+      );
+      if (hasWelcomeContent && !updatedGroup?.welcomeMessageRead) {
+        return { success: true, needsWelcome: true };
+      }
+    }
+
+    // Enter the signaling room
+    await this.enterGroupRoom(group);
     return { success: true };
   }
 
   /**
-   * Leaves a permanent study group.
-   * User is removed from permanent membership unless they explicitly rejoin.
+   * Leaves a permanent study group membership.
+   * User is removed from persistent membership but group stays in discover list.
    */
   public async leaveGroup(groupId: string): Promise<void> {
     const target = this.groups.find((g) => g.id === groupId || g.roomId === groupId);
@@ -228,14 +285,12 @@ export class GroupService {
       await this.roomService.leaveCurrentRoom();
     }
 
-    // If it's a default group or problem group, mark isMember: false; otherwise remove it
-    if (target.id.startsWith('default-') || target.isProblemGroup) {
-      target.isMember = false;
-      this.saveToStorage();
-    } else {
-      this.groups = this.groups.filter((g) => g.id !== groupId && g.roomId !== groupId);
-      this.saveToStorage();
-    }
+    // Mark as not a member but keep in list for discovery
+    target.isMember = false;
+    target.isCreator = false;
+    target.welcomeMessageRead = false;
+    target.joinedAt = undefined;
+    this.saveToStorage();
     this.emitChange();
   }
 
@@ -245,6 +300,65 @@ export class GroupService {
   public isMember(groupId: string): boolean {
     const g = this.groups.find((grp) => grp.id === groupId || grp.roomId === groupId);
     return Boolean(g && (g.isMember || g.isCreator));
+  }
+
+  /**
+   * Checks if user is admin/creator (can edit group info).
+   */
+  public async isAdmin(groupId: string): Promise<boolean> {
+    const g = this.groups.find((grp) => grp.id === groupId || grp.roomId === groupId);
+    if (!g) return false;
+    if (g.isCreator) return true;
+    const identity = await this.identityService.getOrCreateIdentity();
+    return Boolean(g.adminPeerIds?.includes(identity.peerId));
+  }
+
+  /**
+   * Updates group info (description, goals, rules, schedule, tags).
+   * Only admin/creator can call this.
+   */
+  public async updateGroupInfo(
+    groupId: string,
+    updates: {
+      description?: string;
+      goals?: string;
+      rules?: string;
+      schedule?: GroupSchedule;
+      tags?: string[];
+      name?: string;
+      avatar?: string;
+    }
+  ): Promise<boolean> {
+    const idx = this.groups.findIndex((g) => g.id === groupId || g.roomId === groupId);
+    if (idx < 0) return false;
+
+    const group = this.groups[idx];
+    if (updates.description !== undefined) group.description = updates.description;
+    if (updates.goals !== undefined) group.goals = updates.goals;
+    if (updates.rules !== undefined) group.rules = updates.rules;
+    if (updates.schedule !== undefined) group.schedule = updates.schedule;
+    if (updates.tags !== undefined) {
+      group.tags = updates.tags;
+      if (!group.tags.includes('#general')) group.tags.unshift('#general');
+    }
+    if (updates.name !== undefined) group.name = updates.name;
+    if (updates.avatar !== undefined) group.avatar = updates.avatar;
+
+    this.saveToStorage();
+    this.emitChange();
+    return true;
+  }
+
+  /**
+   * Marks the welcome message as read for this group.
+   */
+  public markWelcomeRead(groupId: string): void {
+    const g = this.groups.find((grp) => grp.id === groupId || grp.roomId === groupId);
+    if (g) {
+      g.welcomeMessageRead = true;
+      this.saveToStorage();
+      this.emitChange();
+    }
   }
 
   /**
@@ -305,7 +419,7 @@ export class GroupService {
   }
 
   /**
-   * Deletes / removes a group from saved study squads.
+   * Deletes / removes a group from saved study squads entirely.
    */
   public async deleteGroup(groupId: string): Promise<void> {
     this.groups = this.groups.filter((g) => g.id !== groupId);

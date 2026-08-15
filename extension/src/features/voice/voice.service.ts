@@ -40,22 +40,31 @@ export class VoiceService {
 
   private setupWebRTCListeners() {
     this.webrtc.onRemoteStream((peerId, stream) => {
-      let audioEl = document.getElementById(`audio-${peerId}`) as HTMLAudioElement;
+      // Only process streams that contain audio tracks for voice chat
+      const audioTracks = stream.getAudioTracks();
+      if (audioTracks.length === 0) return;
+
+      let audioEl = document.getElementById(`synqto-audio-${peerId}`) as HTMLAudioElement;
       if (!audioEl) {
         audioEl = document.createElement('audio');
-        audioEl.id = `audio-${peerId}`;
+        audioEl.id = `synqto-audio-${peerId}`;
         audioEl.autoplay = true;
+        audioEl.style.display = 'none';
         document.body.appendChild(audioEl);
       }
       audioEl.srcObject = stream;
       audioEl.play().catch(() => {
         const unlock = () => {
-          audioEl.play().catch(() => {});
+          if (audioEl) {
+            audioEl.play().catch(() => {});
+          }
           window.removeEventListener('click', unlock);
           window.removeEventListener('keydown', unlock);
+          window.removeEventListener('touchstart', unlock);
         };
         window.addEventListener('click', unlock, { once: true });
         window.addEventListener('keydown', unlock, { once: true });
+        window.addEventListener('touchstart', unlock, { once: true });
       });
 
       this.participants.set(peerId, {
@@ -67,7 +76,7 @@ export class VoiceService {
     });
 
     this.webrtc.onRemoteStreamRemoved((peerId) => {
-      const audioEl = document.getElementById(`audio-${peerId}`) as HTMLAudioElement;
+      const audioEl = document.getElementById(`synqto-audio-${peerId}`) as HTMLAudioElement;
       if (audioEl) {
         audioEl.srcObject = null;
         audioEl.remove();
@@ -94,8 +103,11 @@ export class VoiceService {
       this.isInVoice = true;
       this.isMuted = false;
 
-      // Pass local media stream to WebRTC service
-      this.webrtc.setLocalMediaStream(this.localStream);
+      const audioTrack = this.localStream.getAudioTracks()[0] || null;
+      if (audioTrack) {
+        audioTrack.enabled = true;
+        this.webrtc.setLocalAudioTrack(audioTrack);
+      }
 
       // Start volume / speaking analyser
       this.startAudioAnalyser(this.localStream);
@@ -118,16 +130,16 @@ export class VoiceService {
       this.localStream = null;
     }
 
-    // Clean up all remote audio DOM elements and detach media streams
+    // Clean up all remote audio DOM elements
     if (typeof document !== 'undefined') {
-      document.querySelectorAll('audio[id^="audio-"]').forEach((el) => {
+      document.querySelectorAll('audio[id^="synqto-audio-"]').forEach((el) => {
         const audio = el as HTMLAudioElement;
         audio.srcObject = null;
         audio.remove();
       });
     }
 
-    this.webrtc.setLocalMediaStream(null);
+    this.webrtc.setLocalAudioTrack(null);
     this.isInVoice = false;
     this.isMuted = false;
     this.participants.clear();

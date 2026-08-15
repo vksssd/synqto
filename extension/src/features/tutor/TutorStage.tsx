@@ -23,6 +23,8 @@ import {
   Sliders,
   Settings2,
   Sparkles,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 
 interface TutorStageProps {
@@ -36,13 +38,14 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
   const tutorService = TutorService.getInstance();
   const [stageState, setStageState] = useState<TutorStageState>(tutorService.getState());
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(tutorService.getActiveRemoteStream());
-  const [selectedPeerId, setSelectedPeerId] = useState<string | null>(tutorService.getSelectedStreamPeerId());
   const [isStarting, setIsStarting] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
-  const [isWatchingStream, setIsWatchingStream] = useState(false);
+  const [isWatchingStream, setIsWatchingStream] = useState(true);
   const [showStartModal, setShowStartModal] = useState(false);
   const [streamTitleInput, setStreamTitleInput] = useState('');
   const [selectedBroadcastType, setSelectedBroadcastType] = useState<BroadcastType>('screen');
+  const [selectedPeerId, setSelectedPeerId] = useState<string | null>(tutorService.getSelectedStreamPeerId());
+  const [isAudienceAudioMuted, setIsAudienceAudioMuted] = useState(false);
 
   // Aspect Ratio, Sizing & Zoom State for Audience Stream Viewing
   const [aspectRatioMode, setAspectRatioMode] = useState<AspectRatioOption>(() => {
@@ -70,7 +73,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
   useEffect(() => {
     const unsubState = tutorService.onStateChange((state) => {
       setStageState(state);
-      if (state.myRole === 'tutor') {
+      if (state.myRole === 'tutor' || state.isActive || state.activeStreams.length > 0) {
         setIsWatchingStream(true);
       }
     });
@@ -78,6 +81,9 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
     const unsubStream = tutorService.onRemoteStreamChange((stream, peerId) => {
       setRemoteStream(stream);
       setSelectedPeerId(peerId);
+      if (stream) {
+        setIsWatchingStream(true);
+      }
     });
 
     return () => {
@@ -93,14 +99,23 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
         const local = tutorService.getLocalStream();
         if (local) {
           videoRef.current.srcObject = local;
+          videoRef.current.muted = true; // Mute self preview to prevent audio feedback
           videoRef.current.play().catch(() => {});
         }
-      } else if (remoteStream && isWatchingStream) {
+      } else if (remoteStream) {
         videoRef.current.srcObject = remoteStream;
-        videoRef.current.play().catch(() => {});
+        videoRef.current.muted = isAudienceAudioMuted;
+        videoRef.current.play().catch(() => {
+          // If unmuted autoplay blocked by browser policy, fallback to muted and let user unmute
+          if (videoRef.current) {
+            videoRef.current.muted = true;
+            setIsAudienceAudioMuted(true);
+            videoRef.current.play().catch(() => {});
+          }
+        });
       }
     }
-  }, [stageState.isActive, stageState.myRole, remoteStream, isWatchingStream, selectedPeerId]);
+  }, [stageState.isActive, stageState.myRole, remoteStream, isWatchingStream, selectedPeerId, isAudienceAudioMuted]);
 
   // Track Native Video Dimensions for Auto Aspect Ratio Calculation
   const handleLoadedMetadata = () => {
@@ -526,8 +541,20 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                   )}
                 </div>
 
-                {/* Right controls: Aspect Ratio menu toggle, Zoom, PiP, Fullscreen */}
+                {/* Right controls: Volume, Aspect Ratio menu toggle, Zoom, PiP, Fullscreen */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '3px', flexShrink: 0 }}>
+                  {!isTutor && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-icon"
+                      style={{ width: '22px', height: '22px', padding: 0, background: 'rgba(0,0,0,0.4)' }}
+                      onClick={() => setIsAudienceAudioMuted(!isAudienceAudioMuted)}
+                      title={isAudienceAudioMuted ? 'Unmute stream audio' : 'Mute stream audio'}
+                    >
+                      {isAudienceAudioMuted ? <VolumeX size={11} color="#fca5a5" /> : <Volume2 size={11} color="#34d399" />}
+                    </button>
+                  )}
+
                   <button
                     type="button"
                     className="btn btn-ghost btn-icon"
@@ -574,6 +601,38 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                     {isFullscreen ? <Minimize2 size={11} /> : <Maximize2 size={11} />}
                   </button>
                 </div>
+              </div>
+
+              {/* Quick 1-Click Aspect Ratio & Fit Switcher Pills */}
+              <div style={{ display: 'flex', gap: '3px', overflowX: 'auto', padding: '3px 6px', alignItems: 'center', background: 'rgba(0,0,0,0.5)' }}>
+                <span style={{ fontSize: '8px', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>Fit:</span>
+                {[
+                  { id: 'auto', label: '⚡ Auto' },
+                  { id: '16:9', label: '📺 16:9' },
+                  { id: '16:10', label: '💻 16:10' },
+                  { id: '4:3', label: '📐 4:3' },
+                  { id: 'fill', label: '🔲 Fill' },
+                  { id: 'contain', label: '↔️ Contain' },
+                ].map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => handleAspectRatioChange(opt.id as AspectRatioOption)}
+                    style={{
+                      fontSize: '8.5px',
+                      fontWeight: 600,
+                      padding: '1px 5px',
+                      borderRadius: '3px',
+                      border: aspectRatioMode === opt.id ? '1px solid var(--primary)' : '1px solid rgba(255, 255, 255, 0.08)',
+                      background: aspectRatioMode === opt.id ? 'rgba(99, 102, 241, 0.45)' : 'rgba(255, 255, 255, 0.04)',
+                      color: aspectRatioMode === opt.id ? '#ffffff' : 'var(--text-secondary)',
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
               </div>
 
               {/* 4. Audience Aspect Ratio & Sizing Overlay Drawer */}

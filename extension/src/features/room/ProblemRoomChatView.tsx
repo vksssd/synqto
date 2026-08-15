@@ -43,6 +43,9 @@ export const ProblemRoomChatView: React.FC<ProblemRoomChatViewProps> = ({
   useEffect(() => {
     const unsubTutor = tutorService.onStateChange((st) => {
       setStageState(st);
+      if (st.isActive || st.activeStreams.length > 0 || st.myRole === 'tutor') {
+        setShowTutorStage(true);
+      }
     });
 
     const unsubVoice = voiceService.onStateChange((inVoice, muted) => {

@@ -14,7 +14,10 @@ export interface PeerConnectionWrapper {
 export class WebRTCService {
   private static instance: WebRTCService | null = null;
   private connections: Map<string, PeerConnectionWrapper> = new Map();
-  private localMediaStream: MediaStream | null = null;
+  
+  // Independent Local Media Tracks (Audio & Video co-exist without collision)
+  private localAudioTrack: MediaStreamTrack | null = null;
+  private localVideoTrack: MediaStreamTrack | null = null;
 
   // Event listener sets for multi-service subscription without overwrite
   private packetListeners: Set<(fromPeerId: string, packet: NetworkPacket) => void> = new Set();
@@ -114,37 +117,89 @@ export class WebRTCService {
     if (callbacks.onSignalNeeded) this.signalNeededListeners.add(callbacks.onSignalNeeded);
   }
 
+  public setLocalAudioTrack(track: MediaStreamTrack | null) {
+    this.localAudioTrack = track;
+    this.syncTracksToAllPeers('audio');
+  }
+
+  public setLocalVideoTrack(track: MediaStreamTrack | null) {
+    this.localVideoTrack = track;
+    this.syncTracksToAllPeers('video');
+  }
+
   public setLocalMediaStream(stream: MediaStream | null) {
-    this.localMediaStream = stream;
+    if (stream) {
+      const audio = stream.getAudioTracks()[0] || null;
+      const video = stream.getVideoTracks()[0] || null;
+      if (audio) this.localAudioTrack = audio;
+      if (video) this.localVideoTrack = video;
+      this.syncTracksToAllPeers();
+    } else {
+      this.localAudioTrack = null;
+      this.localVideoTrack = null;
+      this.syncTracksToAllPeers();
+    }
+  }
 
-    // Attach local stream tracks to all active peer connections & trigger renegotiation
+  private getCompositeLocalStream(): MediaStream {
+    const stream = new MediaStream();
+    if (this.localAudioTrack && this.localAudioTrack.readyState === 'live') {
+      stream.addTrack(this.localAudioTrack);
+    }
+    if (this.localVideoTrack && this.localVideoTrack.readyState === 'live') {
+      stream.addTrack(this.localVideoTrack);
+    }
+    return stream;
+  }
+
+  private syncTracksToAllPeers(kindFilter?: 'audio' | 'video') {
+    const composite = this.getCompositeLocalStream();
+
     this.connections.forEach(async (wrapper, peerId) => {
-      if (wrapper.pc && wrapper.pc.connectionState !== 'closed') {
-        const senders = wrapper.pc.getSenders();
+      if (!wrapper.pc || wrapper.pc.connectionState === 'closed') return;
 
-        if (stream) {
-          stream.getTracks().forEach((track) => {
-            const existingSender = senders.find((s) => s.track?.kind === track.kind);
-            if (existingSender) {
-              existingSender.replaceTrack(track).catch(() => {});
-            } else {
-              try {
-                wrapper.pc.addTrack(track, stream);
-              } catch (e) {}
-            }
-          });
-        } else {
-          // Remove sender tracks when stopping stream
-          senders.forEach((sender) => {
-            if (sender.track) {
-              try {
-                wrapper.pc.removeTrack(sender);
-              } catch (e) {}
-            }
-          });
+      const senders = wrapper.pc.getSenders();
+      let modified = false;
+
+      // Handle Audio Track
+      if (!kindFilter || kindFilter === 'audio') {
+        const audioSender = senders.find((s) => s.track?.kind === 'audio' || (s as any).kind === 'audio');
+        if (this.localAudioTrack && this.localAudioTrack.readyState === 'live') {
+          if (audioSender) {
+            await audioSender.replaceTrack(this.localAudioTrack).catch(() => {});
+          } else {
+            try {
+              wrapper.pc.addTrack(this.localAudioTrack, composite);
+              modified = true;
+            } catch (e) {}
+          }
+        } else if (audioSender) {
+          try {
+            await audioSender.replaceTrack(null).catch(() => {});
+          } catch (e) {}
         }
+      }
 
-        // Trigger renegotiation offer
+      // Handle Video Track
+      if (!kindFilter || kindFilter === 'video') {
+        const videoSender = senders.find((s) => s.track?.kind === 'video' || (s as any).kind === 'video');
+        if (this.localVideoTrack && this.localVideoTrack.readyState === 'live') {
+          if (videoSender) {
+            await videoSender.replaceTrack(this.localVideoTrack).catch(() => {});
+          } else {
+            try {
+              wrapper.pc.addTrack(this.localVideoTrack, composite);
+              modified = true;
+            } catch (e) {}
+          }
+        } else if (videoSender) {
+          try {
+            await videoSender.replaceTrack(null).catch(() => {});
+          } catch (e) {}
+        }
+      }
+
+      if (modified) {
         await this.renegotiate(peerId);
       }
     });
@@ -183,7 +238,7 @@ export class WebRTCService {
     }
 
     const pc = this.createPeerConnection(remotePeerId, true);
-    const dc = pc.createDataChannel('nerd-buddy-data', {
+    const dc = pc.createDataChannel('synqto-data', {
       ordered: true,
     });
     this.setupDataChannel(remotePeerId, dc);
@@ -338,13 +393,17 @@ export class WebRTCService {
       pc.addTransceiver('video', { direction: 'sendrecv' });
     } catch (e) {}
 
-    // Add local media stream tracks if active
-    if (this.localMediaStream) {
-      this.localMediaStream.getTracks().forEach((track) => {
-        try {
-          pc.addTrack(track, this.localMediaStream!);
-        } catch (e) {}
-      });
+    // Add active local audio & video media stream tracks
+    const composite = this.getCompositeLocalStream();
+    if (this.localAudioTrack && this.localAudioTrack.readyState === 'live') {
+      try {
+        pc.addTrack(this.localAudioTrack, composite);
+      } catch (e) {}
+    }
+    if (this.localVideoTrack && this.localVideoTrack.readyState === 'live') {
+      try {
+        pc.addTrack(this.localVideoTrack, composite);
+      } catch (e) {}
     }
 
     pc.onicecandidate = (event) => {
@@ -384,7 +443,16 @@ export class WebRTCService {
     // Remote media track received (Screen share / Camera / Mic)
     pc.ontrack = (event) => {
       const wrapper = this.connections.get(remotePeerId);
-      const stream = event.streams && event.streams[0] ? event.streams[0] : new MediaStream([event.track]);
+      let stream: MediaStream;
+
+      if (event.streams && event.streams[0]) {
+        stream = event.streams[0];
+      } else if (wrapper && wrapper.remoteStream) {
+        wrapper.remoteStream.addTrack(event.track);
+        stream = wrapper.remoteStream;
+      } else {
+        stream = new MediaStream([event.track]);
+      }
 
       if (wrapper) {
         wrapper.remoteStream = stream;
@@ -419,7 +487,7 @@ export class WebRTCService {
       }
     };
 
-    dc.onerror = (err) => {
+    dc.onerror = () => {
       // Clean error catch
     };
   }

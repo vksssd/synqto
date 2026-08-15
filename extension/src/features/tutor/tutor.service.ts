@@ -280,7 +280,18 @@ export class TutorService {
         });
       }
 
-      this.webrtc.setLocalMediaStream(this.localStream);
+      const videoTrack = this.localStream.getVideoTracks()[0] || null;
+      const audioTrack = this.localStream.getAudioTracks()[0] || null;
+
+      if (videoTrack) {
+        this.webrtc.setLocalVideoTrack(videoTrack);
+        videoTrack.onended = () => {
+          this.stopTutorStage(currentRoomId);
+        };
+      }
+      if (audioTrack) {
+        this.webrtc.setLocalAudioTrack(audioTrack);
+      }
 
       // Connect with all room peers for direct streaming
       const topology = this.network.getTopologyState();
@@ -289,13 +300,6 @@ export class TutorService {
           this.webrtc.initiateConnection(peerId);
         }
       });
-
-      const videoTrack = this.localStream.getVideoTracks()[0];
-      if (videoTrack) {
-        videoTrack.onended = () => {
-          this.stopTutorStage(currentRoomId);
-        };
-      }
 
       const streamTitle =
         customTitle?.trim() ||
@@ -345,7 +349,7 @@ export class TutorService {
       this.localStream = null;
     }
 
-    this.webrtc.setLocalMediaStream(null);
+    this.webrtc.setLocalVideoTrack(null);
 
     const remainingStreams = this.state.activeStreams.filter(
       (s) => s.broadcasterPeerId !== (myIdentity?.peerId || '')

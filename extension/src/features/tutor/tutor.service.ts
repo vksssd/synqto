@@ -191,6 +191,8 @@ export class TutorService {
 
   private handleIncomingCursor(cursor: CursorPosition): void {
     if (!cursor || !cursor.peerId) return;
+    const myIdentity = this.identityService.getCachedIdentity();
+    if (myIdentity && cursor.peerId === myIdentity.peerId) return;
     this.remoteCursors.set(cursor.peerId, cursor);
     this.forwardCursorToContentScript(cursor);
 
@@ -200,6 +202,8 @@ export class TutorService {
 
   private handleIncomingClick(click: ClickPulse): void {
     if (!click || !click.peerId) return;
+    const myIdentity = this.identityService.getCachedIdentity();
+    if (myIdentity && click.peerId === myIdentity.peerId) return;
     this.forwardClickToContentScript(click);
   }
 
@@ -256,18 +260,33 @@ export class TutorService {
           audio: true,
         });
 
-        // Optionally attach microphone audio track if permitted
+        let finalStream = screenStream;
         if (navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function') {
           try {
             const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            micStream.getAudioTracks().forEach((track) => screenStream.addTrack(track));
+            const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+            const ctx = new AudioCtx();
+            const dest = ctx.createMediaStreamDestination();
+
+            if (screenStream.getAudioTracks().length > 0) {
+              const screenSource = ctx.createMediaStreamSource(screenStream);
+              screenSource.connect(dest);
+            }
+            const micSource = ctx.createMediaStreamSource(micStream);
+            micSource.connect(dest);
+
+            const mixedAudioTrack = dest.stream.getAudioTracks()[0];
+            const videoTrack = screenStream.getVideoTracks()[0];
+            finalStream = new MediaStream([
+              ...(videoTrack ? [videoTrack] : []),
+              ...(mixedAudioTrack ? [mixedAudioTrack] : []),
+            ]);
           } catch (e) {
-            // Microphone track is optional; screen/tab audio continues cleanly without error popup
-            console.debug('[TutorService] Screen share operating with system/tab audio (mic optional)');
+            console.debug('[TutorService] Screen share operating with system audio only');
           }
         }
 
-        this.localStream = screenStream;
+        this.localStream = finalStream;
       } else if (broadcastType === 'camera') {
         this.localStream = await navigator.mediaDevices.getUserMedia({
           video: { width: { ideal: 1280 }, height: { ideal: 720 } },

@@ -15,6 +15,7 @@ export const StreakHeatmap: React.FC<StreakHeatmapProps> = ({ stats }) => {
   const days: { dateStr: string; dayNum: number; count: number; minutes: number; problems: number }[] = [];
   const today = new Date();
 
+  const activityMap = stats.activityMap || {};
   for (let i = 59; i >= 0; i--) {
     const d = new Date();
     d.setDate(today.getDate() - i);
@@ -23,7 +24,7 @@ export const StreakHeatmap: React.FC<StreakHeatmapProps> = ({ stats }) => {
     const day = String(d.getDate()).padStart(2, '0');
     const dateStr = `${year}-${month}-${day}`;
 
-    const act = stats.activityMap[dateStr];
+    const act = activityMap[dateStr];
     days.push({
       dateStr,
       dayNum: d.getDate(),

@@ -40,7 +40,11 @@ export class VoiceService {
 
   private setupWebRTCListeners() {
     this.webrtc.onRemoteStream((peerId, stream) => {
-      // Only process streams that contain audio tracks for voice chat
+      // Ignore video streams (TutorStage handles screen/camera video and its audio)
+      if (stream.getVideoTracks().length > 0) {
+        return;
+      }
+
       const audioTracks = stream.getAudioTracks();
       if (audioTracks.length === 0) return;
 
@@ -53,19 +57,24 @@ export class VoiceService {
         document.body.appendChild(audioEl);
       }
       audioEl.srcObject = stream;
-      audioEl.play().catch(() => {
-        const unlock = () => {
-          if (audioEl) {
-            audioEl.play().catch(() => {});
-          }
-          window.removeEventListener('click', unlock);
-          window.removeEventListener('keydown', unlock);
-          window.removeEventListener('touchstart', unlock);
-        };
-        window.addEventListener('click', unlock, { once: true });
-        window.addEventListener('keydown', unlock, { once: true });
-        window.addEventListener('touchstart', unlock, { once: true });
-      });
+
+      const playPromise = audioEl.play();
+      if (playPromise !== undefined) {
+        playPromise.catch(() => {
+          const unlock = () => {
+            const currentEl = document.getElementById(`synqto-audio-${peerId}`) as HTMLAudioElement;
+            if (currentEl) {
+              currentEl.play().catch(() => {});
+            }
+            window.removeEventListener('click', unlock);
+            window.removeEventListener('keydown', unlock);
+            window.removeEventListener('touchstart', unlock);
+          };
+          window.addEventListener('click', unlock, { once: true });
+          window.addEventListener('keydown', unlock, { once: true });
+          window.addEventListener('touchstart', unlock, { once: true });
+        });
+      }
 
       this.participants.set(peerId, {
         peerId,
@@ -110,7 +119,7 @@ export class VoiceService {
       }
 
       // Start volume / speaking analyser
-      this.startAudioAnalyser(this.localStream);
+      await this.startAudioAnalyser(this.localStream);
 
       this.emitState();
       return true;
@@ -161,10 +170,13 @@ export class VoiceService {
     return this.isMuted;
   }
 
-  private startAudioAnalyser(stream: MediaStream) {
+  private async startAudioAnalyser(stream: MediaStream) {
     try {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
       this.audioContext = new AudioCtx();
+      if (this.audioContext.state === 'suspended') {
+        await this.audioContext.resume().catch(() => {});
+      }
       const source = this.audioContext.createMediaStreamSource(stream);
       this.analyser = this.audioContext.createAnalyser();
       this.analyser.fftSize = 64;
@@ -210,7 +222,7 @@ export class VoiceService {
       this.volumeCheckInterval = null;
     }
     if (this.audioContext && this.audioContext.state !== 'closed') {
-      this.audioContext.close();
+      this.audioContext.close().catch(() => {});
       this.audioContext = null;
     }
     this.analyser = null;

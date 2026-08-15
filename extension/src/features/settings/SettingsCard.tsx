@@ -91,6 +91,10 @@ export const SettingsCard: React.FC = () => {
 
   const handleRetryServerConnection = () => {
     if (isRetryingServer) return;
+    const targetUrl = serverUrl.trim();
+    if (targetUrl && targetUrl !== signaling.getServerUrl()) {
+      signaling.setServerUrl(targetUrl);
+    }
     setIsRetryingServer(true);
     signaling.reconnect();
 

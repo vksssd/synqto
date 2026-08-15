@@ -747,8 +747,9 @@ export const WhiteboardCanvas: React.FC = () => {
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
-      const w = canvas.width;
-      const h = canvas.height;
+      const dpr = window.devicePixelRatio || 1;
+      const w = canvas.width / dpr;
+      const h = canvas.height / dpr;
       const isLight = isLightColor(bgColor);
 
       drawBackground(ctx, w, h, backgroundType, bgColor);
@@ -879,8 +880,20 @@ export const WhiteboardCanvas: React.FC = () => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
-    const clientX = 'touches' in e && e.touches[0] ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
-    const clientY = 'touches' in e && e.touches[0] ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
+    let clientX = 0;
+    let clientY = 0;
+
+    if ('touches' in e) {
+      const touch = e.touches[0] || (e.changedTouches && e.changedTouches[0]);
+      if (touch) {
+        clientX = touch.clientX;
+        clientY = touch.clientY;
+      }
+    } else {
+      clientX = (e as React.MouseEvent).clientX;
+      clientY = (e as React.MouseEvent).clientY;
+    }
+
     return {
       x: clientX - rect.left,
       y: clientY - rect.top,

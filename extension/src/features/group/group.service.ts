@@ -337,12 +337,16 @@ export class GroupService {
       pwd: includePassword && password ? password : undefined,
     };
 
-    const jsonStr = JSON.stringify(payload);
     try {
-      const b64 = btoa(unescape(encodeURIComponent(jsonStr)));
-      return `NBGRP:${b64}`;
+      const jsonStr = JSON.stringify(payload);
+      const bytes = new TextEncoder().encode(jsonStr);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      return `NBGRP:${btoa(binary)}`;
     } catch {
-      return `NBGRP:${btoa(jsonStr)}`;
+      return `NBGRP:${btoa(JSON.stringify(payload))}`;
     }
   }
 
@@ -357,7 +361,12 @@ export class GroupService {
 
     try {
       const b64 = clean.slice(6);
-      const jsonStr = decodeURIComponent(escape(atob(b64)));
+      const binary = atob(b64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      const jsonStr = new TextDecoder().decode(bytes);
       const parsed = JSON.parse(jsonStr) as GroupInvitePayload;
       if (!parsed.name || !parsed.slug) {
         return null;

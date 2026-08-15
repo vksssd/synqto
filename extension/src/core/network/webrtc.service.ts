@@ -9,13 +9,16 @@ export interface PeerConnectionWrapper {
   remoteStream: MediaStream | null;
   isInitiator: boolean;
   status: 'connecting' | 'connected' | 'disconnected' | 'failed';
+  isMakingOffer: boolean;
 }
 
 export class WebRTCService {
   private static instance: WebRTCService | null = null;
+  private myPeerId = '';
   private connections: Map<string, PeerConnectionWrapper> = new Map();
-  
-  // Independent Local Media Tracks (Audio & Video co-exist without collision)
+  private pendingIceCandidates: Map<string, RTCIceCandidateInit[]> = new Map();
+
+  // Distinct local media tracks
   private localAudioTrack: MediaStreamTrack | null = null;
   private localVideoTrack: MediaStreamTrack | null = null;
 
@@ -69,6 +72,10 @@ export class WebRTCService {
       WebRTCService.instance = new WebRTCService();
     }
     return WebRTCService.instance;
+  }
+
+  public setMyPeerId(peerId: string) {
+    this.myPeerId = peerId;
   }
 
   public onRemoteStream(fn: (peerId: string, stream: MediaStream) => void): () => void {
@@ -141,68 +148,42 @@ export class WebRTCService {
     }
   }
 
-  private getCompositeLocalStream(): MediaStream {
-    const stream = new MediaStream();
-    if (this.localAudioTrack && this.localAudioTrack.readyState === 'live') {
-      stream.addTrack(this.localAudioTrack);
-    }
-    if (this.localVideoTrack && this.localVideoTrack.readyState === 'live') {
-      stream.addTrack(this.localVideoTrack);
-    }
-    return stream;
-  }
+  private async syncTracksToAllPeers(kindFilter?: 'audio' | 'video') {
+    for (const [peerId, wrapper] of this.connections.entries()) {
+      if (!wrapper.pc || wrapper.pc.connectionState === 'closed') continue;
 
-  private syncTracksToAllPeers(kindFilter?: 'audio' | 'video') {
-    const composite = this.getCompositeLocalStream();
+      const transceivers = wrapper.pc.getTransceivers();
+      let needsRenegotiation = false;
 
-    this.connections.forEach(async (wrapper, peerId) => {
-      if (!wrapper.pc || wrapper.pc.connectionState === 'closed') return;
-
-      const senders = wrapper.pc.getSenders();
-      let modified = false;
-
-      // Handle Audio Track
+      // 1. Audio Transceiver Sync
       if (!kindFilter || kindFilter === 'audio') {
-        const audioSender = senders.find((s) => s.track?.kind === 'audio' || (s as any).kind === 'audio');
-        if (this.localAudioTrack && this.localAudioTrack.readyState === 'live') {
-          if (audioSender) {
-            await audioSender.replaceTrack(this.localAudioTrack).catch(() => {});
-          } else {
-            try {
-              wrapper.pc.addTrack(this.localAudioTrack, composite);
-              modified = true;
-            } catch (e) {}
+        const audioTx = transceivers.find((t) => t.receiver.track.kind === 'audio');
+        if (audioTx) {
+          const trackToSet = this.localAudioTrack && this.localAudioTrack.readyState === 'live' ? this.localAudioTrack : null;
+          if (audioTx.sender.track !== trackToSet) {
+            await audioTx.sender.replaceTrack(trackToSet).catch(() => {});
+            audioTx.direction = trackToSet ? 'sendrecv' : 'recvonly';
           }
-        } else if (audioSender) {
-          try {
-            await audioSender.replaceTrack(null).catch(() => {});
-          } catch (e) {}
         }
       }
 
-      // Handle Video Track
+      // 2. Video Transceiver Sync
       if (!kindFilter || kindFilter === 'video') {
-        const videoSender = senders.find((s) => s.track?.kind === 'video' || (s as any).kind === 'video');
-        if (this.localVideoTrack && this.localVideoTrack.readyState === 'live') {
-          if (videoSender) {
-            await videoSender.replaceTrack(this.localVideoTrack).catch(() => {});
-          } else {
-            try {
-              wrapper.pc.addTrack(this.localVideoTrack, composite);
-              modified = true;
-            } catch (e) {}
+        const videoTx = transceivers.find((t) => t.receiver.track.kind === 'video');
+        if (videoTx) {
+          const trackToSet = this.localVideoTrack && this.localVideoTrack.readyState === 'live' ? this.localVideoTrack : null;
+          if (videoTx.sender.track !== trackToSet) {
+            await videoTx.sender.replaceTrack(trackToSet).catch(() => {});
+            videoTx.direction = trackToSet ? 'sendrecv' : 'recvonly';
+            needsRenegotiation = true;
           }
-        } else if (videoSender) {
-          try {
-            await videoSender.replaceTrack(null).catch(() => {});
-          } catch (e) {}
         }
       }
 
-      if (modified) {
+      if (needsRenegotiation) {
         await this.renegotiate(peerId);
       }
-    });
+    }
   }
 
   /**
@@ -213,15 +194,16 @@ export class WebRTCService {
     if (!wrapper || !wrapper.pc || wrapper.pc.signalingState === 'closed') return;
 
     try {
-      const offer = await wrapper.pc.createOffer({
-        offerToReceiveAudio: true,
-        offerToReceiveVideo: true,
-      });
+      wrapper.isMakingOffer = true;
+      const offer = await wrapper.pc.createOffer();
+      if (wrapper.pc.connectionState === 'closed') return;
       await wrapper.pc.setLocalDescription(offer);
 
       this.signalNeededListeners.forEach((fn) => fn(remotePeerId, 'offer', offer));
     } catch (err) {
       console.warn(`[WebRTCService] Renegotiation offer error for ${remotePeerId}:`, err);
+    } finally {
+      if (wrapper) wrapper.isMakingOffer = false;
     }
   }
 
@@ -237,7 +219,7 @@ export class WebRTCService {
       this.closeConnection(remotePeerId);
     }
 
-    const pc = this.createPeerConnection(remotePeerId, true);
+    const pc = this.createPeerConnection(remotePeerId);
     const dc = pc.createDataChannel('synqto-data', {
       ordered: true,
     });
@@ -250,24 +232,23 @@ export class WebRTCService {
       remoteStream: null,
       isInitiator: true,
       status: 'connecting',
+      isMakingOffer: false,
     };
     this.connections.set(remotePeerId, wrapper);
 
     try {
-      const offer = await pc.createOffer({
-        offerToReceiveAudio: true,
-        offerToReceiveVideo: true,
-      });
+      wrapper.isMakingOffer = true;
+      const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
       this.signalNeededListeners.forEach((fn) => fn(remotePeerId, 'offer', offer));
     } catch (err) {
       console.error(`[WebRTCService] Failed to create offer for ${remotePeerId}:`, err);
       this.handleConnectionFailure(remotePeerId);
+    } finally {
+      wrapper.isMakingOffer = false;
     }
   }
-
-  private pendingIceCandidates: Map<string, RTCIceCandidateInit[]> = new Map();
 
   private async flushPendingIce(remotePeerId: string, pc: RTCPeerConnection) {
     const candidates = this.pendingIceCandidates.get(remotePeerId) || [];
@@ -275,7 +256,9 @@ export class WebRTCService {
       this.pendingIceCandidates.delete(remotePeerId);
       for (const c of candidates) {
         try {
-          await pc.addIceCandidate(new RTCIceCandidate(c));
+          if (c.candidate) {
+            await pc.addIceCandidate(new RTCIceCandidate(c));
+          }
         } catch (err) {
           console.warn(`[WebRTCService] Failed to flush queued ICE candidate for ${remotePeerId}:`, err);
         }
@@ -284,21 +267,27 @@ export class WebRTCService {
   }
 
   /**
-   * Handles incoming SDP offer (supports initial connection and renegotiation)
+   * Handles incoming SDP offer (supports initial connection and Perfect Negotiation renegotiation)
    */
   public async handleIncomingOffer(
     remotePeerId: string,
     offer: RTCSessionDescriptionInit
   ): Promise<void> {
     let wrapper = this.connections.get(remotePeerId);
+    const isPolite = this.myPeerId ? this.myPeerId < remotePeerId : false;
 
-    // If existing active connection, handle as renegotiation without tearing down
+    // Handle existing connection renegotiation
     if (wrapper && wrapper.pc && wrapper.pc.signalingState !== 'closed') {
-      try {
-        if (wrapper.pc.signalingState === 'have-local-offer') {
-          // SDP glare collision: rollback local offer to accept incoming offer
-          await wrapper.pc.setLocalDescription({ type: 'rollback' });
+      const offerCollision = wrapper.isMakingOffer || wrapper.pc.signalingState !== 'stable';
+      if (offerCollision) {
+        if (!isPolite) {
+          // Impolite peer ignores colliding offer; polite peer rolls back
+          return;
         }
+        await wrapper.pc.setLocalDescription({ type: 'rollback' });
+      }
+
+      try {
         await wrapper.pc.setRemoteDescription(new RTCSessionDescription(offer));
         await this.flushPendingIce(remotePeerId, wrapper.pc);
         const answer = await wrapper.pc.createAnswer();
@@ -307,23 +296,23 @@ export class WebRTCService {
         this.signalNeededListeners.forEach((fn) => fn(remotePeerId, 'answer', answer));
         return;
       } catch (err) {
-        console.warn(`[WebRTCService] Renegotiation answer failed for ${remotePeerId}, recreating connection:`, err);
+        console.warn(`[WebRTCService] Renegotiation answer failed for ${remotePeerId}, resetting:`, err);
       }
     }
 
-    // Otherwise initialize new peer connection
     if (wrapper) {
       this.closeConnection(remotePeerId);
     }
 
-    const pc = this.createPeerConnection(remotePeerId, false);
+    const pc = this.createPeerConnection(remotePeerId);
     wrapper = {
       peerId: remotePeerId,
       pc,
-      dataChannel: null, // Will be set in ondatachannel
+      dataChannel: null,
       remoteStream: null,
       isInitiator: false,
       status: 'connecting',
+      isMakingOffer: false,
     };
     this.connections.set(remotePeerId, wrapper);
 
@@ -375,36 +364,31 @@ export class WebRTCService {
     }
 
     try {
-      await wrapper.pc.addIceCandidate(new RTCIceCandidate(candidate));
+      if (candidate.candidate) {
+        await wrapper.pc.addIceCandidate(new RTCIceCandidate(candidate));
+      }
     } catch (err) {
       console.warn(`[WebRTCService] Failed to add ICE candidate for ${remotePeerId}:`, err);
     }
   }
 
-  private createPeerConnection(remotePeerId: string, isInitiator: boolean): RTCPeerConnection {
+  private createPeerConnection(remotePeerId: string): RTCPeerConnection {
     const pc = new RTCPeerConnection({
       iceServers: this.iceServers,
       iceCandidatePoolSize: 2,
     });
 
-    // Ensure audio & video transceivers are configured to receive stream tracks
+    // Create exactly one audio and one video transceiver with initial tracks
     try {
-      pc.addTransceiver('audio', { direction: 'sendrecv' });
-      pc.addTransceiver('video', { direction: 'sendrecv' });
+      pc.addTransceiver(
+        this.localAudioTrack && this.localAudioTrack.readyState === 'live' ? this.localAudioTrack : 'audio',
+        { direction: this.localAudioTrack ? 'sendrecv' : 'recvonly' }
+      );
+      pc.addTransceiver(
+        this.localVideoTrack && this.localVideoTrack.readyState === 'live' ? this.localVideoTrack : 'video',
+        { direction: this.localVideoTrack ? 'sendrecv' : 'recvonly' }
+      );
     } catch (e) {}
-
-    // Add active local audio & video media stream tracks
-    const composite = this.getCompositeLocalStream();
-    if (this.localAudioTrack && this.localAudioTrack.readyState === 'live') {
-      try {
-        pc.addTrack(this.localAudioTrack, composite);
-      } catch (e) {}
-    }
-    if (this.localVideoTrack && this.localVideoTrack.readyState === 'live') {
-      try {
-        pc.addTrack(this.localVideoTrack, composite);
-      } catch (e) {}
-    }
 
     pc.onicecandidate = (event) => {
       if (event.candidate) {
@@ -465,13 +449,19 @@ export class WebRTCService {
   }
 
   private setupDataChannel(remotePeerId: string, dc: RTCDataChannel) {
-    dc.onopen = () => {
+    const handleOpen = () => {
       const wrapper = this.connections.get(remotePeerId);
       if (wrapper) {
         wrapper.status = 'connected';
         this.connectionStateListeners.forEach((fn) => fn(remotePeerId, 'connected'));
       }
     };
+
+    if (dc.readyState === 'open') {
+      handleOpen();
+    } else {
+      dc.onopen = handleOpen;
+    }
 
     dc.onmessage = (event) => {
       try {
@@ -487,9 +477,7 @@ export class WebRTCService {
       }
     };
 
-    dc.onerror = () => {
-      // Clean error catch
-    };
+    dc.onerror = () => {};
   }
 
   public sendPacket(remotePeerId: string, packet: NetworkPacket): boolean {

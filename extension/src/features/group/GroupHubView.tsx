@@ -70,7 +70,10 @@ export const GroupHubView: React.FC<GroupHubViewProps> = ({ currentRoom, onOpenC
     }
   };
 
-  const handleLeaveClick = () => {
+  const handleLeaveClick = async (group?: StudyGroup) => {
+    if (group) {
+      await groupService.leaveGroup(group.id);
+    }
     roomService.leaveCurrentRoom();
   };
 
@@ -175,51 +178,12 @@ export const GroupHubView: React.FC<GroupHubViewProps> = ({ currentRoom, onOpenC
                 Open Room
               </button>
             )}
-            <button className="btn btn-secondary btn-sm" onClick={handleLeaveClick}>
+            <button className="btn btn-secondary btn-sm" onClick={() => handleLeaveClick()}>
               Leave
             </button>
           </div>
         </div>
       )}
-
-      {/* Search & Topic Filters */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-        <div style={{ position: 'relative' }}>
-          <Search
-            size={13}
-            color="var(--text-muted)"
-            style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)' }}
-          />
-          <input
-            type="text"
-            className="input-glass"
-            placeholder="Search squads & problems..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            style={{ paddingLeft: '30px', fontSize: '11px' }}
-          />
-        </div>
-
-        {/* Topic Pills */}
-        <div style={{ display: 'flex', gap: '5px', overflowX: 'auto', paddingBottom: '2px' }}>
-          {topics.map((t) => (
-            <button
-              key={t}
-              className={`prompt-pill ${selectedTopic === t ? 'active' : ''}`}
-              onClick={() => setSelectedTopic(t)}
-              style={{
-                background: selectedTopic === t ? 'rgba(99, 102, 241, 0.22)' : undefined,
-                borderColor: selectedTopic === t ? 'var(--primary)' : undefined,
-                color: selectedTopic === t ? '#f8fafc' : undefined,
-                fontSize: '10px',
-                padding: '2px 8px',
-              }}
-            >
-              {t}
-            </button>
-          ))}
-        </div>
-      </div>
 
       {/* Groups List */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', flex: 1, overflowY: 'auto' }}>
@@ -272,7 +236,7 @@ export const GroupHubView: React.FC<GroupHubViewProps> = ({ currentRoom, onOpenC
                       group={g}
                       isActive={Boolean(currentRoom && currentRoom.roomId === g.roomId)}
                       onJoin={handleJoinClick}
-                      onLeave={handleLeaveClick}
+                      onLeave={() => handleLeaveClick(g)}
                       onShare={(group) => setShareTargetGroup(group)}
                       onDelete={handleDeleteClick}
                     />
@@ -294,7 +258,7 @@ export const GroupHubView: React.FC<GroupHubViewProps> = ({ currentRoom, onOpenC
                       group={g}
                       isActive={Boolean(currentRoom && currentRoom.roomId === g.roomId)}
                       onJoin={handleJoinClick}
-                      onLeave={handleLeaveClick}
+                      onLeave={() => handleLeaveClick(g)}
                       onShare={(group) => setShareTargetGroup(group)}
                       onDelete={handleDeleteClick}
                     />

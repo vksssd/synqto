@@ -326,54 +326,62 @@ export class DiaryService {
             ctx.lineTo(stroke.points[i].x, stroke.points[i].y);
           }
           ctx.stroke();
-        } else if (stroke.start && stroke.end) {
-          const { start, end } = stroke;
-          if (stroke.tool === 'line' || stroke.tool === 'arrow') {
-            ctx.beginPath();
-            ctx.moveTo(start.x, start.y);
-            ctx.lineTo(end.x, end.y);
-            ctx.stroke();
-            if (stroke.tool === 'arrow') {
-              const angle = Math.atan2(end.y - start.y, end.x - start.x);
-              const headLen = 12;
+        } else {
+          const geom = stroke.geometry || (stroke.start && stroke.end ? {
+            x1: stroke.start.x,
+            y1: stroke.start.y,
+            x2: stroke.end.x,
+            y2: stroke.end.y,
+          } : null);
+
+          if (geom) {
+            const { x1, y1, x2, y2 } = geom;
+            const minX = Math.min(x1, x2);
+            const minY = Math.min(y1, y2);
+            const w = Math.abs(x2 - x1);
+            const h = Math.abs(y2 - y1);
+
+            if (stroke.tool === 'line' || stroke.tool === 'arrow') {
               ctx.beginPath();
-              ctx.moveTo(end.x, end.y);
-              ctx.lineTo(end.x - headLen * Math.cos(angle - Math.PI / 6), end.y - headLen * Math.sin(angle - Math.PI / 6));
-              ctx.lineTo(end.x - headLen * Math.cos(angle + Math.PI / 6), end.y - headLen * Math.sin(angle + Math.PI / 6));
-              ctx.closePath();
-              ctx.fill();
+              ctx.moveTo(x1, y1);
+              ctx.lineTo(x2, y2);
+              ctx.stroke();
+              if (stroke.tool === 'arrow') {
+                const angle = Math.atan2(y2 - y1, x2 - x1);
+                const headLen = 12;
+                ctx.beginPath();
+                ctx.moveTo(x2, y2);
+                ctx.lineTo(x2 - headLen * Math.cos(angle - Math.PI / 6), y2 - headLen * Math.sin(angle - Math.PI / 6));
+                ctx.lineTo(x2 - headLen * Math.cos(angle + Math.PI / 6), y2 - headLen * Math.sin(angle + Math.PI / 6));
+                ctx.closePath();
+                ctx.fill();
+              }
+            } else if (stroke.tool === 'rect') {
+              ctx.strokeRect(minX, minY, w, h);
+            } else if (stroke.tool === 'circle') {
+              ctx.beginPath();
+              ctx.ellipse(minX + w / 2, minY + h / 2, Math.max(1, w / 2), Math.max(1, h / 2), 0, 0, Math.PI * 2);
+              ctx.stroke();
+            } else if (stroke.tool === 'tree_node') {
+              const cx = (x1 + x2) / 2;
+              const cy = (y1 + y2) / 2;
+              const r = Math.max(14, Math.hypot(x2 - x1, y2 - y1) / 2);
+              ctx.beginPath();
+              ctx.arc(cx, cy, r, 0, Math.PI * 2);
+              ctx.stroke();
+              if (stroke.text) {
+                ctx.font = 'bold 13px Inter, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(stroke.text, cx, cy);
+              }
             }
-          } else if (stroke.tool === 'rect') {
-            const rx = Math.min(start.x, end.x);
-            const ry = Math.min(start.y, end.y);
-            const rw = Math.abs(end.x - start.x);
-            const rh = Math.abs(end.y - start.y);
-            ctx.strokeRect(rx, ry, rw, rh);
-          } else if (stroke.tool === 'circle') {
-            const rx = (start.x + end.x) / 2;
-            const ry = (start.y + end.y) / 2;
-            const rw = Math.abs(end.x - start.x) / 2;
-            const rh = Math.abs(end.y - start.y) / 2;
-            ctx.beginPath();
-            ctx.ellipse(rx, ry, Math.max(1, rw), Math.max(1, rh), 0, 0, Math.PI * 2);
-            ctx.stroke();
-          } else if (stroke.tool === 'tree_node') {
-            const cx = (start.x + end.x) / 2;
-            const cy = (start.y + end.y) / 2;
-            const r = Math.max(14, Math.hypot(end.x - start.x, end.y - start.y) / 2);
-            ctx.beginPath();
-            ctx.arc(cx, cy, r, 0, Math.PI * 2);
-            ctx.stroke();
-            if (stroke.text) {
-              ctx.font = 'bold 13px Inter, sans-serif';
-              ctx.textAlign = 'center';
-              ctx.textBaseline = 'middle';
-              ctx.fillText(stroke.text, cx, cy);
-            }
+          } else if (stroke.text && (stroke.geometry || stroke.start)) {
+            const tx = stroke.geometry ? stroke.geometry.x1 : stroke.start.x;
+            const ty = stroke.geometry ? stroke.geometry.y1 : stroke.start.y;
+            ctx.font = '14px Inter, sans-serif';
+            ctx.fillText(stroke.text, tx, ty);
           }
-        } else if (stroke.text && stroke.start) {
-          ctx.font = '14px Inter, sans-serif';
-          ctx.fillText(stroke.text, stroke.start.x, stroke.start.y);
         }
 
         ctx.restore();

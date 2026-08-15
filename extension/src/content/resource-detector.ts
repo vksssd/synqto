@@ -14,18 +14,19 @@ export function detectResource(urlStr: string, documentTitle?: string): Detected
     const hostname = parsed.hostname.toLowerCase();
     const pathname = parsed.pathname;
 
-    // 1. LeetCode
-    if (hostname.includes('leetcode.com')) {
+    // 1. LeetCode (Global + China)
+    if (hostname.includes('leetcode.com') || hostname.includes('leetcode.cn')) {
       const match = pathname.match(/\/problems\/([a-zA-Z0-9-_]+)/);
       if (match && match[1]) {
         const slug = match[1];
         const title = formatSlugToTitle(slug);
+        const domain = hostname.includes('leetcode.cn') ? 'leetcode.cn' : 'leetcode.com';
         return {
           platform: 'LeetCode',
           slug,
           title,
           url: urlStr,
-          canonicalUrl: `https://leetcode.com/problems/${slug}/`,
+          canonicalUrl: `https://${domain}/problems/${slug}/`,
         };
       }
     }
@@ -46,12 +47,14 @@ export function detectResource(urlStr: string, documentTitle?: string): Detected
       }
     }
 
-    // 3. Codeforces
-    if (hostname.includes('codeforces.com')) {
-      const probMatch = pathname.match(/\/(?:contest|problemset\/problem)\/(\d+)\/([A-Z0-9]+)/i);
-      if (probMatch) {
-        const contestId = probMatch[1];
-        const problemIndex = probMatch[2].toUpperCase();
+    // 3. Codeforces (Contest, Problemset, Gym)
+    if (hostname.includes('codeforces.com') || hostname.includes('codeforces.net')) {
+      const cfMatch = pathname.match(
+        /\/(?:contest\/(\d+)\/problem|problemset\/problem\/(\d+)|gym\/(\d+)\/problem)\/([a-zA-Z0-9]+)/i
+      );
+      if (cfMatch) {
+        const contestId = cfMatch[1] || cfMatch[2] || cfMatch[3];
+        const problemIndex = cfMatch[4].toUpperCase();
         const slug = `cf-${contestId}-${problemIndex}`;
         return {
           platform: 'Codeforces',
@@ -63,7 +66,23 @@ export function detectResource(urlStr: string, documentTitle?: string): Detected
       }
     }
 
-    // 4. HackerRank
+    // 4. AtCoder
+    if (hostname.includes('atcoder.jp')) {
+      const atCoderMatch = pathname.match(/\/contests\/([a-zA-Z0-9-_]+)\/tasks\/([a-zA-Z0-9-_]+)/);
+      if (atCoderMatch) {
+        const contest = atCoderMatch[1];
+        const taskId = atCoderMatch[2];
+        return {
+          platform: 'AtCoder',
+          slug: `atcoder-${taskId}`,
+          title: formatSlugToTitle(taskId),
+          url: urlStr,
+          canonicalUrl: `https://atcoder.jp/contests/${contest}/tasks/${taskId}`,
+        };
+      }
+    }
+
+    // 5. HackerRank
     if (hostname.includes('hackerrank.com')) {
       const match = pathname.match(/\/challenges\/([a-zA-Z0-9-_]+)/);
       if (match && match[1]) {
@@ -78,7 +97,7 @@ export function detectResource(urlStr: string, documentTitle?: string): Detected
       }
     }
 
-    // 5. CodeChef
+    // 6. CodeChef
     if (hostname.includes('codechef.com')) {
       const match = pathname.match(/\/problems\/([a-zA-Z0-9-_]+)/);
       if (match && match[1]) {
@@ -93,22 +112,23 @@ export function detectResource(urlStr: string, documentTitle?: string): Detected
       }
     }
 
-    // 6. GeeksforGeeks
+    // 7. GeeksforGeeks
     if (hostname.includes('geeksforgeeks.org')) {
       const match = pathname.match(/\/problems\/([a-zA-Z0-9-_]+)/);
       if (match && match[1]) {
         const slug = match[1];
+        const cleanSlug = slug.replace(/-\d{6,}$/, '');
         return {
           platform: 'GeeksforGeeks',
           slug,
-          title: formatSlugToTitle(slug),
+          title: formatSlugToTitle(cleanSlug),
           url: urlStr,
           canonicalUrl: `https://www.geeksforgeeks.org/problems/${slug}/1`,
         };
       }
     }
 
-    // 7. YouTube (Lectures & Solutions)
+    // 8. YouTube (Lectures & Solutions)
     if (hostname.includes('youtube.com') || hostname.includes('youtu.be')) {
       let videoId = parsed.searchParams.get('v');
       if (!videoId && hostname.includes('youtu.be')) {
@@ -130,7 +150,7 @@ export function detectResource(urlStr: string, documentTitle?: string): Detected
       }
     }
 
-    // 8. ArXiv Papers
+    // 9. ArXiv Papers
     if (hostname.includes('arxiv.org')) {
       const match = pathname.match(/\/(?:abs|pdf)\/(\d+\.\d+(?:v\d+)?)/);
       if (match && match[1]) {
@@ -145,7 +165,7 @@ export function detectResource(urlStr: string, documentTitle?: string): Detected
       }
     }
 
-    // 9. GitHub (Issues / Pull Requests / Repos)
+    // 10. GitHub (Issues / Pull Requests / Repos)
     if (hostname.includes('github.com')) {
       const match = pathname.match(/^\/([^\/]+)\/([^\/]+)\/(?:issues|pull)\/(\d+)/);
       if (match) {

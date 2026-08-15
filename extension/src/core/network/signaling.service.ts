@@ -23,11 +23,6 @@ export interface DemoteData {
   newLeader: string;
 }
 
-export interface SignalData {
-  sdp?: RTCSessionDescriptionInit;
-  candidate?: RTCIceCandidateInit;
-}
-
 export interface ServerMessage {
   type: string;
   from: string;
@@ -35,8 +30,6 @@ export interface ServerMessage {
   roomId: string;
   payload?: any;
 }
-
-export type SignalingEventHandler = (event: string, data: any) => void;
 
 export class SignalingService {
   private static instance: SignalingService | null = null;
@@ -49,10 +42,11 @@ export class SignalingService {
   private reconnectAttempts = 0;
   private reconnectTimer: any = null;
   private pingInterval: any = null;
+  private pongTimeoutTimer: any = null;
+  private messageQueue: string[] = [];
   private listeners: Map<string, Set<(data: any) => void>> = new Map();
 
   private constructor() {
-    // Load custom server URL from storage if configured
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       chrome.storage.local.get(['nerd_buddy_server_url', 'synqto_server_url'], (res) => {
         const stored = res.synqto_server_url || res.nerd_buddy_server_url;
@@ -111,6 +105,7 @@ export class SignalingService {
     if (
       this.ws &&
       this.currentRoomId === roomId &&
+      this.peerId === peerId &&
       (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)
     ) {
       return;
@@ -163,7 +158,7 @@ export class SignalingService {
         }
         this.emit('connection:change', { connected: true, roomId: this.currentRoomId, serverUrl: this.serverUrl });
 
-        // First message MUST be room:join
+        // Join room immediately
         this.sendRaw({
           type: 'room:join',
           from: this.peerId,
@@ -174,7 +169,12 @@ export class SignalingService {
           },
         });
 
-        // Start heartbeat ping
+        // Flush any queued signaling messages
+        while (this.messageQueue.length > 0 && this.ws?.readyState === WebSocket.OPEN) {
+          const raw = this.messageQueue.shift();
+          if (raw) this.ws.send(raw);
+        }
+
         this.startHeartbeat();
       };
 
@@ -204,14 +204,12 @@ export class SignalingService {
       };
 
       this.ws.onerror = () => {
-        // Browser WebSocket error events are generic Event objects without message text.
-        // We log an informative message on initial attempt instead of printing raw '[object Event]'.
         if (this.reconnectAttempts === 0) {
           console.info(`[SignalingService] Signaling server not reachable at ${this.serverUrl}. Operating in offline/local peer mode.`);
         }
       };
     } catch (err) {
-      console.info(`[SignalingService] WebSocket connection attempt failed for ${this.serverUrl}. Operating in offline mode.`);
+      console.info(`[SignalingService] WebSocket connection attempt failed for ${this.serverUrl}.`);
       this.scheduleReconnect();
     }
   }
@@ -237,7 +235,10 @@ export class SignalingService {
         this.emit('signal:ice', { from: msg.from, candidate: msg.payload?.candidate });
         break;
       case 'pong':
-        // Heartbeat acknowledged
+        if (this.pongTimeoutTimer) {
+          clearTimeout(this.pongTimeoutTimer);
+          this.pongTimeoutTimer = null;
+        }
         break;
       default:
         console.log('[SignalingService] Unhandled server message:', msg);
@@ -275,8 +276,13 @@ export class SignalingService {
   }
 
   private sendRaw(msg: ServerMessage) {
+    const raw = JSON.stringify(msg);
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(msg));
+      this.ws.send(raw);
+    } else if (this.ws && this.ws.readyState === WebSocket.CONNECTING) {
+      if (this.messageQueue.length < 100) {
+        this.messageQueue.push(raw);
+      }
     }
   }
 
@@ -288,6 +294,14 @@ export class SignalingService {
         from: this.peerId,
         roomId: this.currentRoomId,
       });
+
+      // 10s watchdog for dead socket detection
+      this.pongTimeoutTimer = setTimeout(() => {
+        console.warn('[SignalingService] Heartbeat pong timeout. Reconnecting...');
+        if (this.ws) {
+          try { this.ws.close(); } catch (e) {}
+        }
+      }, 10000);
     }, 20000);
   }
 
@@ -296,13 +310,16 @@ export class SignalingService {
       clearInterval(this.pingInterval);
       this.pingInterval = null;
     }
+    if (this.pongTimeoutTimer) {
+      clearTimeout(this.pongTimeoutTimer);
+      this.pongTimeoutTimer = null;
+    }
   }
 
   private scheduleReconnect() {
     if (!this.currentRoomId) return;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
 
-    // If retried multiple times and server is offline, back off gracefully to avoid background resource churn
     const baseDelay = this.reconnectAttempts > 4 ? 20000 : 1000;
     const maxDelay = this.reconnectAttempts > 4 ? 40000 : 15000;
     const delay = backoffDelay(this.reconnectAttempts, baseDelay, maxDelay, 500);
@@ -316,6 +333,7 @@ export class SignalingService {
   private cleanupState() {
     this.isConnected = false;
     this.stopHeartbeat();
+    this.messageQueue = [];
     if (this.ws) {
       try {
         if (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) {

@@ -82,6 +82,8 @@
     },
     "featureList": [
       "Auto-forming P2P problem rooms via deterministic URL hashing",
+      "System Architecture & Collaborative Whiteboard Studio with 11 design shapes and disappearing ink",
+      "Private offline coding diary and problem journal with local storage and Markdown export",
       "Live Tutor Stage with screen and camera streaming",
       "Real-time synchronized laser pointer with 25fps coordinate mapping",
       "In-page floating chat with click-to-reveal spoilers and 1-click code copying",
@@ -245,6 +247,7 @@
 
       <nav class="nav-links" id="nav-links" aria-label="Main Navigation">
         <a href="#features">Features</a>
+        <a href="#whiteboard-studio">Whiteboard & Diary</a>
         <a href="#interactive-p2p-demo">Live Dual-Peer Demo</a>
         <a href="#sandbox">Room Simulator</a>
         <a href="#architecture">Architecture</a>
@@ -278,7 +281,7 @@
       <div class="container hero-container">
         <div class="hero-badge">
           <span class="badge-dot"></span>
-          <span>Chrome Extension Manifest V3 • Zero-Server P2P Mesh</span>
+          <span>Chrome Extension Manifest V3 • Zero-Server P2P Mesh • System Design Whiteboard • Offline Diary</span>
         </div>
 
         <h1 class="hero-title" id="main-heading">
@@ -289,7 +292,8 @@
         <p class="hero-subtitle">
           Instant collaborative study rooms that form automatically the second you open any 
           <strong>LeetCode</strong>, <strong>Codeforces</strong>, <strong>NeetCode</strong>, or <strong>HackerRank</strong> problem. 
-          Direct WebRTC screen sharing, laser pointers, and in-page chat with <strong>zero central servers between peers</strong>.
+          Includes <strong>System Architecture Whiteboards</strong>, <strong>Private Offline Coding Diaries</strong>, 
+          direct WebRTC screen sharing, and laser pointers with <strong>zero central servers between peers</strong>.
         </p>
 
         <div class="hero-cta-group">
@@ -298,7 +302,7 @@
               <i data-lucide="download" class="icon-lg"></i>
               <div class="btn-lg-text">
                 <span class="btn-main-text">Download Extension (.zip)</span>
-                <span class="btn-subtext">v0.1.0 Beta • 100 KB • Ready to Load</span>
+                <span class="btn-subtext">v0.1.0 Beta • 122 KB • Ready to Load</span>
               </div>
             </div>
           </a>
@@ -480,70 +484,203 @@
             </div>
             <h3 class="feature-title">Auto-Forming P2P Rooms</h3>
             <p class="feature-desc">
-              Zero invite codes or room URLs. Rooms are deterministically hashed from the canonical problem URL. Open the problem on LeetCode, and you're instantly in the room.
+              Zero invite codes or room URLs. Rooms are deterministically hashed from canonical problem URLs. Open any problem on LeetCode, and you're instantly in the room.
             </p>
             <div class="feature-tag"><i data-lucide="cpu" class="icon-xxs"></i> Deterministic URL Hashing</div>
           </article>
 
-          <!-- Feature 2 -->
-          <article class="feature-card">
-            <div class="feature-icon-wrapper">
-              <i data-lucide="tv" class="icon-feature"></i>
+          <!-- Feature 2: System Architecture & Whiteboard Studio -->
+          <article class="feature-card highlight-card">
+            <div class="feature-icon-wrapper" style="background: rgba(99, 102, 241, 0.25); color: #818cf8;">
+              <i data-lucide="palette" class="icon-feature"></i>
             </div>
-            <h3 class="feature-title">Tutor Stage & Screen Broadcast</h3>
+            <h3 class="feature-title">System Architecture & Whiteboard</h3>
             <p class="feature-desc">
-              Host live problem walkthroughs with 1-click screen or camera streaming. Audience members can raise their hands to be promoted to speak on stage.
+              Collaborative canvas with 11 System Design shapes (🗄️ Database, ☁️ Cloud, ⚖️ Load Balancer, 📨 Message Queue, 📦 Server Box, ⚡ Cache, 👤 Client, 🌳 Trees), ⏳ Disappearing Temporary Ink (3s fade), and 7 background themes.
             </p>
-            <div class="feature-tag"><i data-lucide="radio" class="icon-xxs"></i> WebRTC Media Mesh</div>
+            <div class="feature-tag"><i data-lucide="shapes" class="icon-xxs"></i> 11 System Design Tools & Temp Pen</div>
           </article>
 
-          <!-- Feature 3 -->
-          <article class="feature-card">
-            <div class="feature-icon-wrapper">
-              <i data-lucide="crosshair" class="icon-feature"></i>
+          <!-- Feature 3: Personal Coding Diary & Journal -->
+          <article class="feature-card highlight-card">
+            <div class="feature-icon-wrapper" style="background: rgba(16, 185, 129, 0.25); color: #34d399;">
+              <i data-lucide="book-open" class="icon-feature"></i>
             </div>
-            <h3 class="feature-title">Live Laser Pointer & Click Ripples</h3>
+            <h3 class="feature-title">Private Coding Diary & Notes</h3>
             <p class="feature-desc">
-              Point to specific code lines and test cases across everyone's screens in real-time with responsive coordinate mapping and animated ripple clicks.
+              Full-featured offline journal stored locally in <code>chrome.storage.local</code>. Create multiple diaries (Daily Problem Log, System Design Notes, Bug Retrospectives), auto-dated entries, tags (<code>#dp</code>), mood tracking, and Markdown export.
             </p>
-            <div class="feature-tag"><i data-lucide="mouse-pointer-2" class="icon-xxs"></i> 25fps Cursor Broadcast</div>
+            <div class="feature-tag"><i data-lucide="lock" class="icon-xxs"></i> 100% Local Storage Persistence</div>
           </article>
 
           <!-- Feature 4 -->
           <article class="feature-card">
             <div class="feature-icon-wrapper">
-              <i data-lucide="message-square-code" class="icon-feature"></i>
+              <i data-lucide="tv" class="icon-feature"></i>
             </div>
-            <h3 class="feature-title">In-Page Floating Chat & Sidepanel</h3>
+            <h3 class="feature-title">Multi-Broadcaster Live Stage</h3>
             <p class="feature-desc">
-              Full 1:1 chat parity whether using the Chrome Sidepanel or lightweight in-page popup. Includes click-to-reveal spoilers (<code>||hint||</code>) and 1-click code copying.
+              Host live walkthroughs with 1-click screen or camera streaming. Multiple peers can go live simultaneously on any problem, with live stream selector carousel.
             </p>
-            <div class="feature-tag"><i data-lucide="check-check" class="icon-xxs"></i> 3-Level Delivery ACKs</div>
+            <div class="feature-tag"><i data-lucide="radio" class="icon-xxs"></i> WebRTC Multi-Stream Mesh</div>
           </article>
 
           <!-- Feature 5 -->
           <article class="feature-card">
             <div class="feature-icon-wrapper">
-              <i data-lucide="network" class="icon-feature"></i>
+              <i data-lucide="crosshair" class="icon-feature"></i>
             </div>
-            <h3 class="feature-title">Dual-Leader Backbone Clustering</h3>
+            <h3 class="feature-title">Live Laser Pointer & Spotlight</h3>
             <p class="feature-desc">
-              High-concurrency Go signaling engine supporting 17,000+ messages/second with automatic orphan peer redistribution and dual-leader failover redundancy.
+              Point to specific code lines and test cases across everyone's screens with sub-millisecond coordinate mapping, glowing laser trails, and darkened spotlight focus.
             </p>
-            <div class="feature-tag"><i data-lucide="shield-check" class="icon-xxs"></i> Sub-Millisecond Latency</div>
+            <div class="feature-tag"><i data-lucide="mouse-pointer-2" class="icon-xxs"></i> 25fps Coordinate Broadcast</div>
           </article>
 
           <!-- Feature 6 -->
           <article class="feature-card">
             <div class="feature-icon-wrapper">
-              <i data-lucide="palette" class="icon-feature"></i>
+              <i data-lucide="message-square-code" class="icon-feature"></i>
             </div>
-            <h3 class="feature-title">P2P Collaborative Whiteboard</h3>
+            <h3 class="feature-title">Focused Chat & Spoilers</h3>
             <p class="feature-desc">
-              Toggleable from Settings. Draw algorithms together with multi-pen thicknesses, highlighters, geometric trees, boxes, arrows, and instant canvas export.
+              Clean in-page popup and sidepanel chat with click-to-reveal spoiler protection (<code>||hint solution||</code>), 1-click code copying, and 3-level message delivery ACKs.
             </p>
-            <div class="feature-tag"><i data-lucide="pen-tool" class="icon-xxs"></i> Real-time Stroke Mesh</div>
+            <div class="feature-tag"><i data-lucide="check-check" class="icon-xxs"></i> Spoilers & 1-Click Code Copy</div>
           </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- Interactive Whiteboard & Diary Live Playground Section -->
+    <section class="whiteboard-studio-section" id="whiteboard-studio" aria-label="Interactive Whiteboard & Diary Studio">
+      <div class="container">
+        <div class="section-header">
+          <div class="badge-pill"><i data-lucide="sparkles" class="icon-xs"></i> Interactive Studio Playground</div>
+          <h2 class="section-title">Whiteboard Architecture Studio & Private Diary</h2>
+          <p class="section-subtitle">Try drawing system design components or switch to the private coding journal directly in your browser.</p>
+        </div>
+
+        <div class="studio-card">
+          <!-- Studio Header Mode Switcher -->
+          <div class="studio-header">
+            <div class="studio-tabs">
+              <button class="studio-tab active" id="tab-btn-whiteboard">
+                <i data-lucide="palette" class="icon-xs"></i>
+                <span>🎨 System Design Whiteboard</span>
+              </button>
+              <button class="studio-tab" id="tab-btn-diary">
+                <i data-lucide="book-open" class="icon-xs"></i>
+                <span>📔 Coding Diary & Journal</span>
+              </button>
+            </div>
+            <div class="studio-meta">
+              <span class="badge-status-dot"></span>
+              <span id="studio-mode-label">Live Interactive Canvas</span>
+            </div>
+          </div>
+
+          <!-- Whiteboard Workspace View -->
+          <div class="studio-workspace" id="workspace-whiteboard">
+            <!-- Studio Toolbar -->
+            <div class="studio-toolbar">
+              <div class="tool-btn-group">
+                <button class="wb-demo-btn active" data-tool="pen" title="Fine Pen">✏️ Pen</button>
+                <button class="wb-demo-btn" data-tool="temp_pen" title="⏳ Disappearing Ink (Fades in 3s)">⏳ Temp Ink</button>
+                <button class="wb-demo-btn" data-tool="db_cylinder" title="🗄️ Database Cylinder">🗄️ DB</button>
+                <button class="wb-demo-btn" data-tool="cloud" title="☁️ Cloud Gateway">☁️ Cloud</button>
+                <button class="wb-demo-btn" data-tool="load_balancer" title="⚖️ Load Balancer">⚖️ LB</button>
+                <button class="wb-demo-btn" data-tool="server_box" title="📦 App Server">📦 Server</button>
+                <button class="wb-demo-btn" data-tool="tree_node" title="🌳 Tree Node">🌳 Node</button>
+                <button class="wb-demo-btn" data-tool="eraser" title="Eraser">🧹 Eraser</button>
+              </div>
+
+              <div class="tool-btn-group">
+                <!-- Color Dots -->
+                <div class="wb-color-picker">
+                  <span class="color-swatch active" data-color="#6366f1" style="background:#6366f1;"></span>
+                  <span class="color-swatch" data-color="#06b6d4" style="background:#06b6d4;"></span>
+                  <span class="color-swatch" data-color="#10b981" style="background:#10b981;"></span>
+                  <span class="color-swatch" data-color="#f59e0b" style="background:#f59e0b;"></span>
+                  <span class="color-swatch" data-color="#f43f5e" style="background:#f43f5e;"></span>
+                  <span class="color-swatch" data-color="#ffffff" style="background:#ffffff;"></span>
+                </div>
+                <button class="btn-micro" id="wb-demo-clear" style="color:#f87171;"><i data-lucide="trash-2" class="icon-xxs"></i> Clear</button>
+              </div>
+            </div>
+
+            <!-- HTML5 Interactive Demo Canvas -->
+            <div class="studio-canvas-container">
+              <canvas id="landing-wb-canvas" width="900" height="380"></canvas>
+              <div class="canvas-watermark-hint">
+                <i data-lucide="mouse-pointer" class="icon-xs"></i> Click & drag anywhere to draw architecture components or disappearing ink!
+              </div>
+            </div>
+          </div>
+
+          <!-- Diary Workspace View -->
+          <div class="studio-workspace" id="workspace-diary" style="display: none;">
+            <div class="diary-demo-container">
+              <!-- Diary Left Sidebar -->
+              <div class="diary-demo-sidebar">
+                <div class="diary-book-pill">
+                  <span>📓 Daily Problem Log (2 entries)</span>
+                </div>
+                <div class="diary-entries-list">
+                  <div class="diary-entry-card active" data-entry="1">
+                    <div class="diary-entry-date">Today • Breakthrough 💡</div>
+                    <div class="diary-entry-title">Two Sum (Optimal O(N) Hash Map)</div>
+                    <div class="diary-entry-tags">#leetcode #hashmap #arrays</div>
+                  </div>
+                  <div class="diary-entry-card" data-entry="2">
+                    <div class="diary-entry-date">Yesterday • Productive 🚀</div>
+                    <div class="diary-entry-title">LRU Cache Architecture & Doubly Linked List</div>
+                    <div class="diary-entry-tags">#system-design #cache #lru</div>
+                  </div>
+                </div>
+                <button class="btn btn-secondary btn-sm" id="btn-diary-demo-add" style="margin-top: 8px; width: 100%; font-size: 11px;">
+                  <i data-lucide="plus" class="icon-xxs"></i> <span>New Diary Entry</span>
+                </button>
+              </div>
+
+              <!-- Diary Editor Preview -->
+              <div class="diary-demo-editor">
+                <div class="diary-editor-header">
+                  <input type="text" class="diary-title-input" id="diary-demo-title" value="Two Sum (Optimal O(N) Hash Map)">
+                  <div class="diary-meta-row">
+                    <span class="diary-mood-badge">💡 Breakthrough</span>
+                    <span class="diary-problem-link"><i data-lucide="external-link" class="icon-xxs"></i> leetcode.com/problems/two-sum</span>
+                  </div>
+                </div>
+                <textarea class="diary-textarea" id="diary-demo-content" rows="9">### 🎯 Daily Reflection & Notes
+
+- **Approach**: Single-pass Hash Map
+- **Time Complexity**: $O(N)$
+- **Space Complexity**: $O(N)$
+
+```python
+def twoSum(nums, target):
+    seen = {}
+    for i, num in enumerate(nums):
+        diff = target - num
+        if diff in seen:
+            return [seen[diff], i]
+        seen[num] = i
+    return []
+```
+
+- [x] Solved in 6 minutes
+- [x] Verified zero off-by-one errors</textarea>
+                <div class="diary-footer-actions">
+                  <span class="diary-storage-tag"><i data-lucide="shield-check" class="icon-xxs"></i> Saved to Local Storage</span>
+                  <button class="btn btn-primary btn-sm" id="btn-diary-demo-export">
+                    <i data-lucide="download" class="icon-xxs"></i>
+                    <span>Export Markdown (.md)</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -693,6 +830,26 @@
                 <td><i data-lucide="x-circle" class="icon-cross"></i> Switch Apps</td>
                 <td><i data-lucide="x-circle" class="icon-cross"></i> Separate Window</td>
                 <td><i data-lucide="x-circle" class="icon-cross"></i> Requires Desktop IDE</td>
+              </tr>
+              <tr>
+                <td class="td-feature">
+                  <strong>System Design Architecture Whiteboard</strong>
+                  <span>11 Cloud & DB shapes with 3s disappearing ink</span>
+                </td>
+                <td class="td-nerd highlight-cell"><i data-lucide="check-circle-2" class="icon-check"></i> 11 Shapes & Temp Pen</td>
+                <td><i data-lucide="x-circle" class="icon-cross"></i> Not Supported</td>
+                <td><i data-lucide="minus-circle" class="icon-neutral"></i> Basic Freehand</td>
+                <td><i data-lucide="x-circle" class="icon-cross"></i> Extension Needed</td>
+              </tr>
+              <tr>
+                <td class="td-feature">
+                  <strong>Private Offline Coding Diary & Journal</strong>
+                  <span>Auto-dated problem entries, tags & Markdown export</span>
+                </td>
+                <td class="td-nerd highlight-cell"><i data-lucide="check-circle-2" class="icon-check"></i> Built-in Local Storage</td>
+                <td><i data-lucide="x-circle" class="icon-cross"></i> Public Chat Only</td>
+                <td><i data-lucide="x-circle" class="icon-cross"></i> Not Supported</td>
+                <td><i data-lucide="minus-circle" class="icon-neutral"></i> Manual Files</td>
               </tr>
               <tr>
                 <td class="td-feature">

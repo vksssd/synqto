@@ -427,26 +427,355 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   };
 
-  if (langSelector) {
-    langSelector.addEventListener('change', (e) => {
-      const selected = (e.target).value;
-      const dict = translations[selected] || translations.en;
+  // 12. Interactive Whiteboard & Diary Studio Playground
+  const tabWb = document.getElementById('tab-btn-whiteboard');
+  const tabDiary = document.getElementById('tab-btn-diary');
+  const wsWb = document.getElementById('workspace-whiteboard');
+  const wsDiary = document.getElementById('workspace-diary');
+  const modeLabel = document.getElementById('studio-mode-label');
 
-      const heroHeading = document.getElementById('main-heading');
-      if (heroHeading) heroHeading.innerHTML = dict.heroTitle;
+  if (tabWb && tabDiary && wsWb && wsDiary) {
+    tabWb.addEventListener('click', () => {
+      tabWb.classList.add('active');
+      tabDiary.classList.remove('active');
+      wsWb.style.display = 'block';
+      wsDiary.style.display = 'none';
+      if (modeLabel) modeLabel.innerText = 'Live Architecture Canvas';
+    });
 
-      const heroSubtitle = document.querySelector('.hero-subtitle');
-      if (heroSubtitle) heroSubtitle.innerHTML = dict.heroSub;
-
-      const mainDownloadTexts = document.querySelectorAll('.btn-main-text');
-      mainDownloadTexts.forEach((el) => {
-        if (el.innerText.includes('Download') || el.innerText.includes('Descargar') || el.innerText.includes('下载') || el.innerText.includes('डाउनलोड') || el.innerText.includes('ダウンロード')) {
-          el.innerText = dict.downloadBtn;
-        }
-      });
-
-      showToast(dict.toastLang, 'globe');
+    tabDiary.addEventListener('click', () => {
+      tabDiary.classList.add('active');
+      tabWb.classList.remove('active');
+      wsWb.style.display = 'none';
+      wsDiary.style.display = 'block';
+      if (modeLabel) modeLabel.innerText = 'Private Offline Problem Journal';
     });
   }
+
+  // Interactive Whiteboard Canvas Logic
+  const canvas = document.getElementById('landing-wb-canvas');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    let currentTool = 'pen';
+    let currentColor = '#6366f1';
+    let isDrawing = false;
+    let startPt = null;
+    let currentPoints = [];
+    const strokes = [];
+    let tempStrokes = [];
+
+    // Background Grid
+    function drawBackground() {
+      if (!ctx) return;
+      ctx.fillStyle = '#090d16';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
+      ctx.lineWidth = 1;
+      const step = 20;
+      for (let x = 0; x < canvas.width; x += step) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvas.height);
+        ctx.stroke();
+      }
+      for (let y = 0; y < canvas.height; y += step) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
+        ctx.stroke();
+      }
+    }
+
+    function renderStroke(s, alpha = 1.0) {
+      if (!ctx) return;
+      ctx.save();
+      ctx.strokeStyle = s.color;
+      ctx.fillStyle = s.color;
+      ctx.lineWidth = 3;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.globalAlpha = alpha;
+
+      if (s.geometry) {
+        const { x1, y1, x2, y2 } = s.geometry;
+        const w = Math.max(50, Math.abs(x2 - x1));
+        const h = Math.max(40, Math.abs(y2 - y1));
+        const minX = Math.min(x1, x2);
+        const minY = Math.min(y1, y2);
+
+        if (s.tool === 'db_cylinder') {
+          const ry = 10;
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.95)';
+          ctx.beginPath();
+          ctx.ellipse(minX + w / 2, minY + ry, w / 2, ry, 0, Math.PI, 0);
+          ctx.lineTo(minX + w, minY + h - ry);
+          ctx.ellipse(minX + w / 2, minY + h - ry, w / 2, ry, 0, 0, Math.PI);
+          ctx.lineTo(minX, minY + ry);
+          ctx.fill();
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.ellipse(minX + w / 2, minY + ry, w / 2, ry, 0, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.fillStyle = '#ffffff';
+          ctx.font = 'bold 10px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('🗄️ DB', minX + w / 2, minY + h / 2 + 4);
+        } else if (s.tool === 'cloud') {
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.95)';
+          ctx.beginPath();
+          ctx.roundRect(minX, minY, w, h, 14);
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = '#ffffff';
+          ctx.font = 'bold 10px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('☁️ Cloud', minX + w / 2, minY + h / 2 + 3);
+        } else if (s.tool === 'load_balancer') {
+          const midX = minX + w / 2;
+          const midY = minY + h / 2;
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.95)';
+          ctx.beginPath();
+          ctx.moveTo(midX, minY);
+          ctx.lineTo(minX + w, midY);
+          ctx.lineTo(midX, minY + h);
+          ctx.lineTo(minX, midY);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = '#ffffff';
+          ctx.font = 'bold 10px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('⚖️ LB', midX, midY + 3);
+        } else if (s.tool === 'server_box') {
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.95)';
+          ctx.beginPath();
+          ctx.roundRect(minX, minY, w, h, 6);
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = '#10b981';
+          ctx.beginPath();
+          ctx.arc(minX + 8, minY + 8, 3, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#ffffff';
+          ctx.font = 'bold 9px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('📦 Server', minX + w / 2, minY + h / 2 + 2);
+        } else if (s.tool === 'tree_node') {
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.95)';
+          ctx.beginPath();
+          ctx.arc(x1, y1, 16, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = '#ffffff';
+          ctx.font = 'bold 10px monospace';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('Node', x1, y1);
+        }
+      } else if (s.points && s.points.length > 1) {
+        if (s.tool === 'eraser') {
+          ctx.globalCompositeOperation = 'destination-out';
+          ctx.lineWidth = 18;
+        }
+        ctx.beginPath();
+        ctx.moveTo(s.points[0].x, s.points[0].y);
+        for (let i = 1; i < s.points.length; i++) {
+          ctx.lineTo(s.points[i].x, s.points[i].y);
+        }
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    function redraw(previewPts, previewGeom) {
+      drawBackground();
+      strokes.forEach((s) => renderStroke(s));
+
+      const now = Date.now();
+      tempStrokes.forEach((t) => {
+        const alpha = Math.max(0, 1 - (now - t.createdAt) / 3000);
+        renderStroke(t.stroke, alpha);
+      });
+
+      if (previewGeom) {
+        renderStroke({ tool: currentTool, color: currentColor, geometry: previewGeom });
+      } else if (previewPts && previewPts.length > 1) {
+        renderStroke({ tool: currentTool, color: currentColor, points: previewPts });
+      }
+    }
+
+    // Disappearing ink animation loop
+    setInterval(() => {
+      if (tempStrokes.length > 0) {
+        const now = Date.now();
+        tempStrokes = tempStrokes.filter((t) => now - t.createdAt < 3000);
+        redraw();
+      }
+    }, 40);
+
+    // Initial Demo Shapes
+    strokes.push({
+      tool: 'server_box',
+      color: '#818cf8',
+      geometry: { x1: 60, y1: 80, x2: 170, y2: 150 },
+    });
+    strokes.push({
+      tool: 'load_balancer',
+      color: '#f59e0b',
+      geometry: { x1: 230, y1: 70, x2: 320, y2: 160 },
+    });
+    strokes.push({
+      tool: 'cloud',
+      color: '#38bdf8',
+      geometry: { x1: 380, y1: 80, x2: 500, y2: 150 },
+    });
+    strokes.push({
+      tool: 'db_cylinder',
+      color: '#10b981',
+      geometry: { x1: 560, y1: 70, x2: 670, y2: 160 },
+    });
+    redraw();
+
+    function getCoords(e) {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      return {
+        x: (e.clientX - rect.left) * scaleX,
+        y: (e.clientY - rect.top) * scaleY,
+      };
+    }
+
+    canvas.addEventListener('mousedown', (e) => {
+      isDrawing = true;
+      const pt = getCoords(e);
+      startPt = pt;
+      currentPoints = [pt];
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+      if (!isDrawing) return;
+      const pt = getCoords(e);
+      const isGeom = ['db_cylinder', 'cloud', 'load_balancer', 'server_box', 'tree_node'].includes(currentTool);
+
+      if (isGeom && startPt) {
+        redraw(undefined, { x1: startPt.x, y1: startPt.y, x2: pt.x, y2: pt.y });
+      } else {
+        currentPoints.push(pt);
+        redraw(currentPoints);
+      }
+    });
+
+    function stopDrawing(e) {
+      if (!isDrawing) return;
+      isDrawing = false;
+      const endPt = getCoords(e);
+      const isGeom = ['db_cylinder', 'cloud', 'load_balancer', 'server_box', 'tree_node'].includes(currentTool);
+
+      const stroke = {
+        tool: currentTool,
+        color: currentColor,
+        points: isGeom ? [] : [...currentPoints],
+        geometry: isGeom && startPt ? { x1: startPt.x, y1: startPt.y, x2: endPt.x, y2: endPt.y } : undefined,
+      };
+
+      if (currentTool === 'temp_pen') {
+        tempStrokes.push({ stroke, createdAt: Date.now() });
+        showToast('Temporary ink fading in 3s!', 'clock');
+      } else {
+        strokes.push(stroke);
+      }
+
+      currentPoints = [];
+      startPt = null;
+      redraw();
+    }
+
+    canvas.addEventListener('mouseup', stopDrawing);
+    canvas.addEventListener('mouseleave', stopDrawing);
+
+    // Tool Buttons
+    const toolBtns = document.querySelectorAll('.wb-demo-btn[data-tool]');
+    toolBtns.forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        toolBtns.forEach((b) => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentTool = btn.getAttribute('data-tool');
+      });
+    });
+
+    // Color Swatches
+    const colorSwatches = document.querySelectorAll('.color-swatch[data-color]');
+    colorSwatches.forEach((swatch) => {
+      swatch.addEventListener('click', () => {
+        colorSwatches.forEach((s) => s.classList.remove('active'));
+        swatch.classList.add('active');
+        currentColor = swatch.getAttribute('data-color');
+      });
+    });
+
+    // Clear Button
+    document.getElementById('wb-demo-clear')?.addEventListener('click', () => {
+      strokes.length = 0;
+      tempStrokes.length = 0;
+      redraw();
+      showToast('Canvas cleared!', 'trash-2');
+    });
+  }
+
+  // Diary Playground Logic
+  const entryCards = document.querySelectorAll('.diary-entry-card[data-entry]');
+  const diaryTitle = document.getElementById('diary-demo-title');
+  const diaryContent = document.getElementById('diary-demo-content');
+
+  const diaryEntriesData = {
+    '1': {
+      title: 'Two Sum (Optimal O(N) Hash Map)',
+      content: `### 🎯 Daily Reflection & Notes\n\n- **Approach**: Single-pass Hash Map\n- **Time Complexity**: $O(N)$\n- **Space Complexity**: $O(N)$\n\n\`\`\`python\ndef twoSum(nums, target):\n    seen = {}\n    for i, num in enumerate(nums):\n        diff = target - num\n        if diff in seen:\n            return [seen[diff], i]\n        seen[num] = i\n    return []\n\`\`\`\n\n- [x] Solved in 6 minutes\n- [x] Verified zero off-by-one errors`
+    },
+    '2': {
+      title: 'LRU Cache Architecture & Doubly Linked List',
+      content: `### 💡 System Design Note: LRU Cache\n\n- **Data Structure**: Hash Map + Doubly Linked List\n- **Get(key)**: Move node to head -> $O(1)$\n- **Put(key, val)**: Evict from tail if capacity reached -> $O(1)\n\n\`\`\`go\ntype LRUCache struct {\n    capacity int\n    items    map[int]*Node\n    head, tail *Node\n}\n\`\`\`\n\n- [x] High-frequency interview question`
+    }
+  };
+
+  entryCards.forEach((card) => {
+    card.addEventListener('click', () => {
+      entryCards.forEach((c) => c.classList.remove('active'));
+      card.classList.add('active');
+      const id = card.getAttribute('data-entry');
+      if (id && diaryEntriesData[id] && diaryTitle && diaryContent) {
+        diaryTitle.value = diaryEntriesData[id].title;
+        diaryContent.value = diaryEntriesData[id].content;
+      }
+    });
+  });
+
+  // Export Diary Demo Markdown
+  document.getElementById('btn-diary-demo-export')?.addEventListener('click', () => {
+    const title = diaryTitle?.value || 'Synqto-Diary-Entry';
+    const content = diaryContent?.value || '';
+    const md = `# 📓 ${title}\n\n*Saved in Synqto Private Local Storage*\n\n---\n\n${content}`;
+    const blob = new Blob([md], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.download = `${title.toLowerCase().replace(/\s+/g, '-')}.md`;
+    a.href = url;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('Markdown diary exported successfully!', 'download');
+  });
+
+  // Add Diary Demo Entry
+  document.getElementById('btn-diary-demo-add')?.addEventListener('click', () => {
+    if (diaryTitle && diaryContent) {
+      const now = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      diaryTitle.value = `New Entry • ${now}`;
+      diaryContent.value = `### 📝 Problem Solving Notes (${now})\n\n- **Problem**: \n- **Approach**: \n- **Time Complexity**: \n\n- [ ] Write optimal solution\n`;
+      showToast('Created new dated diary entry page!', 'plus');
+    }
+  });
 });
+
 

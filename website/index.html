@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nerd Buddy — P2P Live Problem Solving & Tutor Stage for Chrome</title>
+  <meta name="description" content="Instant P2P collaborative study rooms that form automatically when you open the same problem on LeetCode, Codeforces, NeetCode, and HackerRank. Real-time screen share, laser pointers, and in-page chat.">
+  <meta name="keywords" content="LeetCode collaboration, peer to peer coding, WebRTC study rooms, codeforces collaborative solving, chrome extension developer tools">
+  <meta property="og:title" content="Nerd Buddy — Collaborative Problem Solving, Reimagined">
+  <meta property="og:description" content="Collaborate on LeetCode & Codeforces in real time with auto-forming P2P study rooms, screen sharing, and laser pointers.">
+  <meta property="og:type" content="website">
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Background Decorative Gradients -->
+  <div class="bg-glow bg-glow-1"></div>
+  <div class="bg-glow bg-glow-2"></div>
+
+  <!-- Navigation Bar -->
+  <header class="navbar" id="navbar">
+    <div class="container nav-container">
+      <a href="#" class="nav-brand">
+        <span class="brand-icon">⚡</span>
+        <span class="brand-text">Nerd<span class="brand-gradient">Buddy</span></span>
+        <span class="badge-beta">v0.1.0 Beta</span>
+      </a>
+
+      <nav class="nav-links" id="nav-links">
+        <a href="#features">Features</a>
+        <a href="#how-it-works">How It Works</a>
+        <a href="#sandbox">Interactive Demo</a>
+        <a href="#how-to-test">How to Test</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+
+      <div class="nav-actions">
+        <a href="https://github.com/vksssd/nerd-buddy" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm">
+          <svg class="icon-svg" viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+            <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+          </svg>
+          <span>GitHub</span>
+        </a>
+        <a href="downloads/nerd-buddy-v0.1.0.zip" download class="btn btn-primary btn-sm">
+          <span>Download Beta (.zip)</span>
+          <span class="btn-icon">⬇</span>
+        </a>
+      </div>
+
+      <button class="nav-toggle" id="nav-toggle" aria-label="Toggle menu">
+        <span></span>
+        <span></span>
+        <span></span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Hero Section -->
+  <section class="hero-section">
+    <div class="container hero-container">
+      <div class="hero-badge">
+        <span class="badge-dot"></span>
+        <span>Chrome Extension Manifest V3 • Zero-Server P2P Mesh</span>
+      </div>
+
+      <h1 class="hero-title">
+        Code Together, <span class="text-gradient">In Real Time.</span><br>
+        Zero Setup Required.
+      </h1>
+
+      <p class="hero-subtitle">
+        Instant collaborative study rooms that form automatically the second you open any 
+        <strong>LeetCode</strong>, <strong>Codeforces</strong>, <strong>NeetCode</strong>, or <strong>HackerRank</strong> problem. 
+        Direct WebRTC screen sharing, laser pointers, and in-page chat with <strong>zero central servers between peers</strong>.
+      </p>
+
+      <div class="hero-cta-group">
+        <a href="downloads/nerd-buddy-v0.1.0.zip" download class="btn btn-primary btn-lg">
+          <span class="btn-icon">📦</span>
+          <span>Download Extension (.zip)</span>
+          <span class="btn-subtext">v0.1.0 Beta • 100 KB</span>
+        </a>
+        <a href="#how-to-test" class="btn btn-secondary btn-lg">
+          <span>How to Install & Test</span>
+          <span class="btn-arrow">→</span>
+        </a>
+      </div>
+
+      <!-- Supported Platforms Pill Bar -->
+      <div class="platforms-bar">
+        <span class="platforms-label">Works Out of the Box On:</span>
+        <div class="platforms-list">
+          <span class="platform-chip">⚡ LeetCode</span>
+          <span class="platform-chip">🎯 NeetCode</span>
+          <span class="platform-chip">⚔️ Codeforces</span>
+          <span class="platform-chip">💻 HackerRank</span>
+          <span class="platform-chip">🧑‍🍳 CodeChef</span>
+          <span class="platform-chip">📚 GeeksforGeeks</span>
+          <span class="platform-chip">📺 Tech YouTube</span>
+          <span class="platform-chip">📄 arXiv CS</span>
+        </div>
+      </div>
+
+      <!-- Hero Interactive Mockup Preview -->
+      <div class="hero-preview-wrapper">
+        <div class="browser-mockup">
+          <div class="browser-header">
+            <div class="browser-dots">
+              <span class="dot dot-red"></span>
+              <span class="dot dot-yellow"></span>
+              <span class="dot dot-green"></span>
+            </div>
+            <div class="browser-url-bar">
+              <span class="lock-icon">🔒</span>
+              <span class="url-text">https://leetcode.com/problems/two-sum/</span>
+              <span class="room-pill">🟢 3 Peers Online</span>
+            </div>
+            <div class="browser-actions">
+              <span class="action-btn">⚡ Nerd Buddy</span>
+            </div>
+          </div>
+
+          <div class="browser-content">
+            <!-- Simulated Problem View -->
+            <div class="mock-problem-pane">
+              <div class="mock-title">1. Two Sum <span class="mock-difficulty">Easy</span></div>
+              <p class="mock-desc">Given an array of integers <code>nums</code> and an integer <code>target</code>, return indices of the two numbers such that they add up to <code>target</code>.</p>
+              
+              <div class="mock-code-box">
+                <div class="code-line"><span class="c-kw">def</span> <span class="c-fn">twoSum</span>(nums: List[int], target: int) -> List[int]:</div>
+                <div class="code-line indent"><span class="c-var">seen</span> = {}</div>
+                <div class="code-line indent"><span class="c-kw">for</span> i, num <span class="c-kw">in</span> <span class="c-fn">enumerate</span>(nums):</div>
+                <div class="code-line indent-2"><span class="c-var">comp</span> = target - num</div>
+                <div class="code-line indent-2"><span class="c-kw">if</span> comp <span class="c-kw">in</span> seen:</div>
+                <div class="code-line indent-3"><span class="c-kw">return</span> [seen[comp], i]</div>
+                <div class="code-line indent-2">seen[num] = i</div>
+              </div>
+
+              <!-- Animated Laser Pointer Demonstration -->
+              <div class="laser-pointer-demo" id="laser-demo">
+                <div class="laser-dot"></div>
+                <div class="laser-label">👑 Alex (Tutor)</div>
+                <div class="laser-ripple"></div>
+              </div>
+            </div>
+
+            <!-- Simulated Sidepanel / Popup View -->
+            <div class="mock-sidepanel-pane">
+              <div class="sidepanel-header">
+                <div class="sidepanel-title">
+                  <span>⚡ Room: Two Sum</span>
+                  <span class="stage-live-badge">🔴 LIVE STAGE</span>
+                </div>
+              </div>
+
+              <div class="mock-chat-messages">
+                <div class="mock-msg incoming">
+                  <div class="msg-avatar">👑</div>
+                  <div class="msg-body">
+                    <div class="msg-meta"><span class="msg-nick">Alex (Tutor)</span> <span class="msg-time">14:02</span></div>
+                    <div class="msg-text">Check line 4! Using a hash map gives us <span class="badge-hint">O(N) Time</span> instead of nested loops.</div>
+                  </div>
+                </div>
+
+                <div class="mock-msg outgoing">
+                  <div class="msg-avatar">⚡</div>
+                  <div class="msg-body">
+                    <div class="msg-meta"><span class="msg-nick">You</span> <span class="msg-time">14:03</span> <span class="msg-ack">✓✓</span></div>
+                    <div class="msg-text">Makes total sense! Can we do it in ||O(1) Space|| if sorted?</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="mock-composer">
+                <input type="text" class="mock-input" placeholder="Type a message or ||spoiler||..." readonly value="Nice explanation! Raising my hand ✋">
+                <button class="mock-send-btn">➤</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Core Features Section -->
+  <section class="features-section" id="features">
+    <div class="container">
+      <div class="section-header">
+        <h2 class="section-title">Built for Serious Problem Solvers</h2>
+        <p class="section-subtitle">Everything you need to study, teach, and prepare for coding interviews collaboratively.</p>
+      </div>
+
+      <div class="features-grid">
+        <!-- Feature 1 -->
+        <div class="feature-card">
+          <div class="feature-icon-wrapper">
+            <span class="feature-icon">⚡</span>
+          </div>
+          <h3 class="feature-title">Auto-Forming P2P Rooms</h3>
+          <p class="feature-desc">
+            Zero invite codes or room URLs. Rooms are deterministically hashed from the canonical problem URL. Open the problem on LeetCode, and you're instantly in the room.
+          </p>
+          <div class="feature-tag">Deterministic URL Hashing</div>
+        </div>
+
+        <!-- Feature 2 -->
+        <div class="feature-card">
+          <div class="feature-icon-wrapper">
+            <span class="feature-icon">📺</span>
+          </div>
+          <h3 class="feature-title">Tutor Stage & Screen Broadcast</h3>
+          <p class="feature-desc">
+            Host live problem walkthroughs with 1-click screen or camera streaming. Audience members can raise their hands to be promoted to speak on stage.
+          </p>
+          <div class="feature-tag">WebRTC Media Mesh</div>
+        </div>
+
+        <!-- Feature 3 -->
+        <div class="feature-card">
+          <div class="feature-icon-wrapper">
+            <span class="feature-icon">🎯</span>
+          </div>
+          <h3 class="feature-title">Live Laser Pointer & Click Ripples</h3>
+          <p class="feature-desc">
+            Point to specific code lines and test cases across everyone's screens in real-time with responsive coordinate mapping and animated ripple clicks.
+          </p>
+          <div class="feature-tag">25fps Cursor Broadcast</div>
+        </div>
+
+        <!-- Feature 4 -->
+        <div class="feature-card">
+          <div class="feature-icon-wrapper">
+            <span class="feature-icon">💬</span>
+          </div>
+          <h3 class="feature-title">In-Page Floating Chat & Sidepanel</h3>
+          <p class="feature-desc">
+            Full 1:1 chat parity whether using the Chrome Sidepanel or lightweight in-page popup. Includes click-to-reveal spoilers (<code>||hint||</code>) and 1-click code copying.
+          </p>
+          <div class="feature-tag">3-Level Delivery ACKs</div>
+        </div>
+
+        <!-- Feature 5 -->
+        <div class="feature-card">
+          <div class="feature-icon-wrapper">
+            <span class="feature-icon">🛡️</span>
+          </div>
+          <h3 class="feature-title">Dual-Leader Backbone Clustering</h3>
+          <p class="feature-desc">
+            High-concurrency Go signaling engine supporting 17,000+ messages/second with automatic orphan peer redistribution and dual-leader failover redundancy.
+          </p>
+          <div class="feature-tag">Sub-Millisecond Latency</div>
+        </div>
+
+        <!-- Feature 6 -->
+        <div class="feature-card">
+          <div class="feature-icon-wrapper">
+            <span class="feature-icon">🔥</span>
+          </div>
+          <h3 class="feature-title">Streaks, Heatmaps & Badges</h3>
+          <p class="feature-desc">
+            Level up your problem solving consistency with daily streak heatmaps, community participation badges, and live tutor achievements.
+          </p>
+          <div class="feature-tag">Gamified Learning</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Interactive Sandbox Simulator -->
+  <section class="sandbox-section" id="sandbox">
+    <div class="container">
+      <div class="section-header">
+        <h2 class="section-title">Interactive Problem Room Simulator</h2>
+        <p class="section-subtitle">Test how Nerd Buddy hashes problem URLs into deterministic P2P rooms in real time.</p>
+      </div>
+
+      <div class="sandbox-card">
+        <div class="sandbox-header">
+          <span class="sandbox-label">Try Entering Any Problem URL:</span>
+          <div class="preset-buttons">
+            <button class="preset-btn" data-url="https://leetcode.com/problems/two-sum/">LeetCode: Two Sum</button>
+            <button class="preset-btn" data-url="https://leetcode.com/problems/trapping-rain-water/">LeetCode: Trapping Rain Water</button>
+            <button class="preset-btn" data-url="https://codeforces.com/problemset/problem/4/A">Codeforces: 4A Watermelon</button>
+          </div>
+        </div>
+
+        <div class="sandbox-input-row">
+          <input type="text" id="sandbox-url-input" class="sandbox-input" value="https://leetcode.com/problems/two-sum/">
+          <button id="sandbox-hash-btn" class="btn btn-primary">Compute Room Hash</button>
+        </div>
+
+        <div class="sandbox-results" id="sandbox-results">
+          <div class="result-box">
+            <span class="result-label">Detected Platform:</span>
+            <span class="result-value" id="res-platform">LeetCode</span>
+          </div>
+          <div class="result-box">
+            <span class="result-label">Problem Slug:</span>
+            <span class="result-value" id="res-slug">two-sum</span>
+          </div>
+          <div class="result-box result-highlight">
+            <span class="result-label">Deterministic Room ID:</span>
+            <span class="result-value code-font" id="res-room-id">room:two-sum-c99292e0</span>
+          </div>
+        </div>
+
+        <!-- Interactive Spoiler Demo Inside Sandbox -->
+        <div class="sandbox-spoiler-demo">
+          <span class="demo-title">Interactive Hint Spoiler:</span>
+          <p class="demo-desc">Click on the blurred pill to reveal the hint:</p>
+          <div class="spoiler-pill" id="demo-spoiler" title="Click to reveal">
+            <span class="spoiler-text">💡 Use a Hash Map to achieve O(N) time complexity!</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- How to Install & Test Beta Section -->
+  <section class="install-section" id="how-to-test">
+    <div class="container">
+      <div class="section-header">
+        <h2 class="section-title">How to Install & Test the Beta</h2>
+        <p class="section-subtitle">Get started in under 60 seconds with Chrome, Brave, Edge, or any Chromium browser.</p>
+      </div>
+
+      <div class="steps-grid">
+        <!-- Step 1 -->
+        <div class="step-card">
+          <div class="step-number">1</div>
+          <h3 class="step-title">Download & Unzip</h3>
+          <p class="step-desc">
+            Download the pre-built beta bundle and extract the <code>.zip</code> file to a folder on your computer.
+          </p>
+          <a href="downloads/nerd-buddy-v0.1.0.zip" download class="btn btn-secondary btn-sm" style="margin-top: 12px;">
+            <span>Download nerd-buddy-v0.1.0.zip</span>
+          </a>
+        </div>
+
+        <!-- Step 2 -->
+        <div class="step-card">
+          <div class="step-number">2</div>
+          <h3 class="step-title">Open Extensions Tab</h3>
+          <p class="step-desc">
+            Open Chrome and navigate to the Extensions page. Toggle <strong>"Developer mode"</strong> in the top-right corner.
+          </p>
+          <div class="code-snippet">
+            <span>chrome://extensions</span>
+            <button class="copy-btn" data-copy="chrome://extensions">Copy</button>
+          </div>
+        </div>
+
+        <!-- Step 3 -->
+        <div class="step-card">
+          <div class="step-number">3</div>
+          <h3 class="step-title">Load Unpacked</h3>
+          <p class="step-desc">
+            Click the <strong>"Load unpacked"</strong> button in the top left and select the unzipped <code>dist</code> directory.
+          </p>
+          <div class="badge-success">✓ Nerd Buddy Installed</div>
+        </div>
+
+        <!-- Step 4 -->
+        <div class="step-card">
+          <div class="step-number">4</div>
+          <h3 class="step-title">Test with a Friend</h3>
+          <p class="step-desc">
+            Open <a href="https://leetcode.com/problems/two-sum/" target="_blank" style="color: var(--accent-primary); text-decoration: underline;">LeetCode Two Sum</a> in two separate browser profiles or tabs.
+          </p>
+          <p class="step-sub">
+            The floating button will appear on the bottom-right. Open the side panel or popup and watch real-time P2P connection form instantly!
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FAQ Accordion Section -->
+  <section class="faq-section" id="faq">
+    <div class="container">
+      <div class="section-header">
+        <h2 class="section-title">Frequently Asked Questions</h2>
+        <p class="section-subtitle">Everything you need to know about the P2P architecture, privacy, and compatibility.</p>
+      </div>
+
+      <div class="faq-accordion">
+        <!-- Item 1 -->
+        <div class="faq-item">
+          <button class="faq-question">
+            <span>Is Nerd Buddy completely free and open source?</span>
+            <span class="faq-icon">+</span>
+          </button>
+          <div class="faq-answer">
+            <p>Yes! Nerd Buddy is 100% free, MIT licensed, and fully open source. You can inspect the entire codebase, self-host the Go signaling server, or contribute on GitHub.</p>
+          </div>
+        </div>
+
+        <!-- Item 2 -->
+        <div class="faq-item">
+          <button class="faq-question">
+            <span>Do my screen shares, audio, or chat messages pass through any central servers?</span>
+            <span class="faq-icon">+</span>
+          </button>
+          <div class="faq-answer">
+            <p>No. Nerd Buddy uses <strong>direct WebSockets only for SDP signaling</strong>. All screen streams, audio calls, mouse coordinates, and chat messages are transmitted <strong>directly between browsers using encrypted WebRTC DataChannels and MediaStreams</strong>.</p>
+          </div>
+        </div>
+
+        <!-- Item 3 -->
+        <div class="faq-item">
+          <button class="faq-question">
+            <span>Which browsers are supported?</span>
+            <span class="faq-icon">+</span>
+          </button>
+          <div class="faq-answer">
+            <p>Nerd Buddy supports Google Chrome, Brave Browser, Microsoft Edge, Opera, Arc, and any Chromium-based browser supporting Chrome Extension Manifest V3 and the Side Panel API.</p>
+          </div>
+        </div>
+
+        <!-- Item 4 -->
+        <div class="faq-item">
+          <button class="faq-question">
+            <span>How does the auto-forming room mechanism work?</span>
+            <span class="faq-icon">+</span>
+          </button>
+          <div class="faq-answer">
+            <p>When you visit a supported coding platform, the content script inspects the canonical URL (e.g. <code>https://leetcode.com/problems/two-sum/</code>), normalizes the slug, and hashes it into a deterministic room ID (e.g. <code>room:two-sum-c99292e0</code>). All peers on that same problem join the exact same cluster mesh automatically.</p>
+          </div>
+        </div>
+
+        <!-- Item 5 -->
+        <div class="faq-item">
+          <button class="faq-question">
+            <span>Can I customize the floating button or open the side panel directly?</span>
+            <span class="faq-icon">+</span>
+          </button>
+          <div class="faq-answer">
+            <p>Yes. Under the <strong>Profile & Settings</strong> tab, you can customize the floating button's position, opacity, unread badges, and choose whether clicking it opens the in-page chat popup or expands the Chrome Side Panel directly.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA Banner Section -->
+  <section class="cta-section">
+    <div class="container cta-container">
+      <h2 class="cta-title">Ready to Study Smarter, Together?</h2>
+      <p class="cta-subtitle">Download the beta extension and start collaborating on your favorite coding problems today.</p>
+      <div class="cta-buttons">
+        <a href="downloads/nerd-buddy-v0.1.0.zip" download class="btn btn-primary btn-lg">
+          <span>Download Nerd Buddy (.zip)</span>
+          <span class="btn-icon">⬇</span>
+        </a>
+        <a href="https://github.com/vksssd/nerd-buddy" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-lg">
+          <span>View Source on GitHub</span>
+          <span class="btn-arrow">→</span>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="container footer-container">
+      <div class="footer-brand">
+        <span class="brand-icon">⚡</span>
+        <span class="brand-text">Nerd<span class="brand-gradient">Buddy</span></span>
+        <p class="footer-tagline">Real-time P2P collaborative problem solving for the modern engineer.</p>
+      </div>
+
+      <div class="footer-links">
+        <div class="footer-col">
+          <span class="col-title">Project</span>
+          <a href="#features">Features</a>
+          <a href="#sandbox">Room Simulator</a>
+          <a href="#how-to-test">How to Test</a>
+          <a href="downloads/nerd-buddy-v0.1.0.zip" download>Download ZIP</a>
+        </div>
+        <div class="footer-col">
+          <span class="col-title">Open Source</span>
+          <a href="https://github.com/vksssd/nerd-buddy" target="_blank" rel="noopener noreferrer">GitHub Repository</a>
+          <a href="https://github.com/vksssd/nerd-buddy/blob/main/README.md" target="_blank" rel="noopener noreferrer">Documentation</a>
+          <a href="https://github.com/vksssd/nerd-buddy/releases" target="_blank" rel="noopener noreferrer">Releases</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer-bottom">
+      <div class="container footer-bottom-content">
+        <p>© 2026 Nerd Buddy. Released under the MIT License.</p>
+        <p>Crafted for competitive programmers, students & interview prep cohorts.</p>
+      </div>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

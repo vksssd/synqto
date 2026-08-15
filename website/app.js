@@ -1,4 +1,4 @@
-// ─── Nerd Buddy Landing Page Client-Side Interactive Logic (Lucide Enhanced) ───
+// ─── Nerd Buddy Landing Page Client-Side Interactive Logic (Dual-Peer Mesh & Checklist) ───
 
 document.addEventListener('DOMContentLoaded', () => {
   // 0. Initialize Lucide Icons
@@ -63,7 +63,111 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // 3. Interactive Sandbox Simulator
+  // 3. Interactive Dual-Peer Live Sandbox Laser & Chat Mirroring
+  const codeEditor1 = document.getElementById('code-interactive-1');
+  const localLaser = document.getElementById('alice-local-laser');
+  const remoteLaser = document.getElementById('bob-remote-laser');
+
+  if (codeEditor1 && localLaser && remoteLaser) {
+    codeEditor1.addEventListener('mousemove', (e) => {
+      const rect = codeEditor1.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
+      const xPct = Math.max(0, Math.min(100, (x / rect.width) * 100));
+      const yPct = Math.max(0, Math.min(100, (y / rect.height) * 100));
+
+      localLaser.style.opacity = '1';
+      localLaser.style.left = `${x}px`;
+      localLaser.style.top = `${y}px`;
+
+      // Mirror directly to Bob's window in real-time
+      remoteLaser.style.left = `${xPct}%`;
+      remoteLaser.style.top = `${yPct}%`;
+    });
+
+    codeEditor1.addEventListener('mouseleave', () => {
+      localLaser.style.opacity = '0';
+    });
+  }
+
+  // Peer 1 Chat Dispatch
+  const input1 = document.getElementById('input-peer-1');
+  const send1 = document.getElementById('send-peer-1');
+  const stream1 = document.getElementById('chat-stream-1');
+  const stream2 = document.getElementById('chat-stream-2');
+
+  function sendFromPeer1() {
+    const text = input1?.value.trim();
+    if (!text) return;
+
+    // Append to Peer 1 as Sent
+    const bubbleSent = document.createElement('div');
+    bubbleSent.className = 'chat-bubble sent';
+    bubbleSent.innerHTML = `<span class="bubble-nick">You (Alice):</span> ${text} <span class="ack-mark">✓✓</span>`;
+    stream1?.appendChild(bubbleSent);
+    stream1.scrollTop = stream1.scrollHeight;
+    input1.value = '';
+
+    // Propagate to Peer 2 as Received after small simulated P2P latency
+    setTimeout(() => {
+      const bubbleRecv = document.createElement('div');
+      bubbleRecv.className = 'chat-bubble received';
+      bubbleRecv.innerHTML = `<span class="bubble-nick">Alice (Tutor):</span> ${text}`;
+      stream2?.appendChild(bubbleRecv);
+      stream2.scrollTop = stream2.scrollHeight;
+      showToast('P2P Message received by Bob via WebRTC DataChannel!', 'message-square');
+    }, 60);
+  }
+
+  send1?.addEventListener('click', sendFromPeer1);
+  input1?.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') sendFromPeer1();
+  });
+
+  // Peer 2 Chat Dispatch
+  const input2 = document.getElementById('input-peer-2');
+  const send2 = document.getElementById('send-peer-2');
+
+  function sendFromPeer2() {
+    const text = input2?.value.trim();
+    if (!text) return;
+
+    // Append to Peer 2 as Sent
+    const bubbleSent = document.createElement('div');
+    bubbleSent.className = 'chat-bubble sent';
+    bubbleSent.innerHTML = `<span class="bubble-nick">You (Bob):</span> ${text} <span class="ack-mark">✓✓</span>`;
+    stream2?.appendChild(bubbleSent);
+    stream2.scrollTop = stream2.scrollHeight;
+    input2.value = '';
+
+    // Propagate to Peer 1 as Received
+    setTimeout(() => {
+      const bubbleRecv = document.createElement('div');
+      bubbleRecv.className = 'chat-bubble received';
+      bubbleRecv.innerHTML = `<span class="bubble-nick">Bob:</span> ${text}`;
+      stream1?.appendChild(bubbleRecv);
+      stream1.scrollTop = stream1.scrollHeight;
+      showToast('P2P Message received by Alice!', 'message-square');
+    }, 60);
+  }
+
+  send2?.addEventListener('click', sendFromPeer2);
+  input2?.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') sendFromPeer2();
+  });
+
+  // Stage Trigger
+  const btnStage = document.getElementById('btn-trigger-stage');
+  const bobPill = document.getElementById('bob-stage-pill');
+  if (btnStage && bobPill) {
+    btnStage.addEventListener('click', () => {
+      bobPill.style.animation = 'pulseWire 1s 3';
+      showToast('Alice broadcasted Live Screen Share stage to peers!', 'tv');
+    });
+  }
+
+  // 4. Interactive Sandbox Simulator
   const urlInput = document.getElementById('sandbox-url-input');
   const hashBtn = document.getElementById('sandbox-hash-btn');
   const resPlatform = document.getElementById('res-platform');
@@ -143,12 +247,11 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // Initial calculation
   if (urlInput) {
     simulateRoomHash(urlInput.value.trim());
   }
 
-  // 4. Interactive Spoiler Demo
+  // 5. Interactive Spoiler Demo
   const demoSpoiler = document.getElementById('demo-spoiler');
   if (demoSpoiler) {
     demoSpoiler.addEventListener('click', () => {
@@ -156,7 +259,41 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 5. 1-Click Code Copy Snippets
+  // 6. Interactive Setup Checklist Progress
+  const checkboxes = document.querySelectorAll('.step-checkbox');
+  const progressFill = document.getElementById('setup-progress-fill');
+  const progressText = document.getElementById('setup-progress-text');
+
+  function updateChecklistProgress() {
+    let checked = 0;
+    checkboxes.forEach((cb) => {
+      const card = cb.closest('.step-card');
+      if (cb.checked) {
+        checked++;
+        card?.classList.add('completed');
+      } else {
+        card?.classList.remove('completed');
+      }
+    });
+
+    const pct = (checked / checkboxes.length) * 100;
+    if (progressFill) progressFill.style.width = `${pct}%`;
+    if (progressText) {
+      if (checked === checkboxes.length) {
+        progressText.innerHTML = `🎉 <strong>100% Completed! You're ready to collaborate!</strong>`;
+        progressText.style.color = '#34d399';
+      } else {
+        progressText.innerText = `${checked} / ${checkboxes.length} Steps Completed`;
+        progressText.style.color = '';
+      }
+    }
+  }
+
+  checkboxes.forEach((cb) => {
+    cb.addEventListener('change', updateChecklistProgress);
+  });
+
+  // 7. 1-Click Code Copy Snippets
   const copyBtns = document.querySelectorAll('.copy-btn');
   copyBtns.forEach((btn) => {
     btn.addEventListener('click', (e) => {
@@ -164,19 +301,33 @@ document.addEventListener('DOMContentLoaded', () => {
       if (textToCopy) {
         navigator.clipboard.writeText(textToCopy);
         showToast('Copied to clipboard!', 'check');
+
+        // Automatically mark step 2 checkbox
+        const chk2 = document.getElementById('chk-step-2');
+        if (chk2 && !chk2.checked) {
+          chk2.checked = true;
+          updateChecklistProgress();
+        }
       }
     });
   });
 
-  // 6. Download Trigger Toast
+  // 8. Download Trigger
   const downloadTriggers = document.querySelectorAll('.btn-download-trigger');
   downloadTriggers.forEach((btn) => {
     btn.addEventListener('click', () => {
       showToast('Downloading nerd-buddy-v0.1.0.zip...', 'download');
+
+      // Automatically mark step 1 checkbox
+      const chk1 = document.getElementById('chk-step-1');
+      if (chk1 && !chk1.checked) {
+        chk1.checked = true;
+        updateChecklistProgress();
+      }
     });
   });
 
-  // 7. FAQ Accordion Toggle
+  // 9. FAQ Accordion Toggle
   const faqItems = document.querySelectorAll('.faq-item');
   faqItems.forEach((item) => {
     const questionBtn = item.querySelector('.faq-question');

@@ -20,10 +20,11 @@ export class VoiceService {
 
   private isInVoice = false;
   private isMuted = false;
+  private permissionNeeded = false;
   private speakingPeers: Set<string> = new Set();
   private participants: Map<string, VoiceParticipant> = new Map();
 
-  private listeners: Set<(isInVoice: boolean, isMuted: boolean) => void> = new Set();
+  private listeners: Set<(isInVoice: boolean, isMuted: boolean, permissionNeeded: boolean) => void> = new Set();
   private speakingListeners: Set<(speaking: Set<string>) => void> = new Set();
 
   private constructor() {
@@ -100,15 +101,24 @@ export class VoiceService {
     if (this.isInVoice) return true;
 
     try {
-      this.localStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-        video: false,
-      });
+      try {
+        this.localStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+          video: false,
+        });
+      } catch (constraintErr) {
+        // Fallback to basic audio constraints if advanced DSP filters are rejected by OS/device
+        this.localStream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+          video: false,
+        });
+      }
 
+      this.permissionNeeded = false;
       this.isInVoice = true;
       this.isMuted = false;
 
@@ -123,9 +133,28 @@ export class VoiceService {
 
       this.emitState();
       return true;
-    } catch (err) {
-      console.error('[VoiceService] Failed to acquire microphone stream:', err);
+    } catch (err: any) {
+      console.warn(
+        '[VoiceService] Microphone access requires permission in Chrome extension:',
+        err?.name || err?.message || err
+      );
+      this.permissionNeeded = true;
+      this.emitState();
       return false;
+    }
+  }
+
+  /**
+   * Opens a dedicated permission prompt tab to let user grant microphone access to the extension origin.
+   */
+  public requestMicrophonePermission(): void {
+    if (typeof chrome !== 'undefined' && chrome.tabs) {
+      chrome.tabs.create({
+        url: chrome.runtime.getURL('sidepanel.html?requestMic=1'),
+        active: true,
+      });
+    } else {
+      window.open('sidepanel.html?requestMic=1', '_blank');
     }
   }
 
@@ -236,13 +265,19 @@ export class VoiceService {
     return this.isMuted;
   }
 
+  public getPermissionNeeded(): boolean {
+    return this.permissionNeeded;
+  }
+
   public getSpeakingPeers(): Set<string> {
     return this.speakingPeers;
   }
 
-  public onStateChange(listener: (isInVoice: boolean, isMuted: boolean) => void): () => void {
+  public onStateChange(
+    listener: (isInVoice: boolean, isMuted: boolean, permissionNeeded: boolean) => void
+  ): () => void {
     this.listeners.add(listener);
-    listener(this.isInVoice, this.isMuted);
+    listener(this.isInVoice, this.isMuted, this.permissionNeeded);
     return () => {
       this.listeners.delete(listener);
     };
@@ -257,7 +292,7 @@ export class VoiceService {
   }
 
   private emitState() {
-    this.listeners.forEach((fn) => fn(this.isInVoice, this.isMuted));
+    this.listeners.forEach((fn) => fn(this.isInVoice, this.isMuted, this.permissionNeeded));
   }
 
   private emitSpeaking() {

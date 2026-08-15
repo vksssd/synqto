@@ -19,12 +19,14 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({
   const voiceService = VoiceService.getInstance();
   const [isInVoice, setIsInVoice] = useState(voiceService.getIsInVoice());
   const [isMuted, setIsMuted] = useState(voiceService.getIsMuted());
+  const [permissionNeeded, setPermissionNeeded] = useState(voiceService.getPermissionNeeded());
   const [speakingPeers, setSpeakingPeers] = useState<Set<string>>(voiceService.getSpeakingPeers());
 
   useEffect(() => {
-    const unsubState = voiceService.onStateChange((inVoice, muted) => {
+    const unsubState = voiceService.onStateChange((inVoice, muted, permNeeded) => {
       setIsInVoice(inVoice);
       setIsMuted(muted);
+      setPermissionNeeded(permNeeded);
     });
 
     const unsubSpeaking = voiceService.onSpeakingChange((speaking) => {
@@ -41,8 +43,15 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({
     if (isInVoice) {
       voiceService.leaveVoice();
     } else {
-      await voiceService.joinVoice();
+      const ok = await voiceService.joinVoice();
+      if (!ok) {
+        setPermissionNeeded(true);
+      }
     }
+  };
+
+  const handleGrantMicPermission = () => {
+    voiceService.requestMicrophonePermission();
   };
 
   const handleToggleMute = () => {
@@ -136,6 +145,35 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({
           )}
         </div>
       </div>
+
+      {/* Permission Needed Helper Banner */}
+      {permissionNeeded && !isInVoice && (
+        <div
+          style={{
+            marginTop: '8px',
+            padding: '6px 10px',
+            borderRadius: '6px',
+            background: 'rgba(245, 158, 11, 0.12)',
+            border: '1px solid rgba(245, 158, 11, 0.35)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '8px',
+          }}
+        >
+          <span style={{ fontSize: '10.5px', color: '#fcd34d' }}>
+            ⚠️ Chrome mic permission needed
+          </span>
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            style={{ fontSize: '10px', padding: '2px 7px' }}
+            onClick={handleGrantMicPermission}
+          >
+            Allow Mic 🎙️
+          </button>
+        </div>
+      )}
     </div>
   );
 };

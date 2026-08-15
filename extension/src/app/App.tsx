@@ -25,7 +25,14 @@ import { TimerService } from '@/features/timer/timer.service';
 import { TimerState, PomodoroConfig } from '@/features/timer/timer.types';
 import { Sparkles, RefreshCw, Radio, Palette, Crown, AlertTriangle, CheckCircle, Clock } from 'lucide-react';
 
+import { MicPermissionTab } from '@/features/voice/MicPermissionTab';
+
 export const App: React.FC = () => {
+  const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+  if (urlParams?.get('requestMic') === '1' || urlParams?.get('micPermission') === '1') {
+    return <MicPermissionTab />;
+  }
+
   const themeService = ThemeService.getInstance();
   const identityService = IdentityService.getInstance();
   const roomService = RoomService.getInstance();
@@ -37,7 +44,6 @@ export const App: React.FC = () => {
   const signalingService = SignalingService.getInstance();
   const timerService = TimerService.getInstance();
 
-  const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
   const initialTab = (urlParams?.get('view') as NavTabType) || 'chat';
   const [currentTab, setCurrentTab] = useState<NavTabType>(initialTab);
   const [isConnected, setIsConnected] = useState(signalingService.getIsConnected());

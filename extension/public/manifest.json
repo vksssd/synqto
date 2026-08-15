@@ -1,8 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "Nerd Buddy",
+  "name": "Synqme - Live P2P Problem Solving & Tutor Stage",
+  "short_name": "Synqme",
   "version": "0.1.0",
-  "description": "P2P collaborative study rooms that form automatically when you're solving the same problem",
+  "description": "Instant P2P study rooms that form automatically when solving LeetCode & Codeforces problems. Screen share, laser pointers & in-page chat.",
   "permissions": [
     "storage",
     "sidePanel",
@@ -31,7 +32,7 @@
     "default_path": "sidepanel.html"
   },
   "action": {
-    "default_title": "Nerd Buddy"
+    "default_title": "Synqme - Live P2P Problem Solving"
   },
   "content_scripts": [
     {

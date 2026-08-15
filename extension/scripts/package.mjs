@@ -29,7 +29,7 @@ if (fs.existsSync(manifestPath)) {
   version = manifest.version || '0.1.0';
 }
 
-const zipFileName = `nerd-buddy-v${version}.zip`;
+const zipFileName = `synqme-v${version}.zip`;
 const zipFilePath = path.resolve(outputDir, zipFileName);
 
 if (fs.existsSync(zipFilePath)) {
@@ -39,6 +39,14 @@ if (fs.existsSync(zipFilePath)) {
 // Compress dist contents directly into root of ZIP
 const psCmd = `powershell -Command "Compress-Archive -Path '${distDir}\\*' -DestinationPath '${zipFilePath}' -Force"`;
 execSync(psCmd, { stdio: 'inherit' });
+
+// Also copy to website/downloads
+const websiteDownloads = path.resolve(extensionRoot, '..', 'website', 'downloads');
+if (fs.existsSync(websiteDownloads)) {
+  const targetZip = path.resolve(websiteDownloads, zipFileName);
+  fs.copyFileSync(zipFilePath, targetZip);
+  console.log(`📋 Copied to website/downloads/${zipFileName}`);
+}
 
 const stats = fs.statSync(zipFilePath);
 const sizeKB = (stats.size / 1024).toFixed(2);

@@ -2,4 +2,4 @@ User-agent: *
 Allow: /
 Disallow: /downloads/*.zip$
 
-Sitemap: https://nerdbuddy.dev/sitemap.xml
+Sitemap: https://synqme.dev/sitemap.xml

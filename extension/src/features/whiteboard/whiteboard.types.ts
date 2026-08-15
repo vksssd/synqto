@@ -1,4 +1,4 @@
-// ─── Collaborative Whiteboard Types, Tools & Background Definitions ───
+// ─── Collaborative Whiteboard Types, Tools, Backgrounds & Size Modes ───
 
 export type WhiteboardToolType =
   | 'pen'           // Standard fine pen
@@ -23,6 +23,13 @@ export type WhiteboardBackgroundType =
   | 'matrix'        // 2D DP array / matrix cell table
   | 'white_blank'   // Crisp classic white board
   | 'white_ruled';  // Light ruled notebook paper
+
+export type WhiteboardSizeMode = 'full' | 'half' | 'popup' | 'custom';
+
+export interface WhiteboardDimensions {
+  width: number;
+  height: number;
+}
 
 export interface Point {
   x: number;
@@ -64,4 +71,5 @@ export interface WhiteboardState {
   undoStack: WhiteboardStroke[];
   redoStack: WhiteboardStroke[];
   background: WhiteboardBackgroundType;
+  sizeMode: WhiteboardSizeMode;
 }

@@ -1,4 +1,4 @@
-// ─── Collaborative Whiteboard Canvas: Multi-Tools & Rich Backgrounds ───
+// ─── Collaborative Whiteboard Canvas: Multi-Tools, Rich Backgrounds & Size Modes ───
 
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import {
@@ -18,11 +18,15 @@ import {
   Lightbulb,
   Type,
   PenTool,
+  Maximize2,
+  Minimize2,
+  ExternalLink,
 } from 'lucide-react';
 import { WhiteboardService } from './whiteboard.service';
 import {
   WhiteboardToolType,
   WhiteboardBackgroundType,
+  WhiteboardSizeMode,
   WhiteboardStroke,
   Point,
   LaserPointerPosition,
@@ -54,6 +58,8 @@ export const WhiteboardCanvas: React.FC = () => {
   const [activeColor, setActiveColor] = useState<string>('#6366f1');
   const [activeWidth, setActiveWidth] = useState<number>(4);
   const [backgroundType, setBackgroundType] = useState<WhiteboardBackgroundType>(whiteboardService.getBackground());
+  const [sizeMode, setSizeMode] = useState<WhiteboardSizeMode>('full');
+  const [customHeight, setCustomHeight] = useState<number>(420);
 
   const [isDrawing, setIsDrawing] = useState(false);
   const [currentPoints, setCurrentPoints] = useState<Point[]>([]);
@@ -266,7 +272,6 @@ export const WhiteboardCanvas: React.FC = () => {
         ctx.fillText(String(rowIdx++), 16, y);
       }
     }
-    // 'blank' and 'white_blank' need no additional lines
 
     ctx.restore();
   }, []);
@@ -405,13 +410,11 @@ export const WhiteboardCanvas: React.FC = () => {
         ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
         ctx.fillRect(0, 0, w, h);
 
-        // Cut out circular spotlight beam
         ctx.globalCompositeOperation = 'destination-out';
         ctx.beginPath();
         ctx.arc(torchPos.x, torchPos.y, 65, 0, Math.PI * 2);
         ctx.fill();
 
-        // Spotlight glowing perimeter ring
         ctx.globalCompositeOperation = 'source-over';
         ctx.strokeStyle = 'rgba(253, 224, 71, 0.8)';
         ctx.lineWidth = 3;
@@ -449,7 +452,7 @@ export const WhiteboardCanvas: React.FC = () => {
       const rect = container.getBoundingClientRect();
       const dpr = window.devicePixelRatio || 1;
       canvas.width = rect.width * dpr;
-      canvas.height = rect.height * dpr;
+      canvas.height = (sizeMode === 'half' ? 300 : sizeMode === 'custom' ? customHeight : rect.height) * dpr;
 
       const ctx = canvas.getContext('2d');
       if (ctx) ctx.scale(dpr, dpr);
@@ -460,7 +463,7 @@ export const WhiteboardCanvas: React.FC = () => {
     handleResize();
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, [redrawCanvas, whiteboardService]);
+  }, [redrawCanvas, whiteboardService, sizeMode, customHeight]);
 
   // Subscribe to stroke changes
   useEffect(() => {
@@ -618,6 +621,20 @@ export const WhiteboardCanvas: React.FC = () => {
     }
   };
 
+  // Open Standalone Popup Window
+  const handleOpenPopupStandaloneWindow = () => {
+    if (typeof chrome !== 'undefined' && chrome.windows) {
+      chrome.windows.create({
+        url: chrome.runtime.getURL('sidepanel.html?view=whiteboard'),
+        type: 'popup',
+        width: 960,
+        height: 720,
+      });
+    } else {
+      window.open(window.location.href, '_blank', 'width=960,height=720');
+    }
+  };
+
   // Export PNG
   const handleExportPNG = () => {
     const canvas = canvasRef.current;
@@ -635,15 +652,18 @@ export const WhiteboardCanvas: React.FC = () => {
       style={{
         display: 'flex',
         flexDirection: 'column',
-        height: '100%',
+        height: sizeMode === 'full' ? '100%' : sizeMode === 'half' ? '300px' : `${customHeight}px`,
+        minHeight: '220px',
+        maxHeight: sizeMode === 'full' ? '100%' : undefined,
         background: backgroundType.startsWith('white_') ? '#f8fafc' : '#090d16',
         borderRadius: 'var(--radius-md)',
         border: '1px solid var(--border-subtle)',
         overflow: 'hidden',
         position: 'relative',
+        transition: 'height 0.2s ease',
       }}
     >
-      {/* 1. Main Top Toolbar: Drawing Tools */}
+      {/* 1. Main Top Toolbar: Drawing Tools & Size Chooser */}
       <div
         style={{
           display: 'flex',
@@ -877,8 +897,86 @@ export const WhiteboardCanvas: React.FC = () => {
           </button>
         </div>
 
-        {/* Action Controls: Undo, Redo, Clear, Save */}
+        {/* Action Controls: Size Mode Switcher, Undo, Redo, Clear, Save */}
         <div style={{ display: 'flex', gap: '3px', alignItems: 'center' }}>
+          {/* Size Choice Pills */}
+          <div style={{ display: 'flex', gap: '2px', alignItems: 'center', background: 'rgba(0,0,0,0.3)', padding: '2px 4px', borderRadius: '4px' }}>
+            <button
+              type="button"
+              onClick={() => setSizeMode('full')}
+              title="Full Screen Workspace"
+              style={{
+                fontSize: '9px',
+                fontWeight: 600,
+                padding: '2px 5px',
+                borderRadius: '3px',
+                background: sizeMode === 'full' ? 'var(--primary)' : 'transparent',
+                color: sizeMode === 'full' ? '#fff' : 'var(--text-muted)',
+                border: 'none',
+                cursor: 'pointer',
+              }}
+            >
+              🖥️ Full
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSizeMode('half')}
+              title="Half Screen View"
+              style={{
+                fontSize: '9px',
+                fontWeight: 600,
+                padding: '2px 5px',
+                borderRadius: '3px',
+                background: sizeMode === 'half' ? 'var(--primary)' : 'transparent',
+                color: sizeMode === 'half' ? '#fff' : 'var(--text-muted)',
+                border: 'none',
+                cursor: 'pointer',
+              }}
+            >
+              🌗 Half
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSizeMode('custom')}
+              title="Custom Resizable Height"
+              style={{
+                fontSize: '9px',
+                fontWeight: 600,
+                padding: '2px 5px',
+                borderRadius: '3px',
+                background: sizeMode === 'custom' ? 'var(--primary)' : 'transparent',
+                color: sizeMode === 'custom' ? '#fff' : 'var(--text-muted)',
+                border: 'none',
+                cursor: 'pointer',
+              }}
+            >
+              📐 Custom
+            </button>
+
+            <button
+              type="button"
+              onClick={handleOpenPopupStandaloneWindow}
+              title="Launch Standalone Whiteboard Window"
+              style={{
+                fontSize: '9px',
+                fontWeight: 600,
+                padding: '2px 5px',
+                borderRadius: '3px',
+                background: 'rgba(255,255,255,0.06)',
+                color: '#c7d2fe',
+                border: 'none',
+                cursor: 'pointer',
+              }}
+            >
+              <ExternalLink size={9} style={{ marginRight: '2px' }} />
+              <span>Popout</span>
+            </button>
+          </div>
+
+          <div style={{ width: '1px', height: '14px', background: 'var(--border-subtle)', margin: '0 2px' }} />
+
           <button
             type="button"
             onClick={() => whiteboardService.undo()}
@@ -934,7 +1032,7 @@ export const WhiteboardCanvas: React.FC = () => {
           gap: '6px',
         }}
       >
-        {/* Background Choices List (Grid, Ruled, Blank, Dotted, Plot, Matrix) */}
+        {/* Background Choices List (Grid, Ruled, Blank, Dotted, Plot, Matrix, White) */}
         <div style={{ display: 'flex', gap: '3px', alignItems: 'center', flexWrap: 'wrap' }}>
           <span style={{ fontSize: '9px', color: 'var(--text-muted)', fontWeight: 600 }}>BG:</span>
 
@@ -1165,6 +1263,40 @@ export const WhiteboardCanvas: React.FC = () => {
           touchAction: 'none',
         }}
       />
+
+      {/* 5. Custom Height Drag Resize Bar (Only shown in 'custom' mode) */}
+      {sizeMode === 'custom' && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '3px 10px',
+            background: 'rgba(15, 23, 42, 0.95)',
+            borderTop: '1px solid var(--border-subtle)',
+            fontSize: '9px',
+            color: 'var(--text-muted)',
+          }}
+        >
+          <span>Canvas Height: {customHeight}px</span>
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <button
+              type="button"
+              onClick={() => setCustomHeight((h) => Math.max(240, h - 50))}
+              style={{ background: 'none', border: 'none', color: '#c7d2fe', cursor: 'pointer', fontSize: '10px' }}
+            >
+              ➖ Smaller
+            </button>
+            <button
+              type="button"
+              onClick={() => setCustomHeight((h) => Math.min(800, h + 50))}
+              style={{ background: 'none', border: 'none', color: '#c7d2fe', cursor: 'pointer', fontSize: '10px' }}
+            >
+              ➕ Larger
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

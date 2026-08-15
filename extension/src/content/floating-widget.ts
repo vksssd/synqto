@@ -54,6 +54,7 @@ export class FloatingWidget {
   private currentPosition: FabPosition = { right: 24, bottom: 24 };
   private isDragging = false;
   private dragMoved = false;
+  private isPopupMaximized = false;
 
   // Whiteboard State
   private activeTab: 'chat' | 'whiteboard' = 'chat';
@@ -324,9 +325,9 @@ export class FloatingWidget {
           position: absolute;
           ${isNearTop ? 'top: 52px; bottom: auto;' : 'bottom: 52px; top: auto;'}
           ${isNearLeft ? 'left: 0; right: auto;' : 'right: 0; left: auto;'}
-          width: 400px;
-          height: 540px;
-          max-height: 84vh;
+          width: ${this.isPopupMaximized ? 'min(680px, 94vw)' : '400px'};
+          height: ${this.isPopupMaximized ? 'min(740px, 90vh)' : '540px'};
+          max-height: 92vh;
           background: rgba(15, 23, 42, 0.96);
           border: 1px solid ${isLive ? 'rgba(239, 68, 68, 0.45)' : 'rgba(99, 102, 241, 0.35)'};
           border-radius: 16px;
@@ -712,13 +713,21 @@ export class FloatingWidget {
           </div>
 
           <div class="header-actions">
+            <button class="icon-btn" id="nb-toggle-popup-size" title="${this.isPopupMaximized ? 'Restore Compact Size' : 'Maximize Popup Window'}">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                ${this.isPopupMaximized
+                  ? '<polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/>'
+                  : '<polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>'
+                }
+              </svg>
+            </button>
             <button class="icon-btn" id="nb-open-sidepanel" title="Open complete extension in side panel">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M15 3h6v6M10 14L21 3M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/>
               </svg>
             </button>
             <button class="icon-btn" id="nb-close-popup" title="Minimize">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M18 6L6 18M6 6l12 12"/>
               </svg>
             </button>
@@ -1004,6 +1013,13 @@ export class FloatingWidget {
         }
       });
     }
+
+    // Toggle Popup Maximize / Compact Size
+    const sizeToggleBtn = this.shadow.getElementById('nb-toggle-popup-size');
+    sizeToggleBtn?.addEventListener('click', () => {
+      this.isPopupMaximized = !this.isPopupMaximized;
+      this.render();
+    });
 
     // Close Popup Button
     const closeBtn = this.shadow.getElementById('nb-close-popup');

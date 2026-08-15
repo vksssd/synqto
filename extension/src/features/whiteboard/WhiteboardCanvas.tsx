@@ -110,6 +110,10 @@ export const WhiteboardCanvas: React.FC = () => {
   const [textModalPos, setTextModalPos] = useState<{ x: number; y: number } | null>(null);
   const [textInput, setTextInput] = useState('');
 
+  // Collapsible drawers for maximum canvas workspace
+  const [showShapesDrawer, setShowShapesDrawer] = useState(false);
+  const [showThemesDrawer, setShowThemesDrawer] = useState(false);
+
   // 1. Subscribe to service listeners
   useEffect(() => {
     const unsubBg = whiteboardService.onBackgroundChange((bg) => setBackgroundType(bg));
@@ -952,15 +956,11 @@ export const WhiteboardCanvas: React.FC = () => {
       style={{
         display: 'flex',
         flexDirection: 'column',
-        height: sizeMode === 'full' ? '100%' : sizeMode === 'half' ? '300px' : `${customHeight}px`,
-        minHeight: '220px',
-        maxHeight: sizeMode === 'full' ? '100%' : undefined,
+        height: '100%',
+        width: '100%',
         background: bgColor || '#090d16',
-        borderRadius: 'var(--radius-md)',
-        border: '1px solid var(--border-subtle)',
         overflow: 'hidden',
         position: 'relative',
-        transition: 'height 0.2s ease',
       }}
     >
       {/* ─── 1. Multi-Page Notebook Navigation Bar ─── */}
@@ -969,11 +969,12 @@ export const WhiteboardCanvas: React.FC = () => {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '4px 8px',
+          padding: '3px 8px',
           background: 'rgba(15, 23, 42, 0.98)',
           borderBottom: '1px solid var(--border-subtle)',
           overflowX: 'auto',
           gap: '4px',
+          flexShrink: 0,
         }}
       >
         {/* Page Tabs */}
@@ -987,13 +988,13 @@ export const WhiteboardCanvas: React.FC = () => {
                   display: 'flex',
                   alignItems: 'center',
                   gap: '4px',
-                  padding: '3px 8px',
+                  padding: '2px 7px',
                   borderRadius: '4px',
                   background: isActive ? 'linear-gradient(135deg, rgba(99, 102, 241, 0.35), rgba(139, 92, 246, 0.35))' : 'rgba(255,255,255,0.03)',
                   border: isActive ? '1px solid var(--primary)' : '1px solid transparent',
                   cursor: 'pointer',
                   color: isActive ? '#ffffff' : 'var(--text-muted)',
-                  fontSize: '10px',
+                  fontSize: '9.5px',
                   fontWeight: isActive ? 700 : 500,
                   whiteSpace: 'nowrap',
                 }}
@@ -1016,13 +1017,13 @@ export const WhiteboardCanvas: React.FC = () => {
                       }
                     }}
                     style={{
-                      fontSize: '10px',
+                      fontSize: '9px',
                       background: 'rgba(0,0,0,0.5)',
                       color: '#fff',
                       border: '1px solid var(--primary)',
                       borderRadius: '2px',
                       padding: '1px 3px',
-                      width: '100px',
+                      width: '90px',
                     }}
                     onClick={(e) => e.stopPropagation()}
                   />
@@ -1063,7 +1064,7 @@ export const WhiteboardCanvas: React.FC = () => {
                     title="Delete Page"
                     style={{ background: 'none', border: 'none', color: '#f87171', padding: 0, cursor: 'pointer' }}
                   >
-                    <X size={10} />
+                    <X size={9} />
                   </button>
                 )}
               </div>
@@ -1076,9 +1077,9 @@ export const WhiteboardCanvas: React.FC = () => {
             className="btn btn-secondary btn-sm"
             onClick={() => whiteboardService.addPage()}
             title="Add New Notebook Page"
-            style={{ fontSize: '10px', padding: '2px 6px', display: 'flex', alignItems: 'center', gap: '2px' }}
+            style={{ fontSize: '9.5px', padding: '2px 6px', display: 'flex', alignItems: 'center', gap: '2px' }}
           >
-            <Plus size={11} />
+            <Plus size={10} />
             <span>Page</span>
           </button>
         </div>
@@ -1092,27 +1093,39 @@ export const WhiteboardCanvas: React.FC = () => {
             title="Duplicate Active Page"
             style={{ fontSize: '9px', padding: '2px 5px', color: 'var(--text-muted)' }}
           >
-            <Copy size={10} style={{ marginRight: '2px' }} />
+            <Copy size={9} style={{ marginRight: '2px' }} />
             <span>Copy</span>
+          </button>
+
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={handleOpenPopupStandaloneWindow}
+            title="Popout Window"
+            style={{ fontSize: '9px', padding: '2px 5px', color: 'var(--text-muted)' }}
+          >
+            <ExternalLink size={9} style={{ marginRight: '2px' }} />
+            <span>Popout</span>
           </button>
         </div>
       </div>
 
-      {/* ─── 2. Main Drawing & System Design Toolbar ─── */}
+      {/* ─── 2. Main Drawing Toolbar (Ultra-Streamlined) ─── */}
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '5px 8px',
+          padding: '4px 8px',
           background: 'rgba(15, 23, 42, 0.95)',
           borderBottom: '1px solid var(--border-subtle)',
           flexWrap: 'wrap',
-          gap: '5px',
+          gap: '4px',
+          flexShrink: 0,
         }}
       >
-        {/* Drawing & System Design Tools */}
-        <div style={{ display: 'flex', gap: '3px', alignItems: 'center', flexWrap: 'wrap' }}>
+        {/* Primary Pens & Geometry Tools */}
+        <div style={{ display: 'flex', gap: '2px', alignItems: 'center', flexWrap: 'wrap' }}>
           {/* Fine Pen */}
           <button
             type="button"
@@ -1120,7 +1133,7 @@ export const WhiteboardCanvas: React.FC = () => {
             onClick={() => setActiveTool('pen')}
             title="Fine Pen"
             style={{
-              padding: '3px 5px',
+              padding: '2px 4px',
               borderRadius: '4px',
               border: activeTool === 'pen' ? '1px solid var(--primary)' : '1px solid transparent',
               background: activeTool === 'pen' ? 'rgba(99, 102, 241, 0.25)' : 'transparent',
@@ -1128,7 +1141,7 @@ export const WhiteboardCanvas: React.FC = () => {
               cursor: 'pointer',
             }}
           >
-            <Pencil size={12} />
+            <Pencil size={11} />
           </button>
 
           {/* Brush Pen */}
@@ -1136,9 +1149,9 @@ export const WhiteboardCanvas: React.FC = () => {
             type="button"
             className={`btn-icon ${activeTool === 'brush' ? 'active' : ''}`}
             onClick={() => setActiveTool('brush')}
-            title="Brush / Calligraphy Pen"
+            title="Brush Pen"
             style={{
-              padding: '3px 5px',
+              padding: '2px 4px',
               borderRadius: '4px',
               border: activeTool === 'brush' ? '1px solid var(--primary)' : '1px solid transparent',
               background: activeTool === 'brush' ? 'rgba(99, 102, 241, 0.25)' : 'transparent',
@@ -1146,7 +1159,7 @@ export const WhiteboardCanvas: React.FC = () => {
               cursor: 'pointer',
             }}
           >
-            <PenTool size={12} />
+            <PenTool size={11} />
           </button>
 
           {/* Highlighter */}
@@ -1154,9 +1167,9 @@ export const WhiteboardCanvas: React.FC = () => {
             type="button"
             className={`btn-icon ${activeTool === 'highlighter' ? 'active' : ''}`}
             onClick={() => setActiveTool('highlighter')}
-            title="Highlighter Marker"
+            title="Highlighter"
             style={{
-              padding: '3px 5px',
+              padding: '2px 4px',
               borderRadius: '4px',
               border: activeTool === 'highlighter' ? '1px solid var(--primary)' : '1px solid transparent',
               background: activeTool === 'highlighter' ? 'rgba(99, 102, 241, 0.25)' : 'transparent',
@@ -1164,17 +1177,17 @@ export const WhiteboardCanvas: React.FC = () => {
               cursor: 'pointer',
             }}
           >
-            <Highlighter size={12} />
+            <Highlighter size={11} />
           </button>
 
-          {/* ⏳ Disappearing / Temporary Ink Pen */}
+          {/* ⏳ Disappearing Ink */}
           <button
             type="button"
             className={`btn-icon ${activeTool === 'temp_pen' ? 'active' : ''}`}
             onClick={() => setActiveTool('temp_pen')}
-            title="⏳ Temporary / Disappearing Ink (Fades away in 3s)"
+            title="⏳ Temporary / Disappearing Ink (Fades in 3s)"
             style={{
-              padding: '3px 5px',
+              padding: '2px 4px',
               borderRadius: '4px',
               border: activeTool === 'temp_pen' ? '1px solid #38bdf8' : '1px solid transparent',
               background: activeTool === 'temp_pen' ? 'rgba(56, 189, 248, 0.25)' : 'transparent',
@@ -1182,7 +1195,7 @@ export const WhiteboardCanvas: React.FC = () => {
               cursor: 'pointer',
             }}
           >
-            <Clock size={12} color="#38bdf8" />
+            <Clock size={11} color="#38bdf8" />
           </button>
 
           {/* Laser Pointer */}
@@ -1190,9 +1203,9 @@ export const WhiteboardCanvas: React.FC = () => {
             type="button"
             className={`btn-icon ${activeTool === 'laser' ? 'active' : ''}`}
             onClick={() => setActiveTool('laser')}
-            title="🔴 Laser Pointer (Real-time P2P trail)"
+            title="🔴 Laser Pointer"
             style={{
-              padding: '3px 5px',
+              padding: '2px 4px',
               borderRadius: '4px',
               border: activeTool === 'laser' ? '1px solid #ef4444' : '1px solid transparent',
               background: activeTool === 'laser' ? 'rgba(239, 68, 68, 0.25)' : 'transparent',
@@ -1200,7 +1213,7 @@ export const WhiteboardCanvas: React.FC = () => {
               cursor: 'pointer',
             }}
           >
-            <Flame size={12} color="#ef4444" />
+            <Flame size={11} color="#ef4444" />
           </button>
 
           {/* Spotlight Torch */}
@@ -1208,9 +1221,9 @@ export const WhiteboardCanvas: React.FC = () => {
             type="button"
             className={`btn-icon ${activeTool === 'torch' ? 'active' : ''}`}
             onClick={() => setActiveTool('torch')}
-            title="🔦 Spotlight / Torch Beam"
+            title="🔦 Spotlight Torch"
             style={{
-              padding: '3px 5px',
+              padding: '2px 4px',
               borderRadius: '4px',
               border: activeTool === 'torch' ? '1px solid #facc15' : '1px solid transparent',
               background: activeTool === 'torch' ? 'rgba(250, 204, 21, 0.25)' : 'transparent',
@@ -1218,7 +1231,7 @@ export const WhiteboardCanvas: React.FC = () => {
               cursor: 'pointer',
             }}
           >
-            <Lightbulb size={12} color="#facc15" />
+            <Lightbulb size={11} color="#facc15" />
           </button>
 
           {/* Eraser */}
@@ -1228,7 +1241,7 @@ export const WhiteboardCanvas: React.FC = () => {
             onClick={() => setActiveTool('eraser')}
             title="Eraser"
             style={{
-              padding: '3px 5px',
+              padding: '2px 4px',
               borderRadius: '4px',
               border: activeTool === 'eraser' ? '1px solid var(--primary)' : '1px solid transparent',
               background: activeTool === 'eraser' ? 'rgba(99, 102, 241, 0.25)' : 'transparent',
@@ -1236,19 +1249,19 @@ export const WhiteboardCanvas: React.FC = () => {
               cursor: 'pointer',
             }}
           >
-            <Eraser size={12} />
+            <Eraser size={11} />
           </button>
 
-          <div style={{ width: '1px', height: '14px', background: 'var(--border-subtle)', margin: '0 2px' }} />
+          <div style={{ width: '1px', height: '12px', background: 'var(--border-subtle)', margin: '0 1px' }} />
 
           {/* Text Note */}
           <button
             type="button"
             className={`btn-icon ${activeTool === 'text' ? 'active' : ''}`}
             onClick={() => setActiveTool('text')}
-            title="📝 Text Label / Code Note"
+            title="Text Note"
             style={{
-              padding: '3px 5px',
+              padding: '2px 4px',
               borderRadius: '4px',
               border: activeTool === 'text' ? '1px solid var(--primary)' : '1px solid transparent',
               background: activeTool === 'text' ? 'rgba(99, 102, 241, 0.25)' : 'transparent',
@@ -1256,7 +1269,7 @@ export const WhiteboardCanvas: React.FC = () => {
               cursor: 'pointer',
             }}
           >
-            <Type size={12} />
+            <Type size={11} />
           </button>
 
           {/* Arrow */}
@@ -1264,9 +1277,9 @@ export const WhiteboardCanvas: React.FC = () => {
             type="button"
             className={`btn-icon ${activeTool === 'arrow' ? 'active' : ''}`}
             onClick={() => setActiveTool('arrow')}
-            title="Directional Arrow"
+            title="Arrow"
             style={{
-              padding: '3px 5px',
+              padding: '2px 4px',
               borderRadius: '4px',
               border: activeTool === 'arrow' ? '1px solid var(--primary)' : '1px solid transparent',
               background: activeTool === 'arrow' ? 'rgba(99, 102, 241, 0.25)' : 'transparent',
@@ -1274,7 +1287,7 @@ export const WhiteboardCanvas: React.FC = () => {
               cursor: 'pointer',
             }}
           >
-            <MoveRight size={12} />
+            <MoveRight size={11} />
           </button>
 
           {/* Box */}
@@ -1282,9 +1295,9 @@ export const WhiteboardCanvas: React.FC = () => {
             type="button"
             className={`btn-icon ${activeTool === 'rect' ? 'active' : ''}`}
             onClick={() => setActiveTool('rect')}
-            title="Box / Rectangle"
+            title="Box"
             style={{
-              padding: '3px 5px',
+              padding: '2px 4px',
               borderRadius: '4px',
               border: activeTool === 'rect' ? '1px solid var(--primary)' : '1px solid transparent',
               background: activeTool === 'rect' ? 'rgba(99, 102, 241, 0.25)' : 'transparent',
@@ -1292,7 +1305,7 @@ export const WhiteboardCanvas: React.FC = () => {
               cursor: 'pointer',
             }}
           >
-            <Square size={12} />
+            <Square size={11} />
           </button>
 
           {/* Tree Node */}
@@ -1300,9 +1313,9 @@ export const WhiteboardCanvas: React.FC = () => {
             type="button"
             className={`btn-icon ${activeTool === 'tree_node' ? 'active' : ''}`}
             onClick={() => setActiveTool('tree_node')}
-            title="Binary Tree Node"
+            title="Tree Node"
             style={{
-              padding: '3px 5px',
+              padding: '2px 4px',
               borderRadius: '4px',
               border: activeTool === 'tree_node' ? '1px solid var(--primary)' : '1px solid transparent',
               background: activeTool === 'tree_node' ? 'rgba(99, 102, 241, 0.25)' : 'transparent',
@@ -1310,141 +1323,55 @@ export const WhiteboardCanvas: React.FC = () => {
               cursor: 'pointer',
             }}
           >
-            <GitBranch size={12} />
+            <GitBranch size={11} />
           </button>
 
-          <div style={{ width: '1px', height: '14px', background: 'var(--border-subtle)', margin: '0 2px' }} />
+          <div style={{ width: '1px', height: '12px', background: 'var(--border-subtle)', margin: '0 1px' }} />
 
-          {/* 🏛️ System Design Architecture Shapes */}
-          {/* Database */}
+          {/* Drawer Toggles */}
           <button
             type="button"
-            className={`btn-icon ${activeTool === 'db_cylinder' ? 'active' : ''}`}
-            onClick={() => setActiveTool('db_cylinder')}
-            title="🗄️ Database Cylinder (SQL/NoSQL)"
+            onClick={() => {
+              setShowShapesDrawer(!showShapesDrawer);
+              setShowThemesDrawer(false);
+            }}
             style={{
-              padding: '3px 5px',
+              fontSize: '9px',
+              fontWeight: 600,
+              padding: '2px 6px',
               borderRadius: '4px',
-              border: activeTool === 'db_cylinder' ? '1px solid #10b981' : '1px solid transparent',
-              background: activeTool === 'db_cylinder' ? 'rgba(16, 185, 129, 0.25)' : 'transparent',
-              color: activeTool === 'db_cylinder' ? '#6ee7b7' : 'var(--text-muted)',
+              background: showShapesDrawer ? 'rgba(99, 102, 241, 0.35)' : 'rgba(255,255,255,0.05)',
+              border: showShapesDrawer ? '1px solid var(--primary)' : '1px solid rgba(255,255,255,0.08)',
+              color: showShapesDrawer ? '#ffffff' : 'var(--text-muted)',
               cursor: 'pointer',
             }}
           >
-            <Database size={12} color={activeTool === 'db_cylinder' ? '#10b981' : undefined} />
+            🏛️ Arch {showShapesDrawer ? '▲' : '▼'}
           </button>
 
-          {/* Cloud / API Gateway */}
           <button
             type="button"
-            className={`btn-icon ${activeTool === 'cloud' ? 'active' : ''}`}
-            onClick={() => setActiveTool('cloud')}
-            title="☁️ Cloud / API Gateway"
+            onClick={() => {
+              setShowThemesDrawer(!showThemesDrawer);
+              setShowShapesDrawer(false);
+            }}
             style={{
-              padding: '3px 5px',
+              fontSize: '9px',
+              fontWeight: 600,
+              padding: '2px 6px',
               borderRadius: '4px',
-              border: activeTool === 'cloud' ? '1px solid #38bdf8' : '1px solid transparent',
-              background: activeTool === 'cloud' ? 'rgba(56, 189, 248, 0.25)' : 'transparent',
-              color: activeTool === 'cloud' ? '#7dd3fc' : 'var(--text-muted)',
+              background: showThemesDrawer ? 'rgba(99, 102, 241, 0.35)' : 'rgba(255,255,255,0.05)',
+              border: showThemesDrawer ? '1px solid var(--primary)' : '1px solid rgba(255,255,255,0.08)',
+              color: showThemesDrawer ? '#ffffff' : 'var(--text-muted)',
               cursor: 'pointer',
             }}
           >
-            <Cloud size={12} color={activeTool === 'cloud' ? '#38bdf8' : undefined} />
-          </button>
-
-          {/* Load Balancer */}
-          <button
-            type="button"
-            className={`btn-icon ${activeTool === 'load_balancer' ? 'active' : ''}`}
-            onClick={() => setActiveTool('load_balancer')}
-            title="⚖️ Load Balancer"
-            style={{
-              padding: '3px 5px',
-              borderRadius: '4px',
-              border: activeTool === 'load_balancer' ? '1px solid #f59e0b' : '1px solid transparent',
-              background: activeTool === 'load_balancer' ? 'rgba(245, 158, 11, 0.25)' : 'transparent',
-              color: activeTool === 'load_balancer' ? '#fcd34d' : 'var(--text-muted)',
-              cursor: 'pointer',
-            }}
-          >
-            <Scale size={12} color={activeTool === 'load_balancer' ? '#f59e0b' : undefined} />
-          </button>
-
-          {/* Message Queue */}
-          <button
-            type="button"
-            className={`btn-icon ${activeTool === 'message_queue' ? 'active' : ''}`}
-            onClick={() => setActiveTool('message_queue')}
-            title="📨 Message Queue / Kafka Buffer"
-            style={{
-              padding: '3px 5px',
-              borderRadius: '4px',
-              border: activeTool === 'message_queue' ? '1px solid #a855f7' : '1px solid transparent',
-              background: activeTool === 'message_queue' ? 'rgba(168, 85, 247, 0.25)' : 'transparent',
-              color: activeTool === 'message_queue' ? '#d8b4fe' : 'var(--text-muted)',
-              cursor: 'pointer',
-            }}
-          >
-            <Layers size={12} color={activeTool === 'message_queue' ? '#a855f7' : undefined} />
-          </button>
-
-          {/* Server Container */}
-          <button
-            type="button"
-            className={`btn-icon ${activeTool === 'server_box' ? 'active' : ''}`}
-            onClick={() => setActiveTool('server_box')}
-            title="📦 Microservice / App Server"
-            style={{
-              padding: '3px 5px',
-              borderRadius: '4px',
-              border: activeTool === 'server_box' ? '1px solid var(--primary)' : '1px solid transparent',
-              background: activeTool === 'server_box' ? 'rgba(99, 102, 241, 0.25)' : 'transparent',
-              color: activeTool === 'server_box' ? '#c7d2fe' : 'var(--text-muted)',
-              cursor: 'pointer',
-            }}
-          >
-            <Server size={12} color={activeTool === 'server_box' ? '#818cf8' : undefined} />
-          </button>
-
-          {/* Cache */}
-          <button
-            type="button"
-            className={`btn-icon ${activeTool === 'cache_mem' ? 'active' : ''}`}
-            onClick={() => setActiveTool('cache_mem')}
-            title="⚡ In-Memory Cache / Redis"
-            style={{
-              padding: '3px 5px',
-              borderRadius: '4px',
-              border: activeTool === 'cache_mem' ? '1px solid #f43f5e' : '1px solid transparent',
-              background: activeTool === 'cache_mem' ? 'rgba(244, 63, 94, 0.25)' : 'transparent',
-              color: activeTool === 'cache_mem' ? '#fda4af' : 'var(--text-muted)',
-              cursor: 'pointer',
-            }}
-          >
-            <Zap size={12} color={activeTool === 'cache_mem' ? '#f43f5e' : undefined} />
-          </button>
-
-          {/* Client Actor */}
-          <button
-            type="button"
-            className={`btn-icon ${activeTool === 'user_client' ? 'active' : ''}`}
-            onClick={() => setActiveTool('user_client')}
-            title="👤 Client Actor"
-            style={{
-              padding: '3px 5px',
-              borderRadius: '4px',
-              border: activeTool === 'user_client' ? '1px solid #3b82f6' : '1px solid transparent',
-              background: activeTool === 'user_client' ? 'rgba(59, 130, 246, 0.25)' : 'transparent',
-              color: activeTool === 'user_client' ? '#93c5fd' : 'var(--text-muted)',
-              cursor: 'pointer',
-            }}
-          >
-            <User size={12} color={activeTool === 'user_client' ? '#3b82f6' : undefined} />
+            🎨 Themes {showThemesDrawer ? '▲' : '▼'}
           </button>
         </div>
 
-        {/* Action Controls: Privacy Mode, Size, Undo, Clear, Save */}
-        <div style={{ display: 'flex', gap: '3px', alignItems: 'center', flexWrap: 'wrap' }}>
+        {/* Action Controls: Privacy Mode, Undo, Clear, Save */}
+        <div style={{ display: 'flex', gap: '3px', alignItems: 'center' }}>
           {/* Privacy Mode */}
           <div style={{ display: 'flex', gap: '1px', background: 'rgba(0,0,0,0.4)', padding: '2px', borderRadius: '4px', border: '1px solid var(--border-subtle)' }}>
             <button
@@ -1457,7 +1384,7 @@ export const WhiteboardCanvas: React.FC = () => {
               style={{
                 fontSize: '8.5px',
                 fontWeight: 700,
-                padding: '2px 5px',
+                padding: '2px 4px',
                 borderRadius: '3px',
                 background: privacyMode === 'collaborative' ? 'linear-gradient(135deg, #10b981, #06b6d4)' : 'transparent',
                 color: privacyMode === 'collaborative' ? '#ffffff' : 'var(--text-muted)',
@@ -1477,7 +1404,7 @@ export const WhiteboardCanvas: React.FC = () => {
               style={{
                 fontSize: '8.5px',
                 fontWeight: 700,
-                padding: '2px 5px',
+                padding: '2px 4px',
                 borderRadius: '3px',
                 background: privacyMode === 'personal' ? 'linear-gradient(135deg, #f59e0b, #f43f5e)' : 'transparent',
                 color: privacyMode === 'personal' ? '#ffffff' : 'var(--text-muted)',
@@ -1485,74 +1412,16 @@ export const WhiteboardCanvas: React.FC = () => {
                 cursor: 'pointer',
               }}
             >
-              🔒 Personal
+              🔒 Private
             </button>
           </div>
 
-          {/* Size Choice Pills */}
-          <div style={{ display: 'flex', gap: '1px', background: 'rgba(0,0,0,0.3)', padding: '2px', borderRadius: '4px' }}>
-            <button
-              type="button"
-              onClick={() => setSizeMode('full')}
-              title="Full Screen Workspace"
-              style={{
-                fontSize: '8.5px',
-                fontWeight: 600,
-                padding: '2px 4px',
-                borderRadius: '3px',
-                background: sizeMode === 'full' ? 'var(--primary)' : 'transparent',
-                color: sizeMode === 'full' ? '#fff' : 'var(--text-muted)',
-                border: 'none',
-                cursor: 'pointer',
-              }}
-            >
-              Full
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setSizeMode('half')}
-              title="Half Screen View"
-              style={{
-                fontSize: '8.5px',
-                fontWeight: 600,
-                padding: '2px 4px',
-                borderRadius: '3px',
-                background: sizeMode === 'half' ? 'var(--primary)' : 'transparent',
-                color: sizeMode === 'half' ? '#fff' : 'var(--text-muted)',
-                border: 'none',
-                cursor: 'pointer',
-              }}
-            >
-              Half
-            </button>
-
-            <button
-              type="button"
-              onClick={handleOpenPopupStandaloneWindow}
-              title="Launch Standalone Whiteboard Window"
-              style={{
-                fontSize: '8.5px',
-                fontWeight: 600,
-                padding: '2px 4px',
-                borderRadius: '3px',
-                background: 'rgba(255,255,255,0.06)',
-                color: '#c7d2fe',
-                border: 'none',
-                cursor: 'pointer',
-              }}
-            >
-              <ExternalLink size={8} style={{ marginRight: '1px' }} />
-              <span>Popout</span>
-            </button>
-          </div>
-
-          <div style={{ width: '1px', height: '14px', background: 'var(--border-subtle)', margin: '0 1px' }} />
+          <div style={{ width: '1px', height: '12px', background: 'var(--border-subtle)', margin: '0 1px' }} />
 
           <button
             type="button"
             onClick={() => whiteboardService.undo()}
-            title="Undo (Ctrl+Z)"
+            title="Undo"
             style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '2px' }}
           >
             <RotateCcw size={11} />
@@ -1583,7 +1452,7 @@ export const WhiteboardCanvas: React.FC = () => {
           <button
             type="button"
             onClick={handleExportPNG}
-            title="Download Canvas as PNG"
+            title="Save PNG"
             style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '2px' }}
           >
             <Download size={11} />
@@ -1591,23 +1460,201 @@ export const WhiteboardCanvas: React.FC = () => {
         </div>
       </div>
 
-      {/* ─── 3. Sub-Toolbar: Background Patterns, Background Colors & Pen Palettes ─── */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '3px 8px',
-          background: 'rgba(0, 0, 0, 0.55)',
-          borderBottom: '1px solid var(--border-subtle)',
-          flexWrap: 'wrap',
-          gap: '5px',
-        }}
-      >
-        {/* Background Patterns & Background Color Swatches */}
-        <div style={{ display: 'flex', gap: '5px', alignItems: 'center', flexWrap: 'wrap' }}>
-          {/* Pattern Buttons */}
-          <div style={{ display: 'flex', gap: '2px', alignItems: 'center' }}>
+      {/* ─── 3. Collapsible Drawer: System Design Architecture Shapes ─── */}
+      {showShapesDrawer && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            padding: '3px 8px',
+            background: 'rgba(0, 0, 0, 0.75)',
+            borderBottom: '1px solid var(--border-subtle)',
+            overflowX: 'auto',
+            flexShrink: 0,
+          }}
+        >
+          <span style={{ fontSize: '8.5px', color: 'var(--text-muted)', fontWeight: 600 }}>Arch Shapes:</span>
+          {/* Database */}
+          <button
+            type="button"
+            className={`btn-icon ${activeTool === 'db_cylinder' ? 'active' : ''}`}
+            onClick={() => setActiveTool('db_cylinder')}
+            title="🗄️ Database Cylinder"
+            style={{
+              padding: '2px 5px',
+              borderRadius: '4px',
+              border: activeTool === 'db_cylinder' ? '1px solid #10b981' : '1px solid transparent',
+              background: activeTool === 'db_cylinder' ? 'rgba(16, 185, 129, 0.25)' : 'transparent',
+              color: activeTool === 'db_cylinder' ? '#6ee7b7' : 'var(--text-muted)',
+              cursor: 'pointer',
+              fontSize: '9px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '3px',
+            }}
+          >
+            <Database size={10} color="#10b981" />
+            <span>DB</span>
+          </button>
+
+          {/* Cloud */}
+          <button
+            type="button"
+            className={`btn-icon ${activeTool === 'cloud' ? 'active' : ''}`}
+            onClick={() => setActiveTool('cloud')}
+            title="☁️ Cloud Gateway"
+            style={{
+              padding: '2px 5px',
+              borderRadius: '4px',
+              border: activeTool === 'cloud' ? '1px solid #38bdf8' : '1px solid transparent',
+              background: activeTool === 'cloud' ? 'rgba(56, 189, 248, 0.25)' : 'transparent',
+              color: activeTool === 'cloud' ? '#7dd3fc' : 'var(--text-muted)',
+              cursor: 'pointer',
+              fontSize: '9px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '3px',
+            }}
+          >
+            <Cloud size={10} color="#38bdf8" />
+            <span>Cloud</span>
+          </button>
+
+          {/* Load Balancer */}
+          <button
+            type="button"
+            className={`btn-icon ${activeTool === 'load_balancer' ? 'active' : ''}`}
+            onClick={() => setActiveTool('load_balancer')}
+            title="⚖️ Load Balancer"
+            style={{
+              padding: '2px 5px',
+              borderRadius: '4px',
+              border: activeTool === 'load_balancer' ? '1px solid #f59e0b' : '1px solid transparent',
+              background: activeTool === 'load_balancer' ? 'rgba(245, 158, 11, 0.25)' : 'transparent',
+              color: activeTool === 'load_balancer' ? '#fcd34d' : 'var(--text-muted)',
+              cursor: 'pointer',
+              fontSize: '9px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '3px',
+            }}
+          >
+            <Scale size={10} color="#f59e0b" />
+            <span>LB</span>
+          </button>
+
+          {/* Message Queue */}
+          <button
+            type="button"
+            className={`btn-icon ${activeTool === 'message_queue' ? 'active' : ''}`}
+            onClick={() => setActiveTool('message_queue')}
+            title="📨 Message Queue / Kafka Buffer"
+            style={{
+              padding: '2px 5px',
+              borderRadius: '4px',
+              border: activeTool === 'message_queue' ? '1px solid #a855f7' : '1px solid transparent',
+              background: activeTool === 'message_queue' ? 'rgba(168, 85, 247, 0.25)' : 'transparent',
+              color: activeTool === 'message_queue' ? '#d8b4fe' : 'var(--text-muted)',
+              cursor: 'pointer',
+              fontSize: '9px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '3px',
+            }}
+          >
+            <Layers size={10} color="#a855f7" />
+            <span>Queue</span>
+          </button>
+
+          {/* Server Container */}
+          <button
+            type="button"
+            className={`btn-icon ${activeTool === 'server_box' ? 'active' : ''}`}
+            onClick={() => setActiveTool('server_box')}
+            title="📦 App Server Container"
+            style={{
+              padding: '2px 5px',
+              borderRadius: '4px',
+              border: activeTool === 'server_box' ? '1px solid var(--primary)' : '1px solid transparent',
+              background: activeTool === 'server_box' ? 'rgba(99, 102, 241, 0.25)' : 'transparent',
+              color: activeTool === 'server_box' ? '#c7d2fe' : 'var(--text-muted)',
+              cursor: 'pointer',
+              fontSize: '9px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '3px',
+            }}
+          >
+            <Server size={10} color="#818cf8" />
+            <span>Server</span>
+          </button>
+
+          {/* Cache */}
+          <button
+            type="button"
+            className={`btn-icon ${activeTool === 'cache_mem' ? 'active' : ''}`}
+            onClick={() => setActiveTool('cache_mem')}
+            title="⚡ In-Memory Cache / Redis"
+            style={{
+              padding: '2px 5px',
+              borderRadius: '4px',
+              border: activeTool === 'cache_mem' ? '1px solid #f43f5e' : '1px solid transparent',
+              background: activeTool === 'cache_mem' ? 'rgba(244, 63, 94, 0.25)' : 'transparent',
+              color: activeTool === 'cache_mem' ? '#fda4af' : 'var(--text-muted)',
+              cursor: 'pointer',
+              fontSize: '9px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '3px',
+            }}
+          >
+            <Zap size={10} color="#f43f5e" />
+            <span>Cache</span>
+          </button>
+
+          {/* Client Actor */}
+          <button
+            type="button"
+            className={`btn-icon ${activeTool === 'user_client' ? 'active' : ''}`}
+            onClick={() => setActiveTool('user_client')}
+            title="👤 Client Actor"
+            style={{
+              padding: '2px 5px',
+              borderRadius: '4px',
+              border: activeTool === 'user_client' ? '1px solid #3b82f6' : '1px solid transparent',
+              background: activeTool === 'user_client' ? 'rgba(59, 130, 246, 0.25)' : 'transparent',
+              color: activeTool === 'user_client' ? '#93c5fd' : 'var(--text-muted)',
+              cursor: 'pointer',
+              fontSize: '9px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '3px',
+            }}
+          >
+            <User size={10} color="#3b82f6" />
+            <span>Client</span>
+          </button>
+        </div>
+      )}
+
+      {/* ─── 4. Collapsible Drawer: Background Themes, BG Colors & Color Palette ─── */}
+      {showThemesDrawer && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '3px 8px',
+            background: 'rgba(0, 0, 0, 0.75)',
+            borderBottom: '1px solid var(--border-subtle)',
+            flexWrap: 'wrap',
+            gap: '4px',
+            flexShrink: 0,
+          }}
+        >
+          {/* Background Patterns & Background Color Swatches */}
+          <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexWrap: 'wrap' }}>
             <span style={{ fontSize: '8.5px', color: 'var(--text-muted)', fontWeight: 600 }}>Pattern:</span>
             {[
               { id: 'grid', label: 'Grid' },
@@ -1634,13 +1681,10 @@ export const WhiteboardCanvas: React.FC = () => {
                 {p.label}
               </button>
             ))}
-          </div>
 
-          <div style={{ width: '1px', height: '12px', background: 'var(--border-subtle)', margin: '0 1px' }} />
+            <div style={{ width: '1px', height: '10px', background: 'var(--border-subtle)', margin: '0 1px' }} />
 
-          {/* BG Color Swatches */}
-          <div style={{ display: 'flex', gap: '3px', alignItems: 'center' }}>
-            <span style={{ fontSize: '8.5px', color: 'var(--text-muted)', fontWeight: 600 }}>BG Color:</span>
+            <span style={{ fontSize: '8.5px', color: 'var(--text-muted)', fontWeight: 600 }}>BG:</span>
             {BG_COLORS.map((bg) => (
               <button
                 key={bg.color}
@@ -1648,36 +1692,11 @@ export const WhiteboardCanvas: React.FC = () => {
                 onClick={() => handleSelectBgColor(bg.color)}
                 title={bg.label}
                 style={{
-                  width: '12px',
-                  height: '12px',
+                  width: '11px',
+                  height: '11px',
                   borderRadius: '3px',
                   background: bg.color,
                   border: bgColor === bg.color ? '2px solid #6366f1' : '1px solid rgba(255,255,255,0.25)',
-                  boxShadow: bgColor === bg.color ? '0 0 5px rgba(99, 102, 241, 0.8)' : 'none',
-                  cursor: 'pointer',
-                  padding: 0,
-                }}
-              />
-            ))}
-          </div>
-        </div>
-
-        {/* Pen Colors & Sizes */}
-        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-          {/* Colors */}
-          <div style={{ display: 'flex', gap: '3px', alignItems: 'center' }}>
-            {PEN_COLORS.map((c) => (
-              <button
-                key={c}
-                type="button"
-                onClick={() => setActiveColor(c)}
-                style={{
-                  width: '11px',
-                  height: '11px',
-                  borderRadius: '50%',
-                  background: c,
-                  border: activeColor === c ? '2px solid #ffffff' : '1px solid rgba(255,255,255,0.2)',
-                  boxShadow: activeColor === c ? `0 0 5px ${c}` : 'none',
                   cursor: 'pointer',
                   padding: 0,
                 }}
@@ -1685,29 +1704,77 @@ export const WhiteboardCanvas: React.FC = () => {
             ))}
           </div>
 
-          {/* Widths */}
-          <div style={{ display: 'flex', gap: '1px', alignItems: 'center' }}>
-            {PEN_SIZES.map((p) => (
-              <button
-                key={p.label}
-                type="button"
-                onClick={() => setActiveWidth(p.size)}
-                style={{
-                  fontSize: '8.5px',
-                  fontWeight: 700,
-                  padding: '1px 3px',
-                  borderRadius: '3px',
-                  background: activeWidth === p.size ? 'rgba(99, 102, 241, 0.4)' : 'rgba(255,255,255,0.05)',
-                  border: activeWidth === p.size ? '1px solid var(--primary)' : '1px solid transparent',
-                  color: activeWidth === p.size ? '#fff' : 'var(--text-dim)',
-                  cursor: 'pointer',
-                }}
-              >
-                {p.label}
-              </button>
-            ))}
+          {/* Pen Colors & Sizes */}
+          <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: '2px', alignItems: 'center' }}>
+              {PEN_COLORS.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => setActiveColor(c)}
+                  style={{
+                    width: '10px',
+                    height: '10px',
+                    borderRadius: '50%',
+                    background: c,
+                    border: activeColor === c ? '2px solid #ffffff' : '1px solid rgba(255,255,255,0.2)',
+                    cursor: 'pointer',
+                    padding: 0,
+                  }}
+                />
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', gap: '1px', alignItems: 'center' }}>
+              {PEN_SIZES.map((p) => (
+                <button
+                  key={p.label}
+                  type="button"
+                  onClick={() => setActiveWidth(p.size)}
+                  style={{
+                    fontSize: '8px',
+                    fontWeight: 700,
+                    padding: '1px 3px',
+                    borderRadius: '3px',
+                    background: activeWidth === p.size ? 'rgba(99, 102, 241, 0.4)' : 'rgba(255,255,255,0.05)',
+                    border: activeWidth === p.size ? '1px solid var(--primary)' : '1px solid transparent',
+                    color: activeWidth === p.size ? '#fff' : 'var(--text-dim)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
+      )}
+
+      {/* ─── 5. Interactive HTML5 Full-Workspace Canvas ─── */}
+      <div style={{ flex: 1, width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}>
+        <canvas
+          ref={canvasRef}
+          onMouseDown={handlePointerDown}
+          onMouseMove={handlePointerMove}
+          onMouseUp={handlePointerUp}
+          onMouseLeave={handlePointerUp}
+          onTouchStart={handlePointerDown}
+          onTouchMove={handlePointerMove}
+          onTouchEnd={handlePointerUp}
+          style={{
+            display: 'block',
+            width: '100%',
+            height: '100%',
+            cursor:
+              activeTool === 'eraser'
+                ? 'cell'
+                : activeTool === 'laser' || activeTool === 'torch'
+                ? 'crosshair'
+                : activeTool === 'text'
+                ? 'text'
+                : 'crosshair',
+          }}
+        />
       </div>
 
       {/* ─── 4. Text Prompt Modal ─── */}

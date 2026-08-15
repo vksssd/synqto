@@ -6,13 +6,11 @@ import { PeerIdentity } from '@/core/network/packet';
 import { OnlinePeer } from '@/features/discovery/discovery.service';
 import { RoomCard } from './RoomCard';
 import { ChatView } from '@/features/chat/ChatView';
-import { WhiteboardCanvas } from '@/features/whiteboard/WhiteboardCanvas';
 import { TutorStage } from '@/features/tutor/TutorStage';
 import { TutorService } from '@/features/tutor/tutor.service';
 import { VoiceRoom } from '@/features/voice/VoiceRoom';
 import { RoomService } from './room.service';
-import { Plus, ArrowRight, MessageSquare, Palette } from 'lucide-react';
-import { FAB_STORAGE_KEY } from '@/features/settings/fab-settings.types';
+import { Plus, ArrowRight } from 'lucide-react';
 
 interface ProblemRoomChatViewProps {
   room: RoomContext | null;
@@ -32,28 +30,6 @@ export const ProblemRoomChatView: React.FC<ProblemRoomChatViewProps> = ({
   const roomService = RoomService.getInstance();
   const tutorService = TutorService.getInstance();
   const [customRoomInput, setCustomRoomInput] = useState('');
-  const [enableWhiteboard, setEnableWhiteboard] = useState(false);
-  const [activeTab, setActiveTab] = useState<'chat' | 'whiteboard'>('chat');
-
-  // Check if whiteboard is enabled in settings
-  useEffect(() => {
-    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-      chrome.storage.local.get([FAB_STORAGE_KEY], (res) => {
-        if (res[FAB_STORAGE_KEY]?.enableWhiteboard) {
-          setEnableWhiteboard(true);
-        }
-      });
-
-      const handleStorage = (changes: any, area: string) => {
-        if (area === 'local' && changes[FAB_STORAGE_KEY]) {
-          setEnableWhiteboard(Boolean(changes[FAB_STORAGE_KEY].newValue?.enableWhiteboard));
-        }
-      };
-
-      chrome.storage.onChanged.addListener(handleStorage);
-      return () => chrome.storage.onChanged.removeListener(handleStorage);
-    }
-  }, []);
 
   // Listen for local mouse moves & clicks from content script to broadcast over P2P DataChannel
   useEffect(() => {
@@ -83,38 +59,49 @@ export const ProblemRoomChatView: React.FC<ProblemRoomChatViewProps> = ({
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', height: '100%' }}>
-      {/* Active Problem / Room Card */}
-      <RoomCard
-        room={room}
-        peerCount={peers.length + 1}
-        isLeader={isLeader}
-        isConnected={Boolean(identity && room)}
-        onLeaveRoom={() => roomService.leaveCurrentRoom()}
-        onOpenPeers={onOpenPeers}
-      />
-
-      {/* If not in a room, provide quick custom room form */}
-      {!room && (
-        <form onSubmit={handleJoinCustom} className="glass-card" style={{ padding: '10px 12px' }}>
-          <div className="glass-card-title" style={{ marginBottom: '6px', fontSize: '12px' }}>
-            <Plus size={13} color="var(--primary)" />
-            <span>Join Custom Study Room</span>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', height: '100%', overflowY: 'auto' }}>
+      {/* Active Problem Room Card */}
+      {room ? (
+        <RoomCard
+          room={room}
+          peers={peers}
+          isLeader={isLeader}
+          onOpenPeers={onOpenPeers}
+        />
+      ) : (
+        <div className="glass-card" style={{ padding: '14px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+            <span style={{ fontSize: '18px' }}>🌐</span>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: '13px', color: '#f8fafc' }}>
+                Global Study Lobby
+              </div>
+              <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                Navigate to a LeetCode / Codeforces problem to auto-join its room.
+              </div>
+            </div>
           </div>
-          <div style={{ display: 'flex', gap: '6px' }}>
+
+          {/* Quick Custom Room Join */}
+          <form onSubmit={handleJoinCustom} style={{ display: 'flex', gap: '6px', marginTop: '10px' }}>
             <input
               type="text"
               className="input-glass"
-              placeholder="e.g. leetcode-grind, system-design..."
+              placeholder="Or join custom room (e.g. system-design)"
               value={customRoomInput}
               onChange={(e) => setCustomRoomInput(e.target.value)}
               style={{ fontSize: '11px', padding: '6px 10px' }}
             />
-            <button type="submit" className="btn btn-primary btn-sm" disabled={!customRoomInput.trim()}>
-              <ArrowRight size={13} />
+            <button
+              type="submit"
+              className="btn btn-primary btn-sm"
+              disabled={!customRoomInput.trim()}
+              style={{ fontSize: '11px', padding: '6px 10px' }}
+            >
+              <ArrowRight size={12} />
             </button>
-          </div>
-        </form>
+          </form>
+        </div>
       )}
 
       {/* Tutor Stage Broadcaster */}
@@ -129,77 +116,12 @@ export const ProblemRoomChatView: React.FC<ProblemRoomChatViewProps> = ({
         />
       )}
 
-      {/* Segmented Switcher when Whiteboard is Enabled in Settings */}
-      {enableWhiteboard && (
-        <div
-          style={{
-            display: 'flex',
-            background: 'rgba(15, 23, 42, 0.8)',
-            padding: '3px',
-            borderRadius: 'var(--radius-sm)',
-            border: '1px solid var(--border-subtle)',
-            gap: '4px',
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => setActiveTab('chat')}
-            style={{
-              flex: 1,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '6px',
-              padding: '5px',
-              fontSize: '11px',
-              fontWeight: 600,
-              borderRadius: '4px',
-              background: activeTab === 'chat' ? 'var(--primary)' : 'transparent',
-              color: activeTab === 'chat' ? '#ffffff' : 'var(--text-muted)',
-              border: 'none',
-              cursor: 'pointer',
-              transition: 'all 0.2s',
-            }}
-          >
-            <MessageSquare size={13} />
-            <span>Live Chat</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('whiteboard')}
-            style={{
-              flex: 1,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '6px',
-              padding: '5px',
-              fontSize: '11px',
-              fontWeight: 600,
-              borderRadius: '4px',
-              background: activeTab === 'whiteboard' ? 'var(--primary)' : 'transparent',
-              color: activeTab === 'whiteboard' ? '#ffffff' : 'var(--text-muted)',
-              border: 'none',
-              cursor: 'pointer',
-              transition: 'all 0.2s',
-            }}
-          >
-            <Palette size={13} />
-            <span>Whiteboard</span>
-          </button>
-        </div>
-      )}
-
-      {/* Main Content Area: Chat or Collaborative Whiteboard */}
+      {/* Main Content Area: Dedicated Live Problem Chat View */}
       <div style={{ flex: 1, minHeight: '280px', display: 'flex', flexDirection: 'column' }}>
-        {enableWhiteboard && activeTab === 'whiteboard' ? (
-          <WhiteboardCanvas />
-        ) : (
-          <ChatView
-            myIdentity={identity}
-            roomId={room?.roomId || 'global-lobby'}
-          />
-        )}
+        <ChatView
+          myIdentity={identity}
+          roomId={room?.roomId || 'global-lobby'}
+        />
       </div>
     </div>
   );

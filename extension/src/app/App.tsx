@@ -14,7 +14,7 @@ import { RoomContext } from '@/features/room/room-utils';
 
 import { NavBar, NavTabType } from '@/features/navigation/NavBar';
 import { ProblemRoomChatView } from '@/features/room/ProblemRoomChatView';
-import { WhiteboardCanvas } from '@/features/whiteboard/WhiteboardCanvas';
+import { BoardAndDiaryContainer } from '@/features/whiteboard/BoardAndDiaryContainer';
 import { GroupHubView } from '@/features/group/GroupHubView';
 import { ProfileSettingsView } from '@/features/settings/ProfileSettingsView';
 import { PeerListModal } from '@/features/discovery/PeerListModal';
@@ -241,7 +241,7 @@ export const App: React.FC = () => {
             type="button"
             className={`btn ${currentTab === 'whiteboard' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
             onClick={() => setCurrentTab(currentTab === 'whiteboard' ? 'chat' : 'whiteboard')}
-            title="Open Collaborative Whiteboard"
+            title="Open Collaborative Whiteboard & Private Diary"
             style={{
               fontSize: '11px',
               padding: '3px 8px',
@@ -254,7 +254,7 @@ export const App: React.FC = () => {
             }}
           >
             <Palette size={12} />
-            <span>{currentTab === 'whiteboard' ? 'Exit Board' : 'Whiteboard 🎨'}</span>
+            <span>{currentTab === 'whiteboard' ? 'Exit Board' : 'Board & Diary 🎨'}</span>
           </button>
 
           {/* Detect Active Tab Button */}
@@ -327,10 +327,10 @@ export const App: React.FC = () => {
           />
         )}
 
-        {/* 2. Full Collaborative Whiteboard Screen */}
+        {/* 2. Full Collaborative Whiteboard & Personal Diary Screen */}
         {currentTab === 'whiteboard' && (
-          <div style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: '8px' }}>
-            <WhiteboardCanvas />
+          <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+            <BoardAndDiaryContainer />
           </div>
         )}
 

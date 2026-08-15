@@ -1,0 +1,1104 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <!-- Primary SEO Meta Tags -->
+  <title>Synqto — Live P2P Problem Solving & Tutor Stage for LeetCode & Codeforces</title>
+  <meta name="title" content="Synqto — Live P2P Problem Solving & Tutor Stage for LeetCode & Codeforces">
+  <meta name="description" content="Instant P2P collaborative study rooms that form automatically when you open the same problem on LeetCode, Codeforces, NeetCode, and HackerRank. Direct WebRTC screen share, laser pointers, and in-page chat with zero central servers.">
+  <meta name="keywords" content="Synqto, LeetCode collaboration, peer to peer coding, WebRTC study rooms, codeforces collaborative solving, chrome extension developer tools, live coding tutor, screen share leetcode, competitive programming study group, neetcode roadmap peer room, technical interview prep live">
+  <meta name="author" content="Synqto Core Team">
+  <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+  <link rel="canonical" href="https://synqto.dev/">
+
+  <!-- Geo & Regional Meta Tags -->
+  <meta name="geo.region" content="US;GB;IN;CA;DE;SG;AU;JP;FR;NL;BR">
+  <meta name="geo.placename" content="Global">
+  <meta name="coverage" content="Worldwide">
+  <meta name="distribution" content="Global">
+  <meta name="rating" content="General">
+  <meta name="revisit-after" content="7 days">
+
+  <!-- Multilingual Hreflang Tags -->
+  <link rel="alternate" hreflang="en" href="https://synqto.dev/">
+  <link rel="alternate" hreflang="es" href="https://synqto.dev/?lang=es">
+  <link rel="alternate" hreflang="zh" href="https://synqto.dev/?lang=zh">
+  <link rel="alternate" hreflang="hi" href="https://synqto.dev/?lang=hi">
+  <link rel="alternate" hreflang="x-default" href="https://synqto.dev/">
+
+  <!-- Open Graph / Facebook -->
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://synqto.dev/">
+  <meta property="og:site_name" content="Synqto">
+  <meta property="og:title" content="Synqto — Collaborative Problem Solving, Reimagined">
+  <meta property="og:description" content="Collaborate on LeetCode, Codeforces & NeetCode in real time with auto-forming P2P study rooms, screen sharing, and laser pointers.">
+  <meta property="og:image" content="https://synqto.dev/assets/og-image.png">
+  <meta property="og:locale" content="en_US">
+
+  <!-- Twitter Meta -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:url" content="https://synqto.dev/">
+  <meta name="twitter:title" content="Synqto — Live P2P Problem Solving & Tutor Stage">
+  <meta name="twitter:description" content="Instant collaborative study rooms that form automatically on LeetCode, Codeforces & NeetCode. Real-time screen share & laser pointers.">
+  <meta name="twitter:image" content="https://synqto.dev/assets/og-image.png">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%236366f1'><polygon points='13 2 3 14 12 14 11 22 21 10 12 10 13 2'/></svg>">
+  <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%236366f1'><polygon points='13 2 3 14 12 14 11 22 21 10 12 10 13 2'/></svg>">
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <!-- Lucide Icons CDN -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <link rel="stylesheet" href="style.css">
+
+  <!-- JSON-LD Structured Data: SoftwareApplication -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Synqto",
+    "operatingSystem": "Google Chrome, Microsoft Edge, Brave, Chromium (Manifest V3)",
+    "applicationCategory": "DeveloperApplication",
+    "applicationSubCategory": "EducationalApplication",
+    "description": "Instant P2P collaborative study rooms that form automatically when you open the same problem on LeetCode, Codeforces, NeetCode, and HackerRank. Real-time screen share, laser pointers, and in-page chat.",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD"
+    },
+    "aggregateRating": {
+      "@type": "AggregateRating",
+      "ratingValue": "4.9",
+      "ratingCount": "380",
+      "bestRating": "5",
+      "worstRating": "1"
+    },
+    "featureList": [
+      "Auto-forming P2P problem rooms via deterministic URL hashing",
+      "System Architecture & Collaborative Whiteboard Studio with 11 design shapes and disappearing ink",
+      "Private offline coding diary and problem journal with local storage and Markdown export",
+      "Live Tutor Stage with screen and camera streaming",
+      "Real-time synchronized laser pointer with 25fps coordinate mapping",
+      "In-page floating chat with click-to-reveal spoilers and 1-click code copying",
+      "Dual-leader backbone clustering supporting 17,000+ messages/sec",
+      "Developer streak heatmaps and gamification badges"
+    ]
+  }
+  </script>
+
+  <!-- JSON-LD Structured Data: BreadcrumbList -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+      {
+        "@type": "ListItem",
+        "position": 1,
+        "name": "Home",
+        "item": "https://synqto.dev/"
+      },
+      {
+        "@type": "ListItem",
+        "position": 2,
+        "name": "Download Beta Extension",
+        "item": "https://synqto.dev/downloads/synqto-v0.1.0.zip"
+      }
+    ]
+  }
+  </script>
+
+  <!-- JSON-LD Structured Data: HowTo (Google Rich Snippet) -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "HowTo",
+    "name": "How to Install and Use Synqto for Live LeetCode Collaboration",
+    "description": "Step-by-step instructions to install the Synqto Chrome extension and solve problems collaboratively with peers in real-time.",
+    "totalTime": "PT1M",
+    "step": [
+      {
+        "@type": "HowToStep",
+        "name": "Download and Extract",
+        "text": "Download the synqto-v0.1.0.zip beta bundle and extract the files to a local folder.",
+        "url": "https://synqto.dev/#how-to-test"
+      },
+      {
+        "@type": "HowToStep",
+        "name": "Open Chrome Extensions",
+        "text": "Navigate to chrome://extensions in any Chromium browser and enable Developer mode.",
+        "url": "https://synqto.dev/#how-to-test"
+      },
+      {
+        "@type": "HowToStep",
+        "name": "Load Unpacked Extension",
+        "text": "Click 'Load unpacked' and select the unzipped directory containing manifest.json.",
+        "url": "https://synqto.dev/#how-to-test"
+      },
+      {
+        "@type": "HowToStep",
+        "name": "Collaborate on LeetCode",
+        "text": "Open any problem such as Two Sum on LeetCode to auto-join the P2P room, start screen sharing, or chat with peers.",
+        "url": "https://synqto.dev/#how-to-test"
+      }
+    ]
+  }
+  </script>
+
+  <!-- JSON-LD Structured Data: FAQPage -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "Is Synqto completely free and open source?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Yes! Synqto is 100% free, MIT licensed, and fully open source. You can inspect the entire codebase, self-host the Go signaling server, or contribute on GitHub."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Do my screen shares, audio, or chat messages pass through any central servers?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "No. Synqto uses direct WebSockets only for SDP signaling. All screen streams, audio calls, mouse coordinates, and chat messages are transmitted directly between browsers using encrypted WebRTC DataChannels and MediaStreams."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Which browsers are supported?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Synqto supports Google Chrome, Brave Browser, Microsoft Edge, Opera, Arc, and any Chromium-based browser supporting Chrome Extension Manifest V3 and the Side Panel API."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "How does the auto-forming room mechanism work?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "When you visit a supported coding platform, the content script inspects the canonical URL, normalizes the slug, and hashes it into a deterministic room ID. All peers on that same problem join the exact same cluster mesh automatically."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Can I customize the floating button or open the side panel directly?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Yes. Under the Profile & Settings tab, you can customize the floating button's position, opacity, unread badges, and choose whether clicking it opens the in-page chat popup or expands the Chrome Side Panel directly."
+        }
+      }
+    ]
+  }
+  </script>
+</head>
+<body>
+
+  <!-- Background Decorative Ambient Glows -->
+  <div class="bg-glow bg-glow-1"></div>
+  <div class="bg-glow bg-glow-2"></div>
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- Regional Network Status Bar -->
+  <div class="regional-status-bar">
+    <div class="container regional-status-content">
+      <div class="geo-region-badge">
+        <span class="geo-live-dot"></span>
+        <span id="geo-detected-region"><i data-lucide="globe" class="icon-xxs"></i> Global Anycast Mesh Active</span>
+      </div>
+      <div class="geo-latency-info">
+        <span>Region Latency: <strong id="geo-ping-val">0.6ms</strong></span>
+        <span class="geo-divider">•</span>
+        <span id="geo-time-display">UTC</span>
+      </div>
+      <!-- Language Quick Switcher -->
+      <div class="lang-selector-wrapper">
+        <select id="lang-selector" class="lang-select" aria-label="Select Language">
+          <option value="en" selected>🌐 English (US)</option>
+          <option value="es">🇪🇸 Español</option>
+          <option value="zh">🇨🇳 简体中文</option>
+          <option value="hi">🇮🇳 हिन्दी</option>
+          <option value="ja">🇯🇵 日本語</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- Navigation Bar -->
+  <header class="navbar" id="navbar">
+    <div class="container nav-container">
+      <a href="#" class="nav-brand" aria-label="Synqto Home">
+        <span class="brand-icon-wrapper"><i data-lucide="zap" class="icon-brand"></i></span>
+        <span class="brand-text">Synq<span class="brand-gradient">to</span></span>
+        <span class="badge-beta">v0.1.0 Beta</span>
+      </a>
+
+      <nav class="nav-links" id="nav-links" aria-label="Main Navigation">
+        <a href="#features">Features</a>
+        <a href="#interactive-p2p-demo">Demo</a>
+        <a href="#sandbox">Simulator</a>
+        <a href="#architecture">Architecture</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+
+      <div class="nav-actions">
+        <a href="https://github.com/vksssd/synqto" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm" aria-label="View Source on GitHub">
+          <svg class="icon-svg" viewBox="0 0 24 24" width="15" height="15" fill="currentColor">
+            <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+          </svg>
+          <span>GitHub</span>
+        </a>
+        <a href="downloads/synqto-v0.1.0.zip" download class="btn btn-primary btn-sm btn-download-trigger" aria-label="Download Synqto Beta Package">
+          <i data-lucide="download" class="icon-sm"></i>
+          <span>Download Beta (.zip)</span>
+        </a>
+      </div>
+
+      <button class="nav-toggle" id="nav-toggle" aria-label="Toggle Navigation Menu">
+        <i data-lucide="menu" id="nav-toggle-icon"></i>
+      </button>
+    </div>
+  </header>
+
+  <main>
+    <!-- Hero Section -->
+    <section class="hero-section" aria-labelledby="main-heading">
+      <div class="container hero-container">
+        <div class="hero-badge">
+          <span class="badge-dot"></span>
+          <span>Chrome Extension Manifest V3 • Zero-Server P2P Mesh • System Design Whiteboard • Offline Diary</span>
+        </div>
+
+        <h1 class="hero-title" id="main-heading">
+          Code Together, <span class="text-gradient">In Real Time.</span><br>
+          Zero Setup Required.
+        </h1>
+
+        <p class="hero-subtitle">
+          Instant collaborative study rooms that form automatically the second you open any 
+          <strong>LeetCode</strong>, <strong>Codeforces</strong>, <strong>NeetCode</strong>, or <strong>HackerRank</strong> problem. 
+          Includes <strong>System Architecture Whiteboards</strong>, <strong>Private Offline Coding Diaries</strong>, 
+          direct WebRTC screen sharing, and laser pointers with <strong>zero central servers between peers</strong>.
+        </p>
+
+        <div class="hero-cta-group">
+          <a href="downloads/synqto-v0.1.0.zip" download class="btn btn-primary btn-lg btn-download-trigger">
+            <div class="btn-lg-content">
+              <i data-lucide="download" class="icon-lg"></i>
+              <div class="btn-lg-text">
+                <span class="btn-main-text">Download Extension (.zip)</span>
+                <span class="btn-subtext">v0.1.0 Beta • 133 KB • Ready to Load</span>
+              </div>
+            </div>
+          </a>
+          <a href="#how-to-test" class="btn btn-secondary btn-lg">
+            <div class="btn-lg-content">
+              <i data-lucide="terminal" class="icon-lg"></i>
+              <div class="btn-lg-text">
+                <span class="btn-main-text">How to Install & Test</span>
+                <span class="btn-subtext">60-Second Setup Guide</span>
+              </div>
+            </div>
+          </a>
+        </div>
+
+        <!-- Supported Platforms Pill Bar -->
+        <div class="platforms-bar">
+          <span class="platforms-label">Global Coding Environments Supported:</span>
+          <div class="platforms-list">
+            <span class="platform-chip"><i data-lucide="code-2" class="icon-xs"></i> LeetCode</span>
+            <span class="platform-chip"><i data-lucide="target" class="icon-xs"></i> NeetCode</span>
+            <span class="platform-chip"><i data-lucide="swords" class="icon-xs"></i> Codeforces</span>
+            <span class="platform-chip"><i data-lucide="laptop" class="icon-xs"></i> HackerRank</span>
+            <span class="platform-chip"><i data-lucide="chef-hat" class="icon-xs"></i> CodeChef</span>
+            <span class="platform-chip"><i data-lucide="book-open" class="icon-xs"></i> GeeksforGeeks</span>
+            <span class="platform-chip"><i data-lucide="youtube" class="icon-xs"></i> YouTube</span>
+            <span class="platform-chip"><i data-lucide="file-text" class="icon-xs"></i> arXiv CS</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Live Dual-Peer Interactive Simulation Section -->
+    <section class="dual-demo-section" id="interactive-p2p-demo" aria-label="Interactive Dual-Peer Simulation">
+      <div class="container">
+        <div class="section-header">
+          <div class="badge-pill"><i data-lucide="sparkles" class="icon-xs"></i> Real-Time Interactive Experience</div>
+          <h2 class="section-title">Experience Real-Time P2P Mesh In Action</h2>
+          <p class="section-subtitle">Move your mouse in Peer 1 or send a chat to see it mirror to Peer 2 with zero server latency.</p>
+        </div>
+
+        <div class="dual-demo-container">
+          <!-- Peer 1 Window (Tutor Alice) -->
+          <article class="mock-browser-card" id="peer-card-1">
+            <header class="mock-card-header">
+              <div class="browser-dots">
+                <span class="dot dot-red"></span>
+                <span class="dot dot-yellow"></span>
+                <span class="dot dot-green"></span>
+              </div>
+              <div class="card-user-info">
+                <span class="user-role-badge tutor-badge"><i data-lucide="crown" class="icon-xxs"></i> Alice (Tutor)</span>
+                <span class="card-url">leetcode.com/problems/two-sum</span>
+              </div>
+              <div class="card-status"><span class="status-indicator"></span> Live</div>
+            </header>
+
+            <div class="mock-card-body">
+              <div class="code-editor-area" id="code-interactive-1">
+                <div class="code-header-bar">
+                  <span>solution.py</span>
+                  <span class="hint-text"><i data-lucide="mouse-pointer-2" class="icon-xxs"></i> Hover mouse here to move laser!</span>
+                </div>
+                <div class="code-content">
+                  <div><span class="c-kw">def</span> <span class="c-fn">twoSum</span>(nums, target):</div>
+                  <div class="indent"><span class="c-var">lookup</span> = {}</div>
+                  <div class="indent"><span class="c-kw">for</span> i, num <span class="c-kw">in</span> <span class="c-fn">enumerate</span>(nums):</div>
+                  <div class="indent-2"><span class="c-var">diff</span> = target - num</div>
+                  <div class="indent-2"><span class="c-kw">if</span> diff <span class="c-kw">in</span> lookup:</div>
+                  <div class="indent-3"><span class="c-kw">return</span> [lookup[diff], i]</div>
+                  <div class="indent-2">lookup[num] = i</div>
+                </div>
+                <div class="local-laser-dot" id="alice-local-laser"></div>
+              </div>
+
+              <!-- Mini Chat Area 1 -->
+              <div class="mini-chat-pane">
+                <div class="mini-chat-header">
+                  <span>💬 Problem Chat (Alice)</span>
+                  <button class="btn-micro" id="btn-trigger-stage"><i data-lucide="tv" class="icon-xxs"></i> Toggle Stage</button>
+                </div>
+                <div class="mini-chat-stream" id="chat-stream-1">
+                  <div class="chat-bubble received">
+                    <span class="bubble-nick">Bob:</span> Hey Alice, why use a dictionary here?
+                  </div>
+                  <div class="chat-bubble sent">
+                    <span class="bubble-nick">You (Alice):</span> Gives us O(1) lookups instead of O(N)! <span class="ack-mark">✓✓</span>
+                  </div>
+                </div>
+                <div class="mini-chat-input-box">
+                  <input type="text" id="input-peer-1" placeholder="Type a message as Alice..." value="Check line 4 where we calculate diff!" aria-label="Alice chat input">
+                  <button id="send-peer-1" class="btn-send-mini" aria-label="Send message"><i data-lucide="send" class="icon-xs"></i></button>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <!-- Connection Wire Visualizer -->
+          <div class="mesh-wire-visualizer">
+            <div class="wire-pulse"></div>
+            <div class="wire-label"><i data-lucide="lock" class="icon-xxs"></i> Direct P2P WebRTC DataChannel (0.6ms)</div>
+          </div>
+
+          <!-- Peer 2 Window (Audience Bob) -->
+          <article class="mock-browser-card" id="peer-card-2">
+            <header class="mock-card-header">
+              <div class="browser-dots">
+                <span class="dot dot-red"></span>
+                <span class="dot dot-yellow"></span>
+                <span class="dot dot-green"></span>
+              </div>
+              <div class="card-user-info">
+                <span class="user-role-badge audience-badge"><i data-lucide="user" class="icon-xxs"></i> Bob (Audience)</span>
+                <span class="card-url">leetcode.com/problems/two-sum</span>
+              </div>
+              <div class="card-status"><span class="status-indicator"></span> Connected</div>
+            </header>
+
+            <div class="mock-card-body">
+              <div class="code-editor-area" id="code-interactive-2">
+                <div class="code-header-bar">
+                  <span>solution.py</span>
+                  <span class="hint-text" style="color: #38bdf8;">⚡ Receiving Alice's Laser Pointer</span>
+                </div>
+                <div class="code-content">
+                  <div><span class="c-kw">def</span> <span class="c-fn">twoSum</span>(nums, target):</div>
+                  <div class="indent"><span class="c-var">lookup</span> = {}</div>
+                  <div class="indent"><span class="c-kw">for</span> i, num <span class="c-kw">in</span> <span class="c-fn">enumerate</span>(nums):</div>
+                  <div class="indent-2"><span class="c-var">diff</span> = target - num</div>
+                  <div class="indent-2"><span class="c-kw">if</span> diff <span class="c-kw">in</span> lookup:</div>
+                  <div class="indent-3"><span class="c-kw">return</span> [lookup[diff], i]</div>
+                  <div class="indent-2">lookup[num] = i</div>
+                </div>
+                <!-- Remote Laser Pointer for Bob -->
+                <div class="remote-laser-pointer" id="bob-remote-laser">
+                  <div class="remote-dot"></div>
+                  <div class="remote-tag">👑 Alice (Tutor)</div>
+                </div>
+              </div>
+
+              <!-- Mini Chat Area 2 -->
+              <div class="mini-chat-pane">
+                <div class="mini-chat-header">
+                  <span>💬 Problem Chat (Bob)</span>
+                  <span class="stage-alert-pill" id="bob-stage-pill"><i data-lucide="radio" class="icon-xxs"></i> Alice Live</span>
+                </div>
+                <div class="mini-chat-stream" id="chat-stream-2">
+                  <div class="chat-bubble sent">
+                    <span class="bubble-nick">You (Bob):</span> Hey Alice, why use a dictionary here? <span class="ack-mark">✓✓</span>
+                  </div>
+                  <div class="chat-bubble received">
+                    <span class="bubble-nick">Alice:</span> Gives us O(1) lookups instead of O(N)!
+                  </div>
+                </div>
+                <div class="mini-chat-input-box">
+                  <input type="text" id="input-peer-2" placeholder="Reply as Bob..." value="Got it, that reduces time to O(N)!" aria-label="Bob chat input">
+                  <button id="send-peer-2" class="btn-send-mini" aria-label="Send message"><i data-lucide="send" class="icon-xs"></i></button>
+                </div>
+              </div>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- Core Features Grid -->
+    <section class="features-section" id="features" aria-label="Core Capabilities">
+      <div class="container">
+        <div class="section-header">
+          <div class="badge-pill"><i data-lucide="layers" class="icon-xs"></i> Feature Architecture</div>
+          <h2 class="section-title">Built for Serious Problem Solvers</h2>
+          <p class="section-subtitle">Everything you need to study, teach, and prepare for coding interviews collaboratively worldwide.</p>
+        </div>
+
+        <div class="features-grid">
+          <!-- Feature 1 -->
+          <article class="feature-card">
+            <div class="feature-icon-wrapper">
+              <i data-lucide="zap" class="icon-feature"></i>
+            </div>
+            <h3 class="feature-title">Auto-Forming P2P Rooms</h3>
+            <p class="feature-desc">
+              Zero invite codes or room URLs. Rooms are deterministically hashed from canonical problem URLs. Open any problem on LeetCode, and you're instantly in the room.
+            </p>
+            <div class="feature-tag"><i data-lucide="cpu" class="icon-xxs"></i> Deterministic URL Hashing</div>
+          </article>
+
+          <!-- Feature 2: System Architecture & Whiteboard Studio -->
+          <article class="feature-card highlight-card">
+            <div class="feature-icon-wrapper" style="background: rgba(99, 102, 241, 0.25); color: #818cf8;">
+              <i data-lucide="palette" class="icon-feature"></i>
+            </div>
+            <h3 class="feature-title">System Architecture & Whiteboard</h3>
+            <p class="feature-desc">
+              Collaborative canvas with 11 System Design shapes (🗄️ Database, ☁️ Cloud, ⚖️ Load Balancer, 📨 Message Queue, 📦 Server Box, ⚡ Cache, 👤 Client, 🌳 Trees), ⏳ Disappearing Temporary Ink (3s fade), and 7 background themes.
+            </p>
+            <div class="feature-tag"><i data-lucide="shapes" class="icon-xxs"></i> 11 System Design Tools & Temp Pen</div>
+          </article>
+
+          <!-- Feature 3: Personal Coding Diary & Journal -->
+          <article class="feature-card highlight-card">
+            <div class="feature-icon-wrapper" style="background: rgba(16, 185, 129, 0.25); color: #34d399;">
+              <i data-lucide="book-open" class="icon-feature"></i>
+            </div>
+            <h3 class="feature-title">Private Coding Diary & Notes</h3>
+            <p class="feature-desc">
+              Full-featured offline journal stored locally in <code>chrome.storage.local</code>. Create multiple diaries (Daily Problem Log, System Design Notes, Bug Retrospectives), auto-dated entries, tags (<code>#dp</code>), mood tracking, and Markdown export.
+            </p>
+            <div class="feature-tag"><i data-lucide="lock" class="icon-xxs"></i> 100% Local Storage Persistence</div>
+          </article>
+
+          <!-- Feature 4 -->
+          <article class="feature-card">
+            <div class="feature-icon-wrapper">
+              <i data-lucide="tv" class="icon-feature"></i>
+            </div>
+            <h3 class="feature-title">Multi-Broadcaster Live Stage</h3>
+            <p class="feature-desc">
+              Host live walkthroughs with 1-click screen or camera streaming. Multiple peers can go live simultaneously on any problem, with live stream selector carousel.
+            </p>
+            <div class="feature-tag"><i data-lucide="radio" class="icon-xxs"></i> WebRTC Multi-Stream Mesh</div>
+          </article>
+
+          <!-- Feature 5 -->
+          <article class="feature-card">
+            <div class="feature-icon-wrapper">
+              <i data-lucide="crosshair" class="icon-feature"></i>
+            </div>
+            <h3 class="feature-title">Live Laser Pointer & Spotlight</h3>
+            <p class="feature-desc">
+              Point to specific code lines and test cases across everyone's screens with sub-millisecond coordinate mapping, glowing laser trails, and darkened spotlight focus.
+            </p>
+            <div class="feature-tag"><i data-lucide="mouse-pointer-2" class="icon-xxs"></i> 25fps Coordinate Broadcast</div>
+          </article>
+
+          <!-- Feature 6 -->
+          <article class="feature-card">
+            <div class="feature-icon-wrapper">
+              <i data-lucide="message-square-code" class="icon-feature"></i>
+            </div>
+            <h3 class="feature-title">Focused Chat & Spoilers</h3>
+            <p class="feature-desc">
+              Clean in-page popup and sidepanel chat with click-to-reveal spoiler protection (<code>||hint solution||</code>), 1-click code copying, and 3-level message delivery ACKs.
+            </p>
+            <div class="feature-tag"><i data-lucide="check-check" class="icon-xxs"></i> Spoilers & 1-Click Code Copy</div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- Interactive Whiteboard & Diary Live Playground Section -->
+    <section class="whiteboard-studio-section" id="whiteboard-studio" aria-label="Interactive Whiteboard & Diary Studio">
+      <div class="container">
+        <div class="section-header">
+          <div class="badge-pill"><i data-lucide="sparkles" class="icon-xs"></i> Interactive Studio Playground</div>
+          <h2 class="section-title">Whiteboard Architecture Studio & Private Diary</h2>
+          <p class="section-subtitle">Try drawing system design components or switch to the private coding journal directly in your browser.</p>
+        </div>
+
+        <div class="studio-card">
+          <!-- Studio Header Mode Switcher -->
+          <div class="studio-header">
+            <div class="studio-tabs">
+              <button class="studio-tab active" id="tab-btn-whiteboard">
+                <i data-lucide="palette" class="icon-xs"></i>
+                <span>🎨 System Design Whiteboard</span>
+              </button>
+              <button class="studio-tab" id="tab-btn-diary">
+                <i data-lucide="book-open" class="icon-xs"></i>
+                <span>📔 Coding Diary & Journal</span>
+              </button>
+            </div>
+            <div class="studio-meta">
+              <span class="badge-status-dot"></span>
+              <span id="studio-mode-label">Live Interactive Canvas</span>
+            </div>
+          </div>
+
+          <!-- Whiteboard Workspace View -->
+          <div class="studio-workspace" id="workspace-whiteboard">
+            <!-- Studio Toolbar -->
+            <div class="studio-toolbar">
+              <div class="tool-btn-group">
+                <button class="wb-demo-btn active" data-tool="pen" title="Fine Pen">✏️ Pen</button>
+                <button class="wb-demo-btn" data-tool="temp_pen" title="⏳ Disappearing Ink (Fades in 3s)">⏳ Temp Ink</button>
+                <button class="wb-demo-btn" data-tool="db_cylinder" title="🗄️ Database Cylinder">🗄️ DB</button>
+                <button class="wb-demo-btn" data-tool="cloud" title="☁️ Cloud Gateway">☁️ Cloud</button>
+                <button class="wb-demo-btn" data-tool="load_balancer" title="⚖️ Load Balancer">⚖️ LB</button>
+                <button class="wb-demo-btn" data-tool="server_box" title="📦 App Server">📦 Server</button>
+                <button class="wb-demo-btn" data-tool="tree_node" title="🌳 Tree Node">🌳 Node</button>
+                <button class="wb-demo-btn" data-tool="eraser" title="Eraser">🧹 Eraser</button>
+              </div>
+
+              <div class="tool-btn-group">
+                <!-- Color Dots -->
+                <div class="wb-color-picker">
+                  <span class="color-swatch active" data-color="#6366f1" style="background:#6366f1;"></span>
+                  <span class="color-swatch" data-color="#06b6d4" style="background:#06b6d4;"></span>
+                  <span class="color-swatch" data-color="#10b981" style="background:#10b981;"></span>
+                  <span class="color-swatch" data-color="#f59e0b" style="background:#f59e0b;"></span>
+                  <span class="color-swatch" data-color="#f43f5e" style="background:#f43f5e;"></span>
+                  <span class="color-swatch" data-color="#ffffff" style="background:#ffffff;"></span>
+                </div>
+                <button class="btn-micro" id="wb-demo-clear" style="color:#f87171;"><i data-lucide="trash-2" class="icon-xxs"></i> Clear</button>
+              </div>
+            </div>
+
+            <!-- HTML5 Interactive Demo Canvas -->
+            <div class="studio-canvas-container">
+              <canvas id="landing-wb-canvas" width="900" height="380"></canvas>
+              <div class="canvas-watermark-hint">
+                <i data-lucide="mouse-pointer" class="icon-xs"></i> Click & drag anywhere to draw architecture components or disappearing ink!
+              </div>
+            </div>
+          </div>
+
+          <!-- Diary Workspace View -->
+          <div class="studio-workspace" id="workspace-diary" style="display: none;">
+            <div class="diary-demo-container">
+              <!-- Diary Left Sidebar -->
+              <div class="diary-demo-sidebar">
+                <div class="diary-book-pill">
+                  <span>📓 Daily Problem Log (2 entries)</span>
+                </div>
+                <div class="diary-entries-list">
+                  <div class="diary-entry-card active" data-entry="1">
+                    <div class="diary-entry-date">Today • Breakthrough 💡</div>
+                    <div class="diary-entry-title">Two Sum (Optimal O(N) Hash Map)</div>
+                    <div class="diary-entry-tags">#leetcode #hashmap #arrays</div>
+                  </div>
+                  <div class="diary-entry-card" data-entry="2">
+                    <div class="diary-entry-date">Yesterday • Productive 🚀</div>
+                    <div class="diary-entry-title">LRU Cache Architecture & Doubly Linked List</div>
+                    <div class="diary-entry-tags">#system-design #cache #lru</div>
+                  </div>
+                </div>
+                <button class="btn btn-secondary btn-sm" id="btn-diary-demo-add" style="margin-top: 8px; width: 100%; font-size: 11px;">
+                  <i data-lucide="plus" class="icon-xxs"></i> <span>New Diary Entry</span>
+                </button>
+              </div>
+
+              <!-- Diary Editor Preview -->
+              <div class="diary-demo-editor">
+                <div class="diary-editor-header">
+                  <input type="text" class="diary-title-input" id="diary-demo-title" value="Two Sum (Optimal O(N) Hash Map)">
+                  <div class="diary-meta-row">
+                    <span class="diary-mood-badge">💡 Breakthrough</span>
+                    <span class="diary-problem-link"><i data-lucide="external-link" class="icon-xxs"></i> leetcode.com/problems/two-sum</span>
+                  </div>
+                </div>
+                <textarea class="diary-textarea" id="diary-demo-content" rows="9">### 🎯 Daily Reflection & Notes
+
+- **Approach**: Single-pass Hash Map
+- **Time Complexity**: $O(N)$
+- **Space Complexity**: $O(N)$
+
+```python
+def twoSum(nums, target):
+    seen = {}
+    for i, num in enumerate(nums):
+        diff = target - num
+        if diff in seen:
+            return [seen[diff], i]
+        seen[num] = i
+    return []
+```
+
+- [x] Solved in 6 minutes
+- [x] Verified zero off-by-one errors</textarea>
+                <div class="diary-footer-actions">
+                  <span class="diary-storage-tag"><i data-lucide="shield-check" class="icon-xxs"></i> Saved to Local Storage</span>
+                  <button class="btn btn-primary btn-sm" id="btn-diary-demo-export">
+                    <i data-lucide="file-text" class="icon-xxs"></i>
+                    <span>Export PDF & Markdown</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Interactive Sandbox Simulator -->
+    <section class="sandbox-section" id="sandbox" aria-label="Interactive URL Hasher">
+      <div class="container">
+        <div class="section-header">
+          <div class="badge-pill"><i data-lucide="terminal" class="icon-xs"></i> Client-Side Hasher</div>
+          <h2 class="section-title">Interactive Problem Room Simulator</h2>
+          <p class="section-subtitle">Test how Synqto hashes problem URLs into deterministic P2P rooms in real time.</p>
+        </div>
+
+        <div class="sandbox-card">
+          <div class="sandbox-header">
+            <span class="sandbox-label"><i data-lucide="sparkles" class="icon-xs"></i> Try Entering Any Problem URL:</span>
+            <div class="preset-buttons">
+              <button class="preset-btn" data-url="https://leetcode.com/problems/two-sum/"><i data-lucide="code-2" class="icon-xs"></i> Two Sum (LeetCode)</button>
+              <button class="preset-btn" data-url="https://leetcode.com/problems/trapping-rain-water/"><i data-lucide="code-2" class="icon-xs"></i> Trapping Rain Water (LeetCode)</button>
+              <button class="preset-btn" data-url="https://codeforces.com/problemset/problem/4/A"><i data-lucide="swords" class="icon-xs"></i> 4A Watermelon (Codeforces)</button>
+            </div>
+          </div>
+
+          <div class="sandbox-input-row">
+            <input type="text" id="sandbox-url-input" class="sandbox-input" value="https://leetcode.com/problems/two-sum/" aria-label="Problem URL input">
+            <button id="sandbox-hash-btn" class="btn btn-primary">
+              <i data-lucide="hash" class="icon-sm"></i>
+              <span>Compute Room Hash</span>
+            </button>
+          </div>
+
+          <div class="sandbox-results" id="sandbox-results">
+            <div class="result-box">
+              <span class="result-label"><i data-lucide="globe" class="icon-xxs"></i> Detected Platform:</span>
+              <span class="result-value" id="res-platform">LeetCode</span>
+            </div>
+            <div class="result-box">
+              <span class="result-label"><i data-lucide="file-code" class="icon-xxs"></i> Problem Slug:</span>
+              <span class="result-value" id="res-slug">two-sum</span>
+            </div>
+            <div class="result-box result-highlight">
+              <span class="result-label"><i data-lucide="key" class="icon-xxs"></i> Deterministic Room ID:</span>
+              <span class="result-value code-font" id="res-room-id">room:two-sum-c99292e0</span>
+            </div>
+          </div>
+
+          <!-- Interactive Spoiler Demo Inside Sandbox -->
+          <div class="sandbox-spoiler-demo">
+            <span class="demo-title"><i data-lucide="eye" class="icon-xs"></i> Interactive Hint Spoiler:</span>
+            <p class="demo-desc">Click on the blurred pill to reveal the hidden solution hint:</p>
+            <div class="spoiler-pill" id="demo-spoiler" title="Click to reveal">
+              <span class="spoiler-text">💡 Use a Hash Map with complement lookups to achieve O(N) time complexity!</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Technical Architecture & Privacy -->
+    <section class="architecture-section" id="architecture" aria-label="Architecture & Privacy">
+      <div class="container">
+        <div class="section-header">
+          <div class="badge-pill"><i data-lucide="shield-check" class="icon-xs"></i> Privacy & Performance</div>
+          <h2 class="section-title">Zero-Server WebRTC Architecture</h2>
+          <p class="section-subtitle">How Synqto keeps your screen sharing, video, audio, and code private between peers.</p>
+        </div>
+
+        <div class="architecture-grid">
+          <article class="arch-card">
+            <div class="arch-icon"><i data-lucide="lock" class="icon-md"></i></div>
+            <h3 class="arch-title">Direct P2P Encryption</h3>
+            <p class="arch-desc">Audio, video, screen streams, and chat messages are encrypted with DTLS-SRTP and flow directly between peer browsers with no server in between.</p>
+          </article>
+
+          <article class="arch-card">
+            <div class="arch-icon"><i data-lucide="zap" class="icon-md"></i></div>
+            <h3 class="arch-title">Sub-Millisecond Signaling</h3>
+            <p class="arch-desc">The Go signaling engine only coordinates initial SDP offers/answers (~5ms handshake) and cluster elections before stepping out of the media path.</p>
+          </article>
+
+          <article class="arch-card">
+            <div class="arch-icon"><i data-lucide="database" class="icon-md"></i></div>
+            <h3 class="arch-title">Local-Only Data Storage</h3>
+            <p class="arch-desc">Chat logs, streaks, and user preferences are stored purely in your browser's local storage. Zero analytics or user tracking.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- Comparison Table Section (High-Intent SEO Keywords) -->
+    <section class="comparison-section" id="comparison" aria-label="Feature Comparison">
+      <div class="container">
+        <div class="section-header">
+          <div class="badge-pill"><i data-lucide="scale" class="icon-xs"></i> Why Synqto?</div>
+          <h2 class="section-title">How Synqto Compares</h2>
+          <p class="section-subtitle">Why competitive programmers and interview cohorts choose Synqto over generic meeting apps.</p>
+        </div>
+
+        <div class="comparison-table-wrapper">
+          <table class="comparison-table">
+            <thead>
+              <tr>
+                <th class="th-feature">Feature / Capability</th>
+                <th class="th-nerd highlight-header"><i data-lucide="zap" class="icon-xs"></i> Synqto</th>
+                <th>Discord / Slack</th>
+                <th>Zoom / Google Meet</th>
+                <th>VS Code Live Share</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="td-feature">
+                  <strong>Automatic URL-Based Room Formation</strong>
+                  <span>No room links or invite codes needed</span>
+                </td>
+                <td class="td-nerd highlight-cell"><i data-lucide="check-circle-2" class="icon-check"></i> Instant (0s)</td>
+                <td><i data-lucide="x-circle" class="icon-cross"></i> Manual Voice Channel</td>
+                <td><i data-lucide="x-circle" class="icon-cross"></i> Manual Calendar Link</td>
+                <td><i data-lucide="x-circle" class="icon-cross"></i> Manual Invitation URL</td>
+              </tr>
+              <tr>
+                <td class="td-feature">
+                  <strong>Zero-Server P2P Mesh Privacy</strong>
+                  <span>Direct browser-to-browser encrypted streams</span>
+                </td>
+                <td class="td-nerd highlight-cell"><i data-lucide="check-circle-2" class="icon-check"></i> 100% P2P Encrypted</td>
+                <td><i data-lucide="x-circle" class="icon-cross"></i> Central Server Media</td>
+                <td><i data-lucide="x-circle" class="icon-cross"></i> Central Cloud Media</td>
+                <td><i data-lucide="minus-circle" class="icon-neutral"></i> Microsoft Relay</td>
+              </tr>
+              <tr>
+                <td class="td-feature">
+                  <strong>Live Synchronized Laser Pointer</strong>
+                  <span>Point directly to code lines across all screens</span>
+                </td>
+                <td class="td-nerd highlight-cell"><i data-lucide="check-circle-2" class="icon-check"></i> Sub-millisecond 25fps</td>
+                <td><i data-lucide="x-circle" class="icon-cross"></i> Not Supported</td>
+                <td><i data-lucide="minus-circle" class="icon-neutral"></i> Clunky Annotation</td>
+                <td><i data-lucide="x-circle" class="icon-cross"></i> Cursor Only (No Laser)</td>
+              </tr>
+              <tr>
+                <td class="td-feature">
+                  <strong>In-Browser LeetCode Sidepanel & Chat</strong>
+                  <span>Never leave the problem tab or switch windows</span>
+                </td>
+                <td class="td-nerd highlight-cell"><i data-lucide="check-circle-2" class="icon-check"></i> Native Chrome Sidepanel</td>
+                <td><i data-lucide="x-circle" class="icon-cross"></i> Switch Apps</td>
+                <td><i data-lucide="x-circle" class="icon-cross"></i> Separate Window</td>
+                <td><i data-lucide="x-circle" class="icon-cross"></i> Requires Desktop IDE</td>
+              </tr>
+              <tr>
+                <td class="td-feature">
+                  <strong>System Design Architecture Whiteboard</strong>
+                  <span>11 Cloud & DB shapes with 3s disappearing ink</span>
+                </td>
+                <td class="td-nerd highlight-cell"><i data-lucide="check-circle-2" class="icon-check"></i> 11 Shapes & Temp Pen</td>
+                <td><i data-lucide="x-circle" class="icon-cross"></i> Not Supported</td>
+                <td><i data-lucide="minus-circle" class="icon-neutral"></i> Basic Freehand</td>
+                <td><i data-lucide="x-circle" class="icon-cross"></i> Extension Needed</td>
+              </tr>
+              <tr>
+                <td class="td-feature">
+                  <strong>Private Offline Coding Diary & Journal</strong>
+                  <span>Auto-dated problem entries, tags & Markdown export</span>
+                </td>
+                <td class="td-nerd highlight-cell"><i data-lucide="check-circle-2" class="icon-check"></i> Built-in Local Storage</td>
+                <td><i data-lucide="x-circle" class="icon-cross"></i> Public Chat Only</td>
+                <td><i data-lucide="x-circle" class="icon-cross"></i> Not Supported</td>
+                <td><i data-lucide="minus-circle" class="icon-neutral"></i> Manual Files</td>
+              </tr>
+              <tr>
+                <td class="td-feature">
+                  <strong>Click-to-Reveal Spoilers (<code>||hint||</code>)</strong>
+                  <span>Prevent accidental solution spoiling</span>
+                </td>
+                <td class="td-nerd highlight-cell"><i data-lucide="check-circle-2" class="icon-check"></i> Built-in Blur Filter</td>
+                <td><i data-lucide="check-circle-2" class="icon-check"></i> Text Spoiler</td>
+                <td><i data-lucide="x-circle" class="icon-cross"></i> Not Supported</td>
+                <td><i data-lucide="x-circle" class="icon-cross"></i> Not Supported</td>
+              </tr>
+              <tr>
+                <td class="td-feature">
+                  <strong>Account / Sign-In Requirement</strong>
+                  <span>Time to start collaborating</span>
+                </td>
+                <td class="td-nerd highlight-cell"><i data-lucide="check-circle-2" class="icon-check"></i> Zero Login Needed</td>
+                <td><i data-lucide="x-circle" class="icon-cross"></i> Account + Discord Server</td>
+                <td><i data-lucide="x-circle" class="icon-cross"></i> Google / Zoom Sign-in</td>
+                <td><i data-lucide="x-circle" class="icon-cross"></i> GitHub / MS Account</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- How to Install & Test Beta Section with Interactive Checklist -->
+    <section class="install-section" id="how-to-test" aria-label="Installation Instructions">
+      <div class="container">
+        <div class="section-header">
+          <div class="badge-pill"><i data-lucide="play" class="icon-xs"></i> 60-Second Setup</div>
+          <h2 class="section-title">How to Install & Test the Beta</h2>
+          <p class="section-subtitle">Follow the checklist below to install and test on Chrome, Brave, Edge, or any Chromium browser.</p>
+        </div>
+
+        <!-- Interactive Progress Bar -->
+        <div class="setup-progress-wrapper">
+          <div class="setup-progress-header">
+            <span>Setup Progress:</span>
+            <span id="setup-progress-text">0 / 4 Steps Completed</span>
+          </div>
+          <div class="setup-progress-bar">
+            <div class="setup-progress-fill" id="setup-progress-fill"></div>
+          </div>
+        </div>
+
+        <div class="steps-grid">
+          <!-- Step 1 -->
+          <div class="step-card" data-step="1">
+            <div class="step-card-header">
+              <div class="step-number"><i data-lucide="folder-down" class="icon-sm"></i></div>
+              <label class="step-checkbox-label">
+                <input type="checkbox" class="step-checkbox" id="chk-step-1" aria-label="Mark Step 1 Complete">
+                <span class="custom-chk"></span>
+              </label>
+            </div>
+            <h3 class="step-title">1. Download & Unzip</h3>
+            <p class="step-desc">
+              Download the beta release package and extract the <code>.zip</code> file to a folder on your computer.
+            </p>
+            <a href="downloads/synqto-v0.1.0.zip" download class="btn btn-secondary btn-sm btn-download-trigger" style="margin-top: 14px; width: 100%;">
+              <i data-lucide="download" class="icon-xs"></i>
+              <span>synqto-v0.1.0.zip</span>
+            </a>
+          </div>
+
+          <!-- Step 2 -->
+          <div class="step-card" data-step="2">
+            <div class="step-card-header">
+              <div class="step-number"><i data-lucide="sliders" class="icon-sm"></i></div>
+              <label class="step-checkbox-label">
+                <input type="checkbox" class="step-checkbox" id="chk-step-2" aria-label="Mark Step 2 Complete">
+                <span class="custom-chk"></span>
+              </label>
+            </div>
+            <h3 class="step-title">2. Open Extensions Page</h3>
+            <p class="step-desc">
+              Open Chrome and navigate to the Extensions page. Toggle <strong>"Developer mode"</strong> in the top-right corner.
+            </p>
+            <div class="code-snippet">
+              <span>chrome://extensions</span>
+              <button class="copy-btn" data-copy="chrome://extensions" aria-label="Copy extensions URL">
+                <i data-lucide="copy" class="icon-xxs"></i>
+                <span>Copy</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Step 3 -->
+          <div class="step-card" data-step="3">
+            <div class="step-card-header">
+              <div class="step-number"><i data-lucide="folder-check" class="icon-sm"></i></div>
+              <label class="step-checkbox-label">
+                <input type="checkbox" class="step-checkbox" id="chk-step-3" aria-label="Mark Step 3 Complete">
+                <span class="custom-chk"></span>
+              </label>
+            </div>
+            <h3 class="step-title">3. Load Unpacked</h3>
+            <p class="step-desc">
+              Click the <strong>"Load unpacked"</strong> button in the top left and select the unzipped <code>dist</code> directory.
+            </p>
+            <div class="badge-success"><i data-lucide="check-circle-2" class="icon-xs"></i> Ready in Side Panel</div>
+          </div>
+
+          <!-- Step 4 -->
+          <div class="step-card" data-step="4">
+            <div class="step-card-header">
+              <div class="step-number"><i data-lucide="users-2" class="icon-sm"></i></div>
+              <label class="step-checkbox-label">
+                <input type="checkbox" class="step-checkbox" id="chk-step-4" aria-label="Mark Step 4 Complete">
+                <span class="custom-chk"></span>
+              </label>
+            </div>
+            <h3 class="step-title">4. Test with a Friend</h3>
+            <p class="step-desc">
+              Open <a href="https://leetcode.com/problems/two-sum/" target="_blank" rel="noopener noreferrer" style="color: var(--accent-primary); text-decoration: underline;">LeetCode Two Sum</a> in two separate browser profiles or tabs.
+            </p>
+            <p class="step-sub">
+              The floating button appears on the bottom-right. Open the side panel or popup and watch real-time P2P connection form instantly!
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- FAQ Accordion Section -->
+    <section class="faq-section" id="faq" aria-label="Frequently Asked Questions">
+      <div class="container">
+        <div class="section-header">
+          <div class="badge-pill"><i data-lucide="help-circle" class="icon-xs"></i> Questions & Answers</div>
+          <h2 class="section-title">Frequently Asked Questions</h2>
+          <p class="section-subtitle">Everything you need to know about the P2P architecture, privacy, and global compatibility.</p>
+        </div>
+
+        <div class="faq-accordion">
+          <!-- Item 1 -->
+          <div class="faq-item">
+            <button class="faq-question">
+              <span>Is Synqto completely free and open source?</span>
+              <i data-lucide="chevron-down" class="faq-chevron"></i>
+            </button>
+            <div class="faq-answer">
+              <p>Yes! Synqto is 100% free, MIT licensed, and fully open source. You can inspect the entire codebase, self-host the Go signaling server, or contribute on GitHub.</p>
+            </div>
+          </div>
+
+          <!-- Item 2 -->
+          <div class="faq-item">
+            <button class="faq-question">
+              <span>Do my screen shares, audio, or chat messages pass through any central servers?</span>
+              <i data-lucide="chevron-down" class="faq-chevron"></i>
+            </button>
+            <div class="faq-answer">
+              <p>No. Synqto uses <strong>direct WebSockets only for SDP signaling</strong>. All screen streams, audio calls, mouse coordinates, and chat messages are transmitted <strong>directly between browsers using encrypted WebRTC DataChannels and MediaStreams</strong>.</p>
+            </div>
+          </div>
+
+          <!-- Item 3 -->
+          <div class="faq-item">
+            <button class="faq-question">
+              <span>Which browsers are supported?</span>
+              <i data-lucide="chevron-down" class="faq-chevron"></i>
+            </button>
+            <div class="faq-answer">
+              <p>Synqto supports Google Chrome, Brave Browser, Microsoft Edge, Opera, Arc, and any Chromium-based browser supporting Chrome Extension Manifest V3 and the Side Panel API.</p>
+            </div>
+          </div>
+
+          <!-- Item 4 -->
+          <div class="faq-item">
+            <button class="faq-question">
+              <span>How does the auto-forming room mechanism work?</span>
+              <i data-lucide="chevron-down" class="faq-chevron"></i>
+            </button>
+            <div class="faq-answer">
+              <p>When you visit a supported coding platform, the content script inspects the canonical URL (e.g. <code>https://leetcode.com/problems/two-sum/</code>), normalizes the slug, and hashes it into a deterministic room ID (e.g. <code>room:two-sum-c99292e0</code>). All peers on that same problem join the exact same cluster mesh automatically.</p>
+            </div>
+          </div>
+
+          <!-- Item 5 -->
+          <div class="faq-item">
+            <button class="faq-question">
+              <span>Can I customize the floating button or open the side panel directly?</span>
+              <i data-lucide="chevron-down" class="faq-chevron"></i>
+            </button>
+            <div class="faq-answer">
+              <p>Yes. Under the <strong>Profile & Settings</strong> tab, you can customize the floating button's position, opacity, unread badges, and choose whether clicking it opens the in-page chat popup or expands the Chrome Side Panel directly.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CTA Banner Section -->
+    <section class="cta-section" aria-label="Call to Action">
+      <div class="container cta-container">
+        <div class="cta-badge"><i data-lucide="rocket" class="icon-xs"></i> Instant P2P Collaboration</div>
+        <h2 class="cta-title">Ready to Study Smarter, Together?</h2>
+        <p class="cta-subtitle">Download the beta extension and start collaborating on your favorite coding problems today.</p>
+        <div class="cta-buttons">
+          <a href="downloads/synqto-v0.1.0.zip" download class="btn btn-primary btn-lg btn-download-trigger">
+            <i data-lucide="download" class="icon-md"></i>
+            <span>Download Synqto (.zip)</span>
+          </a>
+          <a href="https://github.com/vksssd/synqto" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-lg">
+            <i data-lucide="github" class="icon-md"></i>
+            <span>View Source on GitHub</span>
+          </a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="container footer-container">
+      <div class="footer-brand">
+        <div class="footer-brand-title">
+          <i data-lucide="zap" class="icon-brand"></i>
+          <span class="brand-text">Synq<span class="brand-gradient">to</span></span>
+        </div>
+        <p class="footer-tagline">Real-time P2P collaborative problem solving for the modern engineer worldwide.</p>
+      </div>
+
+      <div class="footer-links">
+        <div class="footer-col">
+          <span class="col-title">Project</span>
+          <a href="#features">Features</a>
+          <a href="#interactive-p2p-demo">Live Dual-Peer Demo</a>
+          <a href="#sandbox">Room Simulator</a>
+          <a href="#comparison">Comparison</a>
+          <a href="#how-to-test">How to Test</a>
+          <a href="downloads/synqto-v0.1.0.zip" download>Download ZIP</a>
+        </div>
+        <div class="footer-col">
+          <span class="col-title">Open Source</span>
+          <a href="https://github.com/vksssd/synqto" target="_blank" rel="noopener noreferrer">GitHub Repository</a>
+          <a href="https://github.com/vksssd/synqto/blob/main/README.md" target="_blank" rel="noopener noreferrer">Documentation</a>
+          <a href="https://github.com/vksssd/synqto/releases" target="_blank" rel="noopener noreferrer">Releases</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer-bottom">
+      <div class="container footer-bottom-content">
+        <p>© 2026 Synqto. Released under the MIT License.</p>
+        <p>Crafted for competitive programmers, students & interview prep cohorts globally.</p>
+      </div>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

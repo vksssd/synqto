@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+extension/node_modules/
+vendor/
+
+# Separate Server Repo
+server/
+
+# Build artifacts
+dist/
+dist-zip/
+extension/dist/
+extension/dist-zip/
+bin/
+backups/
+
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# IDE & Editor
+.vscode/
+.idea/
+*.swp
+*.swo

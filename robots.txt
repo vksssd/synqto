@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+Disallow: /downloads/*.zip$
+
+Sitemap: https://synqto.dev/sitemap.xml

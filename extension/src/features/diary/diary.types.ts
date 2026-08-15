@@ -2,10 +2,17 @@
 
 export type DiaryMood = 'productive' | 'breakthrough' | 'challenging' | 'mastered' | 'review_needed';
 
+export interface DiaryWhiteboardData {
+  strokes: any[];
+  bgColor?: string;
+  bgPattern?: string;
+}
+
 export interface DiaryEntry {
   id: string;
   title: string;
   content: string; // Markdown notes, code snippets, checklists, lessons learned
+  whiteboard?: DiaryWhiteboardData; // Dedicated whiteboard drawing / sketchpad for this entry
   problemTitle?: string;
   problemUrl?: string;
   tags: string[]; // e.g. ["#leetcode", "#dp", "#graphs", "#interview"]

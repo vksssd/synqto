@@ -1547,11 +1547,13 @@ export class FloatingWidget {
           ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
           ctx.fill();
           ctx.stroke();
-          ctx.fillStyle = '#ffffff';
-          ctx.font = 'bold 11px monospace';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText(s.geometry.label || 'N', x1, y1);
+          if (s.geometry.label) {
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 11px monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(s.geometry.label, x1, y1);
+          }
         } else if (s.tool === 'db_cylinder') {
           const w = Math.max(50, Math.abs(x2 - x1));
           const h = Math.max(55, Math.abs(y2 - y1));
@@ -1569,11 +1571,13 @@ export class FloatingWidget {
           ctx.beginPath();
           ctx.ellipse(minX + w / 2, minY + ry, w / 2, ry, 0, 0, Math.PI * 2);
           ctx.stroke();
-          ctx.fillStyle = '#ffffff';
-          ctx.font = 'bold 10px sans-serif';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText('🗄️ DB', minX + w / 2, minY + h / 2 + 4);
+          if (s.geometry.label) {
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 10px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(s.geometry.label, minX + w / 2, minY + h / 2 + 4);
+          }
         } else if (s.tool === 'cloud') {
           const w = Math.max(65, Math.abs(x2 - x1));
           const h = Math.max(40, Math.abs(y2 - y1));
@@ -1584,11 +1588,13 @@ export class FloatingWidget {
           ctx.roundRect(minX, minY, w, h, 14);
           ctx.fill();
           ctx.stroke();
-          ctx.fillStyle = '#ffffff';
-          ctx.font = 'bold 10px sans-serif';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText('☁️ Cloud', minX + w / 2, minY + h / 2);
+          if (s.geometry.label) {
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 10px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(s.geometry.label, minX + w / 2, minY + h / 2);
+          }
         } else if (s.tool === 'load_balancer') {
           const w = Math.max(55, Math.abs(x2 - x1));
           const h = Math.max(55, Math.abs(y2 - y1));
@@ -1605,11 +1611,13 @@ export class FloatingWidget {
           ctx.closePath();
           ctx.fill();
           ctx.stroke();
-          ctx.fillStyle = '#ffffff';
-          ctx.font = 'bold 10px sans-serif';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText('⚖️ LB', midX, midY);
+          if (s.geometry.label) {
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 10px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(s.geometry.label, midX, midY);
+          }
         } else if (s.tool === 'message_queue') {
           const w = Math.max(70, Math.abs(x2 - x1));
           const h = Math.max(34, Math.abs(y2 - y1));
@@ -1620,11 +1628,13 @@ export class FloatingWidget {
           ctx.roundRect(minX, minY, w, h, 6);
           ctx.fill();
           ctx.stroke();
-          ctx.fillStyle = '#ffffff';
-          ctx.font = 'bold 9px sans-serif';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText('📨 Queue', minX + w / 2, minY + h / 2);
+          if (s.geometry.label) {
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 9px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(s.geometry.label, minX + w / 2, minY + h / 2);
+          }
         } else if (s.tool === 'server_box') {
           const w = Math.max(65, Math.abs(x2 - x1));
           const h = Math.max(40, Math.abs(y2 - y1));
@@ -1639,11 +1649,13 @@ export class FloatingWidget {
           ctx.beginPath();
           ctx.arc(minX + 10, minY + 10, 3, 0, Math.PI * 2);
           ctx.fill();
-          ctx.fillStyle = '#ffffff';
-          ctx.font = 'bold 9px sans-serif';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText('📦 Server', minX + w / 2, minY + h / 2 + 2);
+          if (s.geometry.label) {
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 9px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(s.geometry.label, minX + w / 2, minY + h / 2 + 2);
+          }
         }
       } else if (s.points && s.points.length > 1) {
         ctx.beginPath();

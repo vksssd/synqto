@@ -10,18 +10,25 @@ export type WhiteboardToolType =
   | 'eraser'          // Pixel & stroke eraser
   | 'line'            // Straight line
   | 'arrow'           // Directional arrow
+  | 'arrow_bi'        // Bidirectional arrow (↔️)
   | 'rect'            // Box / rectangle
   | 'circle'          // Circle / node
-  | 'tree_node'       // Binary tree node with label
+  | 'decision_diamond'// Decision diamond (💎)
+  | 'tree_node'       // Binary tree / graph node
+  | 'sticky_note'     // 💬 Sticky note / Callout card
   | 'text'            // Text note / label
   // System Design Architecture Shapes:
-  | 'db_cylinder'     // 🗄️ 3D Database Cylinder (SQL/NoSQL)
+  | 'db_cylinder'     // 🗄️ 3D Relational Database (SQL)
+  | 'db_nosql'        // 🍃 Document / NoSQL Database
   | 'cloud'           // ☁️ Cloud / API Gateway / Cluster
-  | 'load_balancer'   // ⚖️ Load Balancer (Diamond with cross arrows)
+  | 'load_balancer'   // ⚖️ Load Balancer
   | 'message_queue'   // 📨 Message Queue / Kafka partition buffer
   | 'server_box'      // 📦 Server / Microservice container
   | 'cache_mem'       // ⚡ In-Memory Cache / Redis block
-  | 'user_client';    // 👤 Client Actor / User Device
+  | 'dns_router'      // 🌐 DNS / Internet Router
+  | 'firewall'        // 🔒 Firewall / Security Gateway
+  | 'user_client'     // 👤 Desktop / Client Actor
+  | 'mobile_client';  // 📱 Mobile / Tablet Client
 
 export type WhiteboardBackgroundType =
   | 'grid'            // Standard graph / square coordinate grid

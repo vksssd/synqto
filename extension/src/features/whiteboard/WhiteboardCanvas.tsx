@@ -1,4 +1,4 @@
-// ─── Collaborative Whiteboard Canvas: Notebook Pages, System Design Shapes, Disappearing Ink & Custom Colors ───
+// ─── Collaborative Whiteboard Canvas: Multi-Page Notebook, Expanded Architecture Shapes, Custom Text & PDF Export ───
 
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import {
@@ -31,6 +31,12 @@ import {
   X,
   ExternalLink,
   Edit2,
+  Shield,
+  Smartphone,
+  Globe,
+  HelpCircle,
+  FileText,
+  StickyNote,
 } from 'lucide-react';
 import { WhiteboardService } from './whiteboard.service';
 import {
@@ -39,10 +45,8 @@ import {
   WhiteboardSizeMode,
   WhiteboardPrivacyMode,
   WhiteboardStroke,
-  WhiteboardPage,
   WhiteboardNotebook,
   Point,
-  LaserPointerPosition,
 } from './whiteboard.types';
 
 const PEN_COLORS = [
@@ -51,6 +55,7 @@ const PEN_COLORS = [
   '#10b981', // Emerald
   '#f59e0b', // Amber
   '#f43f5e', // Rose
+  '#a855f7', // Purple
   '#ffffff', // White
   '#0f172a', // Dark Slate
 ];
@@ -79,7 +84,7 @@ export const WhiteboardCanvas: React.FC = () => {
 
   const [activeTool, setActiveTool] = useState<WhiteboardToolType>('pen');
   const [activeColor, setActiveColor] = useState<string>('#6366f1');
-  const [activeWidth, setActiveWidth] = useState<number>(4);
+  const [activeWidth, setActiveWidth] = useState<number>(3);
 
   // Background pattern & background color
   const [backgroundType, setBackgroundType] = useState<WhiteboardBackgroundType>(whiteboardService.getBackground());
@@ -106,12 +111,13 @@ export const WhiteboardCanvas: React.FC = () => {
   // Disappearing / Temporary Ink Strokes Pool
   const [tempStrokes, setTempStrokes] = useState<{ stroke: WhiteboardStroke; createdAt: number; durationMs: number }[]>([]);
 
-  // Text Prompt Modal State
+  // Text Tool State (Click-to-place on canvas)
   const [textModalPos, setTextModalPos] = useState<{ x: number; y: number } | null>(null);
   const [textInput, setTextInput] = useState('');
 
-  // Collapsible drawers for maximum canvas workspace
-  const [showShapesDrawer, setShowShapesDrawer] = useState(false);
+  // Collapsible drawers for toolbars
+  const [showArchDrawer, setShowArchDrawer] = useState(false);
+  const [showGeomDrawer, setShowGeomDrawer] = useState(false);
   const [showThemesDrawer, setShowThemesDrawer] = useState(false);
 
   // 1. Subscribe to service listeners
@@ -145,7 +151,6 @@ export const WhiteboardCanvas: React.FC = () => {
     const interval = setInterval(() => {
       const now = Date.now();
 
-      // Laser fade
       setLaserTrails((prev) => {
         if (prev.length === 0) return prev;
         return prev
@@ -156,7 +161,6 @@ export const WhiteboardCanvas: React.FC = () => {
           }));
       });
 
-      // Disappearing ink fade
       setTempStrokes((prev) => {
         if (prev.length === 0) return prev;
         return prev.filter((item) => now - item.createdAt < item.durationMs);
@@ -166,24 +170,20 @@ export const WhiteboardCanvas: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // 3. Helper to determine if background color is light
   const isLightColor = useCallback((hex: string) => {
-    if (hex === '#ffffff' || hex === '#f8fafc' || hex === '#fef3c7') return true;
-    return false;
+    return hex === '#ffffff' || hex === '#f8fafc' || hex === '#fef3c7';
   }, []);
 
-  // 4. Background Pattern Renderer
+  // 3. Background Pattern Renderer
   const drawBackground = useCallback((ctx: CanvasRenderingContext2D, w: number, h: number, bg: WhiteboardBackgroundType, color: string) => {
     ctx.save();
     const isLight = isLightColor(color);
 
-    // Canvas base background fill
     ctx.fillStyle = color || (isLight ? '#f8fafc' : '#090d16');
     ctx.fillRect(0, 0, w, h);
 
     if (bg === 'grid') {
-      // ⬛ Graph Grid
-      ctx.strokeStyle = isLight ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.05)';
+      ctx.strokeStyle = isLight ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.04)';
       ctx.lineWidth = 1;
       const gridSize = 24;
       for (let x = 0; x < w; x += gridSize) {
@@ -199,57 +199,55 @@ export const WhiteboardCanvas: React.FC = () => {
         ctx.stroke();
       }
     } else if (bg === 'ruled' || bg === 'white_ruled') {
-      // 📏 Ruled Notebook Paper
-      ctx.strokeStyle = isLight ? 'rgba(99, 102, 241, 0.25)' : 'rgba(99, 102, 241, 0.16)';
+      ctx.strokeStyle = isLight ? 'rgba(0, 0, 0, 0.09)' : 'rgba(255, 255, 255, 0.06)';
       ctx.lineWidth = 1;
-      const lineGap = 28;
-      for (let y = 36; y < h; y += lineGap) {
+      const lineStep = 28;
+      for (let y = 35; y < h; y += lineStep) {
         ctx.beginPath();
         ctx.moveTo(0, y);
         ctx.lineTo(w, y);
         ctx.stroke();
       }
-
-      // Vertical pink margin line
-      ctx.strokeStyle = isLight ? 'rgba(244, 63, 94, 0.5)' : 'rgba(244, 63, 94, 0.35)';
+      // Red left margin line
+      ctx.strokeStyle = 'rgba(244, 63, 94, 0.35)';
       ctx.lineWidth = 1.5;
       ctx.beginPath();
-      ctx.moveTo(48, 0);
-      ctx.lineTo(48, h);
+      ctx.moveTo(40, 0);
+      ctx.lineTo(40, h);
       ctx.stroke();
     } else if (bg === 'dotted') {
-      // 🟦 Dot Matrix Grid
-      ctx.fillStyle = isLight ? 'rgba(0, 0, 0, 0.3)' : 'rgba(255, 255, 255, 0.18)';
-      const dotGap = 20;
-      for (let x = 10; x < w; x += dotGap) {
-        for (let y = 10; y < h; y += dotGap) {
+      ctx.fillStyle = isLight ? 'rgba(0, 0, 0, 0.15)' : 'rgba(255, 255, 255, 0.12)';
+      const dotSpacing = 20;
+      for (let x = 10; x < w; x += dotSpacing) {
+        for (let y = 10; y < h; y += dotSpacing) {
           ctx.beginPath();
-          ctx.arc(x, y, 1.2, 0, Math.PI * 2);
+          ctx.arc(x, y, 1, 0, Math.PI * 2);
           ctx.fill();
         }
       }
     } else if (bg === 'plot') {
-      // 📈 Cartesian (X, Y) 4-Quadrant Coordinate Axes & Ticks
-      const midX = Math.floor(w / 2);
-      const midY = Math.floor(h / 2);
+      // 4-Quadrant Cartesian Axes
+      const midX = w / 2;
+      const midY = h / 2;
 
-      ctx.strokeStyle = isLight ? 'rgba(0, 0, 0, 0.05)' : 'rgba(255, 255, 255, 0.03)';
+      ctx.strokeStyle = isLight ? 'rgba(0, 0, 0, 0.06)' : 'rgba(255, 255, 255, 0.03)';
       ctx.lineWidth = 1;
-      const gridSize = 20;
-      for (let x = 0; x < w; x += gridSize) {
+      const step = 20;
+      for (let x = 0; x < w; x += step) {
         ctx.beginPath();
         ctx.moveTo(x, 0);
         ctx.lineTo(x, h);
         ctx.stroke();
       }
-      for (let y = 0; y < h; y += gridSize) {
+      for (let y = 0; y < h; y += step) {
         ctx.beginPath();
         ctx.moveTo(0, y);
         ctx.lineTo(w, y);
         ctx.stroke();
       }
 
-      ctx.strokeStyle = isLight ? '#334155' : '#818cf8';
+      // Main Axes
+      ctx.strokeStyle = isLight ? '#4f46e5' : '#818cf8';
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(0, midY);
@@ -257,78 +255,12 @@ export const WhiteboardCanvas: React.FC = () => {
       ctx.moveTo(midX, 0);
       ctx.lineTo(midX, h);
       ctx.stroke();
-
-      // Axis Ticks
-      ctx.strokeStyle = isLight ? '#64748b' : '#a5b4fc';
-      ctx.lineWidth = 1;
-      for (let x = midX; x < w; x += 40) {
-        ctx.beginPath();
-        ctx.moveTo(x, midY - 3);
-        ctx.lineTo(x, midY + 3);
-        ctx.stroke();
-      }
-      for (let x = midX; x > 0; x -= 40) {
-        ctx.beginPath();
-        ctx.moveTo(x, midY - 3);
-        ctx.lineTo(x, midY + 3);
-        ctx.stroke();
-      }
-      for (let y = midY; y < h; y += 40) {
-        ctx.beginPath();
-        ctx.moveTo(midX - 3, y);
-        ctx.lineTo(midX + 3, y);
-        ctx.stroke();
-      }
-      for (let y = midY; y > 0; y -= 40) {
-        ctx.beginPath();
-        ctx.moveTo(midX - 3, y);
-        ctx.lineTo(midX + 3, y);
-        ctx.stroke();
-      }
-
-      ctx.fillStyle = isLight ? '#64748b' : '#c7d2fe';
-      ctx.font = '10px monospace';
-      ctx.fillText('(0,0)', midX + 6, midY - 6);
-      ctx.fillText('+X', w - 24, midY - 6);
-      ctx.fillText('+Y', midX + 6, 16);
-    } else if (bg === 'matrix') {
-      // 📐 2D DP Table
-      ctx.strokeStyle = isLight ? 'rgba(99, 102, 241, 0.3)' : 'rgba(99, 102, 241, 0.15)';
-      ctx.lineWidth = 1;
-      const cell = 32;
-
-      for (let x = 32; x < w; x += cell) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, h);
-        ctx.stroke();
-      }
-      for (let y = 32; y < h; y += cell) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(w, y);
-        ctx.stroke();
-      }
-
-      ctx.fillStyle = isLight ? '#4f46e5' : '#a5b4fc';
-      ctx.font = 'bold 9px monospace';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-
-      let colIdx = 0;
-      for (let x = 32 + cell / 2; x < w; x += cell) {
-        ctx.fillText(String(colIdx++), x, 16);
-      }
-      let rowIdx = 0;
-      for (let y = 32 + cell / 2; y < h; y += cell) {
-        ctx.fillText(String(rowIdx++), 16, y);
-      }
     }
 
     ctx.restore();
   }, [isLightColor]);
 
-  // 5. System Design Shapes & Geometric Stroke Renderer
+  // 4. Vector Shape & Stroke Renderer (Clean - No forced text)
   const renderSingleStroke = useCallback(
     (ctx: CanvasRenderingContext2D, stroke: WhiteboardStroke, isLight: boolean, alphaOverride?: number) => {
       ctx.save();
@@ -357,17 +289,17 @@ export const WhiteboardCanvas: React.FC = () => {
       }
 
       if (stroke.text && stroke.geometry) {
-        // Text Note Tool
-        ctx.font = `bold ${Math.max(12, stroke.width * 3)}px -apple-system, sans-serif`;
+        // User Text Stroke
+        ctx.font = `bold ${Math.max(12, stroke.width * 3.5)}px -apple-system, sans-serif`;
         ctx.fillText(stroke.text, stroke.geometry.x1, stroke.geometry.y1);
       } else if (stroke.geometry) {
-        const { x1, y1, x2, y2 } = stroke.geometry;
+        const { x1, y1, x2, y2, label } = stroke.geometry;
         const width = Math.abs(x2 - x1);
         const height = Math.abs(y2 - y1);
         const minX = Math.min(x1, x2);
         const minY = Math.min(y1, y2);
 
-        // Basic Shapes
+        // ── Basic Geometric Shapes ──
         if (stroke.tool === 'line') {
           ctx.beginPath();
           ctx.moveTo(x1, y1);
@@ -387,6 +319,26 @@ export const WhiteboardCanvas: React.FC = () => {
           ctx.moveTo(x2, y2);
           ctx.lineTo(x2 - headLen * Math.cos(angle + Math.PI / 6), y2 - headLen * Math.sin(angle + Math.PI / 6));
           ctx.stroke();
+        } else if (stroke.tool === 'arrow_bi') {
+          ctx.beginPath();
+          ctx.moveTo(x1, y1);
+          ctx.lineTo(x2, y2);
+          ctx.stroke();
+
+          const angle = Math.atan2(y2 - y1, x2 - x1);
+          const headLen = Math.max(10, stroke.width * 3);
+          // End arrow
+          ctx.beginPath();
+          ctx.moveTo(x2, y2);
+          ctx.lineTo(x2 - headLen * Math.cos(angle - Math.PI / 6), y2 - headLen * Math.sin(angle - Math.PI / 6));
+          ctx.moveTo(x2, y2);
+          ctx.lineTo(x2 - headLen * Math.cos(angle + Math.PI / 6), y2 - headLen * Math.sin(angle + Math.PI / 6));
+          // Start arrow
+          ctx.moveTo(x1, y1);
+          ctx.lineTo(x1 + headLen * Math.cos(angle - Math.PI / 6), y1 + headLen * Math.sin(angle - Math.PI / 6));
+          ctx.moveTo(x1, y1);
+          ctx.lineTo(x1 + headLen * Math.cos(angle + Math.PI / 6), y1 + headLen * Math.sin(angle + Math.PI / 6));
+          ctx.stroke();
         } else if (stroke.tool === 'rect') {
           ctx.strokeRect(minX, minY, width, height);
         } else if (stroke.tool === 'circle') {
@@ -395,31 +347,49 @@ export const WhiteboardCanvas: React.FC = () => {
           ctx.beginPath();
           ctx.ellipse(minX + rx, minY + ry, rx, ry, 0, 0, Math.PI * 2);
           ctx.stroke();
+        } else if (stroke.tool === 'decision_diamond') {
+          const midX = minX + width / 2;
+          const midY = minY + height / 2;
+          ctx.beginPath();
+          ctx.moveTo(midX, minY);
+          ctx.lineTo(minX + width, midY);
+          ctx.lineTo(midX, minY + height);
+          ctx.lineTo(minX, midY);
+          ctx.closePath();
+          ctx.stroke();
         } else if (stroke.tool === 'tree_node') {
-          const radius = Math.max(18, stroke.width * 4);
+          const radius = Math.max(16, stroke.width * 4);
           ctx.beginPath();
           ctx.arc(x1, y1, radius, 0, Math.PI * 2);
           ctx.fillStyle = isLight ? '#ffffff' : 'rgba(15, 23, 42, 0.95)';
           ctx.fill();
           ctx.stroke();
-
-          ctx.fillStyle = isLight ? '#0f172a' : '#ffffff';
-          ctx.font = 'bold 12px monospace';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText(stroke.geometry.label || 'Node', x1, y1);
+        } else if (stroke.tool === 'sticky_note') {
+          const w = Math.max(70, width);
+          const h = Math.max(60, height);
+          ctx.fillStyle = isLight ? '#fef3c7' : 'rgba(254, 243, 199, 0.9)';
+          ctx.beginPath();
+          ctx.roundRect(minX, minY, w, h, 4);
+          ctx.fill();
+          ctx.stroke();
+          // Corner fold
+          ctx.fillStyle = 'rgba(0,0,0,0.15)';
+          ctx.beginPath();
+          ctx.moveTo(minX + w - 14, minY);
+          ctx.lineTo(minX + w, minY + 14);
+          ctx.lineTo(minX + w - 14, minY + 14);
+          ctx.closePath();
+          ctx.fill();
         }
 
-        // 🏛️ System Design Shapes
+        // ── 🏛️ System Design Architecture Shapes (Clean Vector) ──
         else if (stroke.tool === 'db_cylinder') {
-          // 🗄️ 3D Database Cylinder
+          // 🗄️ Relational DB Cylinder (SQL)
           const w = Math.max(50, width);
           const h = Math.max(60, height);
-          const ry = Math.min(16, h * 0.2);
+          const ry = Math.min(14, h * 0.2);
 
           ctx.fillStyle = isLight ? '#ffffff' : 'rgba(15, 23, 42, 0.95)';
-
-          // Body fill & stroke
           ctx.beginPath();
           ctx.ellipse(minX + w / 2, minY + ry, w / 2, ry, 0, Math.PI, 0);
           ctx.lineTo(minX + w, minY + h - ry);
@@ -432,15 +402,30 @@ export const WhiteboardCanvas: React.FC = () => {
           ctx.beginPath();
           ctx.ellipse(minX + w / 2, minY + ry, w / 2, ry, 0, 0, Math.PI * 2);
           ctx.stroke();
+        } else if (stroke.tool === 'db_nosql') {
+          // 🍃 Document DB Cylinder with partition bands
+          const w = Math.max(50, width);
+          const h = Math.max(65, height);
+          const ry = Math.min(12, h * 0.18);
 
-          // Database text label
-          ctx.fillStyle = isLight ? '#0f172a' : '#ffffff';
-          ctx.font = 'bold 11px sans-serif';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText(stroke.geometry.label || '🗄️ Database', minX + w / 2, minY + h / 2 + 4);
+          ctx.fillStyle = isLight ? '#ffffff' : 'rgba(15, 23, 42, 0.95)';
+          ctx.beginPath();
+          ctx.ellipse(minX + w / 2, minY + ry, w / 2, ry, 0, Math.PI, 0);
+          ctx.lineTo(minX + w, minY + h - ry);
+          ctx.ellipse(minX + w / 2, minY + h - ry, w / 2, ry, 0, 0, Math.PI);
+          ctx.lineTo(minX, minY + ry);
+          ctx.fill();
+          ctx.stroke();
+
+          // 3 Partition Bands
+          for (let i = 1; i <= 3; i++) {
+            const bandY = minY + (h / 4) * i;
+            ctx.beginPath();
+            ctx.ellipse(minX + w / 2, bandY, w / 2, ry, 0, 0, Math.PI);
+            ctx.stroke();
+          }
         } else if (stroke.tool === 'cloud') {
-          // ☁️ Cloud / API Gateway Cluster
+          // ☁️ Cloud Gateway
           const w = Math.max(70, width);
           const h = Math.max(45, height);
 
@@ -455,16 +440,10 @@ export const WhiteboardCanvas: React.FC = () => {
           ctx.closePath();
           ctx.fill();
           ctx.stroke();
-
-          ctx.fillStyle = isLight ? '#0f172a' : '#ffffff';
-          ctx.font = 'bold 10px sans-serif';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText(stroke.geometry.label || '☁️ Cloud Gateway', minX + w / 2, minY + h / 2 + 2);
         } else if (stroke.tool === 'load_balancer') {
           // ⚖️ Load Balancer Diamond
-          const w = Math.max(60, width);
-          const h = Math.max(60, height);
+          const w = Math.max(55, width);
+          const h = Math.max(55, height);
           const midX = minX + w / 2;
           const midY = minY + h / 2;
 
@@ -478,16 +457,19 @@ export const WhiteboardCanvas: React.FC = () => {
           ctx.fill();
           ctx.stroke();
 
-          ctx.fillStyle = isLight ? '#0f172a' : '#ffffff';
-          ctx.font = 'bold 10px sans-serif';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText('⚖️ LB', midX, midY);
+          // Balanced distribution split arrows
+          ctx.strokeStyle = drawColor;
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.moveTo(midX, midY - 10);
+          ctx.lineTo(midX, midY + 10);
+          ctx.moveTo(midX - 10, midY);
+          ctx.lineTo(midX + 10, midY);
+          ctx.stroke();
         } else if (stroke.tool === 'message_queue') {
           // 📨 Message Queue / Kafka Buffer
           const w = Math.max(80, width);
           const h = Math.max(36, height);
-          const rx = 12;
 
           ctx.fillStyle = isLight ? '#ffffff' : 'rgba(15, 23, 42, 0.95)';
           ctx.beginPath();
@@ -504,14 +486,8 @@ export const WhiteboardCanvas: React.FC = () => {
             ctx.lineTo(sx, minY + h);
             ctx.stroke();
           }
-
-          ctx.fillStyle = isLight ? '#0f172a' : '#ffffff';
-          ctx.font = 'bold 9px sans-serif';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText('📨 Queue', minX + w / 2, minY + h / 2);
         } else if (stroke.tool === 'server_box') {
-          // 📦 Server Container / Microservice Box
+          // 📦 Server Rack Container
           const w = Math.max(70, width);
           const h = Math.max(45, height);
 
@@ -521,17 +497,16 @@ export const WhiteboardCanvas: React.FC = () => {
           ctx.fill();
           ctx.stroke();
 
-          // Green LED status dot
+          // Server blade horizontal lines & LED
+          ctx.beginPath();
+          ctx.moveTo(minX + 8, minY + h * 0.5);
+          ctx.lineTo(minX + w - 8, minY + h * 0.5);
+          ctx.stroke();
+
           ctx.fillStyle = '#10b981';
           ctx.beginPath();
-          ctx.arc(minX + 12, minY + 12, 3, 0, Math.PI * 2);
+          ctx.arc(minX + 10, minY + 10, 2.5, 0, Math.PI * 2);
           ctx.fill();
-
-          ctx.fillStyle = isLight ? '#0f172a' : '#ffffff';
-          ctx.font = 'bold 10px sans-serif';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText(stroke.geometry.label || '📦 App Server', minX + w / 2, minY + h / 2 + 3);
         } else if (stroke.tool === 'cache_mem') {
           // ⚡ Redis Cache Memory Block
           const w = Math.max(65, width);
@@ -543,32 +518,96 @@ export const WhiteboardCanvas: React.FC = () => {
           ctx.fill();
           ctx.stroke();
 
-          ctx.fillStyle = isLight ? '#0f172a' : '#ffffff';
-          ctx.font = 'bold 10px sans-serif';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText('⚡ Cache / Redis', minX + w / 2, minY + h / 2);
-        } else if (stroke.tool === 'user_client') {
-          // 👤 Client Actor
+          // Lightning Bolt Symbol
+          ctx.fillStyle = '#f59e0b';
+          const cx = minX + w / 2;
+          const cy = minY + h / 2;
+          ctx.beginPath();
+          ctx.moveTo(cx + 2, cy - 10);
+          ctx.lineTo(cx - 6, cy + 1);
+          ctx.lineTo(cx, cy + 1);
+          ctx.lineTo(cx - 2, cy + 10);
+          ctx.lineTo(cx + 6, cy - 1);
+          ctx.lineTo(cx, cy - 1);
+          ctx.closePath();
+          ctx.fill();
+        } else if (stroke.tool === 'dns_router') {
+          // 🌐 DNS / Router Node
+          const r = Math.max(22, width / 2);
+          const cx = minX + r;
+          const cy = minY + r;
+
+          ctx.fillStyle = isLight ? '#ffffff' : 'rgba(15, 23, 42, 0.95)';
+          ctx.beginPath();
+          ctx.arc(cx, cy, r, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+
+          // Crossed routing arrows
+          ctx.beginPath();
+          ctx.moveTo(cx - r * 0.5, cy);
+          ctx.lineTo(cx + r * 0.5, cy);
+          ctx.moveTo(cx, cy - r * 0.5);
+          ctx.lineTo(cx, cy + r * 0.5);
+          ctx.stroke();
+        } else if (stroke.tool === 'firewall') {
+          // 🔒 Security Shield / Firewall
           const w = Math.max(50, width);
-          const h = Math.max(50, height);
+          const h = Math.max(60, height);
+          const midX = minX + w / 2;
+
+          ctx.fillStyle = isLight ? '#ffffff' : 'rgba(15, 23, 42, 0.95)';
+          ctx.beginPath();
+          ctx.moveTo(minX + 6, minY + 6);
+          ctx.lineTo(minX + w - 6, minY + 6);
+          ctx.lineTo(minX + w - 6, minY + h * 0.5);
+          ctx.bezierCurveTo(minX + w - 6, minY + h * 0.85, midX, minY + h, midX, minY + h);
+          ctx.bezierCurveTo(midX, minY + h, minX + 6, minY + h * 0.85, minX + 6, minY + h * 0.5);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+        } else if (stroke.tool === 'user_client') {
+          // 👤 User / Client Desktop Actor
+          const w = Math.max(45, width);
+          const h = Math.max(45, height);
           const midX = minX + w / 2;
 
           ctx.beginPath();
-          ctx.arc(midX, minY + 12, 8, 0, Math.PI * 2);
-          ctx.moveTo(midX, minY + 20);
-          ctx.lineTo(midX, minY + 36);
-          ctx.lineTo(midX - 10, minY + 48);
-          ctx.moveTo(midX, minY + 36);
-          ctx.lineTo(midX + 10, minY + 48);
-          ctx.moveTo(midX - 12, minY + 26);
-          ctx.lineTo(midX + 12, minY + 26);
+          ctx.arc(midX, minY + 10, 7, 0, Math.PI * 2);
+          ctx.moveTo(midX, minY + 17);
+          ctx.lineTo(midX, minY + 32);
+          ctx.lineTo(midX - 8, minY + 44);
+          ctx.moveTo(midX, minY + 32);
+          ctx.lineTo(midX + 8, minY + 44);
+          ctx.moveTo(midX - 10, minY + 22);
+          ctx.lineTo(midX + 10, minY + 22);
+          ctx.stroke();
+        } else if (stroke.tool === 'mobile_client') {
+          // 📱 Mobile Client Frame
+          const w = Math.max(34, width);
+          const h = Math.max(54, height);
+
+          ctx.fillStyle = isLight ? '#ffffff' : 'rgba(15, 23, 42, 0.95)';
+          ctx.beginPath();
+          ctx.roundRect(minX, minY, w, h, 6);
+          ctx.fill();
           ctx.stroke();
 
+          // Screen bezel
+          ctx.strokeRect(minX + 4, minY + 6, w - 8, h - 16);
+          // Home button / bar
+          ctx.beginPath();
+          ctx.arc(minX + w / 2, minY + h - 5, 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        // Only draw label if user explicitly entered a label
+        if (label && label.trim()) {
           ctx.fillStyle = isLight ? '#0f172a' : '#ffffff';
-          ctx.font = 'bold 9px sans-serif';
+          ctx.font = 'bold 11px sans-serif';
           ctx.textAlign = 'center';
-          ctx.fillText('👤 Client', midX, minY + h + 8);
+          ctx.textBaseline = 'middle';
+          ctx.fillText(label, minX + width / 2, minY + height / 2);
         }
       } else if (stroke.points && stroke.points.length > 1) {
         ctx.beginPath();
@@ -584,7 +623,7 @@ export const WhiteboardCanvas: React.FC = () => {
     []
   );
 
-  // 6. Master Canvas Redraw
+  // 5. Master Canvas Redraw
   const redrawCanvas = useCallback(
     (strokes: WhiteboardStroke[], previewPoints?: Point[], previewGeometry?: any) => {
       const canvas = canvasRef.current;
@@ -596,13 +635,9 @@ export const WhiteboardCanvas: React.FC = () => {
       const h = canvas.height;
       const isLight = isLightColor(bgColor);
 
-      // 1. Background Pattern on selected BG Color
       drawBackground(ctx, w, h, backgroundType, bgColor);
-
-      // 2. Render all strokes on active page
       strokes.forEach((s) => renderSingleStroke(ctx, s, isLight));
 
-      // 3. Render Disappearing Temporary Ink Strokes
       const now = Date.now();
       tempStrokes.forEach((item) => {
         const elapsed = now - item.createdAt;
@@ -610,7 +645,6 @@ export const WhiteboardCanvas: React.FC = () => {
         renderSingleStroke(ctx, item.stroke, isLight, alpha);
       });
 
-      // 4. Render Active Drag Preview
       if (previewGeometry) {
         renderSingleStroke(
           ctx,
@@ -646,7 +680,7 @@ export const WhiteboardCanvas: React.FC = () => {
         );
       }
 
-      // 5. Render Torch / Spotlight Beam
+      // Spotlight Torch
       if (activeTool === 'torch' && torchPos) {
         ctx.save();
         ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
@@ -660,40 +694,24 @@ export const WhiteboardCanvas: React.FC = () => {
         ctx.globalCompositeOperation = 'source-over';
         ctx.strokeStyle = 'rgba(253, 224, 71, 0.8)';
         ctx.lineWidth = 3;
-        ctx.shadowColor = '#fde047';
-        ctx.shadowBlur = 12;
         ctx.beginPath();
         ctx.arc(torchPos.x, torchPos.y, 65, 0, Math.PI * 2);
         ctx.stroke();
         ctx.restore();
       }
 
-      // 6. Render Laser Pointer Trails
+      // Laser Trails
       laserTrails.forEach((pt) => {
         ctx.save();
         ctx.globalAlpha = pt.alpha;
         ctx.fillStyle = pt.color || '#ef4444';
-        ctx.shadowColor = pt.color || '#ef4444';
-        ctx.shadowBlur = 10;
         ctx.beginPath();
         ctx.arc(pt.x, pt.y, 5 * pt.alpha, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
       });
     },
-    [
-      activeTool,
-      activeColor,
-      activeWidth,
-      backgroundType,
-      bgColor,
-      drawBackground,
-      isLightColor,
-      laserTrails,
-      renderSingleStroke,
-      tempStrokes,
-      torchPos,
-    ]
+    [activeTool, activeColor, activeWidth, backgroundType, bgColor, drawBackground, isLightColor, laserTrails, renderSingleStroke, tempStrokes, torchPos]
   );
 
   // Resize listener
@@ -719,37 +737,47 @@ export const WhiteboardCanvas: React.FC = () => {
     return () => window.removeEventListener('resize', handleResize);
   }, [redrawCanvas, whiteboardService, sizeMode, customHeight]);
 
-  // Subscribe to stroke changes
+  // Subscribe to strokes
   useEffect(() => {
     return whiteboardService.onStrokesChange((strokes) => {
       redrawCanvas(strokes);
     });
   }, [redrawCanvas, whiteboardService]);
 
-  // Pointer Coordinates helper
   const getCanvasCoords = (e: React.MouseEvent | React.TouchEvent): Point => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
-
-    let clientX = 0;
-    let clientY = 0;
-
-    if ('touches' in e && e.touches.length > 0) {
-      clientX = e.touches[0].clientX;
-      clientY = e.touches[0].clientY;
-    } else if ('clientX' in e) {
-      clientX = e.clientX;
-      clientY = e.clientY;
-    }
-
+    const clientX = 'touches' in e && e.touches[0] ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
+    const clientY = 'touches' in e && e.touches[0] ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
     return {
       x: clientX - rect.left,
       y: clientY - rect.top,
     };
   };
 
-  // Pointer Down
+  const isShapeTool = [
+    'line',
+    'arrow',
+    'arrow_bi',
+    'rect',
+    'circle',
+    'decision_diamond',
+    'tree_node',
+    'sticky_note',
+    'db_cylinder',
+    'db_nosql',
+    'cloud',
+    'load_balancer',
+    'message_queue',
+    'server_box',
+    'cache_mem',
+    'dns_router',
+    'firewall',
+    'user_client',
+    'mobile_client',
+  ].includes(activeTool);
+
   const handlePointerDown = (e: React.MouseEvent | React.TouchEvent) => {
     const pt = getCanvasCoords(e);
 
@@ -775,7 +803,6 @@ export const WhiteboardCanvas: React.FC = () => {
     setCurrentPoints([pt]);
   };
 
-  // Pointer Move
   const handlePointerMove = (e: React.MouseEvent | React.TouchEvent) => {
     const pt = getCanvasCoords(e);
 
@@ -792,37 +819,12 @@ export const WhiteboardCanvas: React.FC = () => {
 
     if (!isDrawing) return;
 
-    const isGeometry = [
-      'line',
-      'arrow',
-      'rect',
-      'circle',
-      'tree_node',
-      'db_cylinder',
-      'cloud',
-      'load_balancer',
-      'message_queue',
-      'server_box',
-      'cache_mem',
-      'user_client',
-    ].includes(activeTool);
-
-    if (isGeometry && startPoint) {
+    if (isShapeTool && startPoint) {
       redrawCanvas(whiteboardService.getStrokes(), undefined, {
         x1: startPoint.x,
         y1: startPoint.y,
         x2: pt.x,
         y2: pt.y,
-        label:
-          activeTool === 'tree_node'
-            ? 'Node'
-            : activeTool === 'db_cylinder'
-            ? '🗄️ Database'
-            : activeTool === 'cloud'
-            ? '☁️ Cloud'
-            : activeTool === 'server_box'
-            ? '📦 Server'
-            : undefined,
       });
     } else {
       const updated = [...currentPoints, pt];
@@ -831,7 +833,6 @@ export const WhiteboardCanvas: React.FC = () => {
     }
   };
 
-  // Pointer Up
   const handlePointerUp = (e: React.MouseEvent | React.TouchEvent) => {
     if (activeTool === 'torch') {
       setTorchPos(null);
@@ -843,23 +844,9 @@ export const WhiteboardCanvas: React.FC = () => {
     setIsDrawing(false);
 
     const endPt = getCanvasCoords(e);
-    const isGeometry = [
-      'line',
-      'arrow',
-      'rect',
-      'circle',
-      'tree_node',
-      'db_cylinder',
-      'cloud',
-      'load_balancer',
-      'message_queue',
-      'server_box',
-      'cache_mem',
-      'user_client',
-    ].includes(activeTool);
     const strokeWidth = activeTool === 'highlighter' ? 14 : activeWidth;
 
-    if (isGeometry && startPoint) {
+    if (isShapeTool && startPoint) {
       whiteboardService.addStroke(
         activeTool,
         activeColor,
@@ -870,16 +857,6 @@ export const WhiteboardCanvas: React.FC = () => {
           y1: startPoint.y,
           x2: endPt.x,
           y2: endPt.y,
-          label:
-            activeTool === 'tree_node'
-              ? String(Math.floor(Math.random() * 50) + 1)
-              : activeTool === 'db_cylinder'
-              ? '🗄️ Database'
-              : activeTool === 'cloud'
-              ? '☁️ API Gateway'
-              : activeTool === 'server_box'
-              ? '📦 App Server'
-              : undefined,
         }
       );
     } else if (currentPoints.length > 0) {
@@ -890,8 +867,8 @@ export const WhiteboardCanvas: React.FC = () => {
     setStartPoint(null);
   };
 
-  // Add Text Note
-  const handleConfirmTextNote = () => {
+  // Add Text Note on Canvas
+  const handleConfirmText = () => {
     if (!textModalPos || !textInput.trim()) {
       setTextModalPos(null);
       return;
@@ -1071,7 +1048,6 @@ export const WhiteboardCanvas: React.FC = () => {
             );
           })}
 
-          {/* Add Page Button */}
           <button
             type="button"
             className="btn btn-secondary btn-sm"
@@ -1110,7 +1086,7 @@ export const WhiteboardCanvas: React.FC = () => {
         </div>
       </div>
 
-      {/* ─── 2. Main Drawing Toolbar (Ultra-Streamlined) ─── */}
+      {/* ─── 2. Main Drawing Toolbar (Categorized, Uncluttered) ─── */}
       <div
         style={{
           display: 'flex',
@@ -1124,215 +1100,50 @@ export const WhiteboardCanvas: React.FC = () => {
           flexShrink: 0,
         }}
       >
-        {/* Primary Pens & Geometry Tools */}
-        <div style={{ display: 'flex', gap: '2px', alignItems: 'center', flexWrap: 'wrap' }}>
-          {/* Fine Pen */}
-          <button
-            type="button"
-            className={`btn-icon ${activeTool === 'pen' ? 'active' : ''}`}
-            onClick={() => setActiveTool('pen')}
-            title="Fine Pen"
-            style={{
-              padding: '2px 4px',
-              borderRadius: '4px',
-              border: activeTool === 'pen' ? '1px solid var(--primary)' : '1px solid transparent',
-              background: activeTool === 'pen' ? 'rgba(99, 102, 241, 0.25)' : 'transparent',
-              color: activeTool === 'pen' ? '#c7d2fe' : 'var(--text-muted)',
-              cursor: 'pointer',
-            }}
-          >
-            <Pencil size={11} />
-          </button>
+        {/* Left Tools: Drawing, Shapes, Arch Drawers */}
+        <div style={{ display: 'flex', gap: '3px', alignItems: 'center', flexWrap: 'wrap' }}>
+          {/* Primary Pens */}
+          {[
+            { id: 'pen', icon: Pencil, label: 'Fine Pen' },
+            { id: 'brush', icon: PenTool, label: 'Brush' },
+            { id: 'highlighter', icon: Highlighter, label: 'Highlighter' },
+            { id: 'temp_pen', icon: Clock, label: '⏳ Temp Ink (3s)' },
+            { id: 'laser', icon: Flame, label: '🔴 Laser' },
+            { id: 'torch', icon: Lightbulb, label: '🔦 Torch' },
+            { id: 'eraser', icon: Eraser, label: 'Eraser' },
+            { id: 'text', icon: Type, label: '🔤 Text Label' },
+          ].map((t) => {
+            const Icon = t.icon;
+            const isActive = activeTool === t.id;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                className={`btn-icon ${isActive ? 'active' : ''}`}
+                onClick={() => setActiveTool(t.id as any)}
+                title={t.label}
+                style={{
+                  padding: '2px 4px',
+                  borderRadius: '4px',
+                  border: isActive ? '1px solid var(--primary)' : '1px solid transparent',
+                  background: isActive ? 'rgba(99, 102, 241, 0.25)' : 'transparent',
+                  color: isActive ? '#c7d2fe' : 'var(--text-muted)',
+                  cursor: 'pointer',
+                }}
+              >
+                <Icon size={11} />
+              </button>
+            );
+          })}
 
-          {/* Brush Pen */}
-          <button
-            type="button"
-            className={`btn-icon ${activeTool === 'brush' ? 'active' : ''}`}
-            onClick={() => setActiveTool('brush')}
-            title="Brush Pen"
-            style={{
-              padding: '2px 4px',
-              borderRadius: '4px',
-              border: activeTool === 'brush' ? '1px solid var(--primary)' : '1px solid transparent',
-              background: activeTool === 'brush' ? 'rgba(99, 102, 241, 0.25)' : 'transparent',
-              color: activeTool === 'brush' ? '#c7d2fe' : 'var(--text-muted)',
-              cursor: 'pointer',
-            }}
-          >
-            <PenTool size={11} />
-          </button>
-
-          {/* Highlighter */}
-          <button
-            type="button"
-            className={`btn-icon ${activeTool === 'highlighter' ? 'active' : ''}`}
-            onClick={() => setActiveTool('highlighter')}
-            title="Highlighter"
-            style={{
-              padding: '2px 4px',
-              borderRadius: '4px',
-              border: activeTool === 'highlighter' ? '1px solid var(--primary)' : '1px solid transparent',
-              background: activeTool === 'highlighter' ? 'rgba(99, 102, 241, 0.25)' : 'transparent',
-              color: activeTool === 'highlighter' ? '#c7d2fe' : 'var(--text-muted)',
-              cursor: 'pointer',
-            }}
-          >
-            <Highlighter size={11} />
-          </button>
-
-          {/* ⏳ Disappearing Ink */}
-          <button
-            type="button"
-            className={`btn-icon ${activeTool === 'temp_pen' ? 'active' : ''}`}
-            onClick={() => setActiveTool('temp_pen')}
-            title="⏳ Temporary / Disappearing Ink (Fades in 3s)"
-            style={{
-              padding: '2px 4px',
-              borderRadius: '4px',
-              border: activeTool === 'temp_pen' ? '1px solid #38bdf8' : '1px solid transparent',
-              background: activeTool === 'temp_pen' ? 'rgba(56, 189, 248, 0.25)' : 'transparent',
-              color: activeTool === 'temp_pen' ? '#7dd3fc' : 'var(--text-muted)',
-              cursor: 'pointer',
-            }}
-          >
-            <Clock size={11} color="#38bdf8" />
-          </button>
-
-          {/* Laser Pointer */}
-          <button
-            type="button"
-            className={`btn-icon ${activeTool === 'laser' ? 'active' : ''}`}
-            onClick={() => setActiveTool('laser')}
-            title="🔴 Laser Pointer"
-            style={{
-              padding: '2px 4px',
-              borderRadius: '4px',
-              border: activeTool === 'laser' ? '1px solid #ef4444' : '1px solid transparent',
-              background: activeTool === 'laser' ? 'rgba(239, 68, 68, 0.25)' : 'transparent',
-              color: activeTool === 'laser' ? '#fca5a5' : 'var(--text-muted)',
-              cursor: 'pointer',
-            }}
-          >
-            <Flame size={11} color="#ef4444" />
-          </button>
-
-          {/* Spotlight Torch */}
-          <button
-            type="button"
-            className={`btn-icon ${activeTool === 'torch' ? 'active' : ''}`}
-            onClick={() => setActiveTool('torch')}
-            title="🔦 Spotlight Torch"
-            style={{
-              padding: '2px 4px',
-              borderRadius: '4px',
-              border: activeTool === 'torch' ? '1px solid #facc15' : '1px solid transparent',
-              background: activeTool === 'torch' ? 'rgba(250, 204, 21, 0.25)' : 'transparent',
-              color: activeTool === 'torch' ? '#fef08a' : 'var(--text-muted)',
-              cursor: 'pointer',
-            }}
-          >
-            <Lightbulb size={11} color="#facc15" />
-          </button>
-
-          {/* Eraser */}
-          <button
-            type="button"
-            className={`btn-icon ${activeTool === 'eraser' ? 'active' : ''}`}
-            onClick={() => setActiveTool('eraser')}
-            title="Eraser"
-            style={{
-              padding: '2px 4px',
-              borderRadius: '4px',
-              border: activeTool === 'eraser' ? '1px solid var(--primary)' : '1px solid transparent',
-              background: activeTool === 'eraser' ? 'rgba(99, 102, 241, 0.25)' : 'transparent',
-              color: activeTool === 'eraser' ? '#c7d2fe' : 'var(--text-muted)',
-              cursor: 'pointer',
-            }}
-          >
-            <Eraser size={11} />
-          </button>
-
-          <div style={{ width: '1px', height: '12px', background: 'var(--border-subtle)', margin: '0 1px' }} />
-
-          {/* Text Note */}
-          <button
-            type="button"
-            className={`btn-icon ${activeTool === 'text' ? 'active' : ''}`}
-            onClick={() => setActiveTool('text')}
-            title="Text Note"
-            style={{
-              padding: '2px 4px',
-              borderRadius: '4px',
-              border: activeTool === 'text' ? '1px solid var(--primary)' : '1px solid transparent',
-              background: activeTool === 'text' ? 'rgba(99, 102, 241, 0.25)' : 'transparent',
-              color: activeTool === 'text' ? '#c7d2fe' : 'var(--text-muted)',
-              cursor: 'pointer',
-            }}
-          >
-            <Type size={11} />
-          </button>
-
-          {/* Arrow */}
-          <button
-            type="button"
-            className={`btn-icon ${activeTool === 'arrow' ? 'active' : ''}`}
-            onClick={() => setActiveTool('arrow')}
-            title="Arrow"
-            style={{
-              padding: '2px 4px',
-              borderRadius: '4px',
-              border: activeTool === 'arrow' ? '1px solid var(--primary)' : '1px solid transparent',
-              background: activeTool === 'arrow' ? 'rgba(99, 102, 241, 0.25)' : 'transparent',
-              color: activeTool === 'arrow' ? '#c7d2fe' : 'var(--text-muted)',
-              cursor: 'pointer',
-            }}
-          >
-            <MoveRight size={11} />
-          </button>
-
-          {/* Box */}
-          <button
-            type="button"
-            className={`btn-icon ${activeTool === 'rect' ? 'active' : ''}`}
-            onClick={() => setActiveTool('rect')}
-            title="Box"
-            style={{
-              padding: '2px 4px',
-              borderRadius: '4px',
-              border: activeTool === 'rect' ? '1px solid var(--primary)' : '1px solid transparent',
-              background: activeTool === 'rect' ? 'rgba(99, 102, 241, 0.25)' : 'transparent',
-              color: activeTool === 'rect' ? '#c7d2fe' : 'var(--text-muted)',
-              cursor: 'pointer',
-            }}
-          >
-            <Square size={11} />
-          </button>
-
-          {/* Tree Node */}
-          <button
-            type="button"
-            className={`btn-icon ${activeTool === 'tree_node' ? 'active' : ''}`}
-            onClick={() => setActiveTool('tree_node')}
-            title="Tree Node"
-            style={{
-              padding: '2px 4px',
-              borderRadius: '4px',
-              border: activeTool === 'tree_node' ? '1px solid var(--primary)' : '1px solid transparent',
-              background: activeTool === 'tree_node' ? 'rgba(99, 102, 241, 0.25)' : 'transparent',
-              color: activeTool === 'tree_node' ? '#c7d2fe' : 'var(--text-muted)',
-              cursor: 'pointer',
-            }}
-          >
-            <GitBranch size={11} />
-          </button>
-
-          <div style={{ width: '1px', height: '12px', background: 'var(--border-subtle)', margin: '0 1px' }} />
+          <div style={{ width: '1px', height: '12px', background: 'var(--border-subtle)', margin: '0 2px' }} />
 
           {/* Drawer Toggles */}
           <button
             type="button"
             onClick={() => {
-              setShowShapesDrawer(!showShapesDrawer);
+              setShowGeomDrawer(!showGeomDrawer);
+              setShowArchDrawer(false);
               setShowThemesDrawer(false);
             }}
             style={{
@@ -1340,20 +1151,42 @@ export const WhiteboardCanvas: React.FC = () => {
               fontWeight: 600,
               padding: '2px 6px',
               borderRadius: '4px',
-              background: showShapesDrawer ? 'rgba(99, 102, 241, 0.35)' : 'rgba(255,255,255,0.05)',
-              border: showShapesDrawer ? '1px solid var(--primary)' : '1px solid rgba(255,255,255,0.08)',
-              color: showShapesDrawer ? '#ffffff' : 'var(--text-muted)',
+              background: showGeomDrawer ? 'rgba(99, 102, 241, 0.35)' : 'rgba(255,255,255,0.05)',
+              border: showGeomDrawer ? '1px solid var(--primary)' : '1px solid rgba(255,255,255,0.08)',
+              color: showGeomDrawer ? '#ffffff' : 'var(--text-muted)',
               cursor: 'pointer',
             }}
           >
-            🏛️ Arch {showShapesDrawer ? '▲' : '▼'}
+            📐 Shapes {showGeomDrawer ? '▲' : '▼'}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setShowArchDrawer(!showArchDrawer);
+              setShowGeomDrawer(false);
+              setShowThemesDrawer(false);
+            }}
+            style={{
+              fontSize: '9px',
+              fontWeight: 600,
+              padding: '2px 6px',
+              borderRadius: '4px',
+              background: showArchDrawer ? 'rgba(99, 102, 241, 0.35)' : 'rgba(255,255,255,0.05)',
+              border: showArchDrawer ? '1px solid var(--primary)' : '1px solid rgba(255,255,255,0.08)',
+              color: showArchDrawer ? '#ffffff' : 'var(--text-muted)',
+              cursor: 'pointer',
+            }}
+          >
+            🏛️ Architecture {showArchDrawer ? '▲' : '▼'}
           </button>
 
           <button
             type="button"
             onClick={() => {
               setShowThemesDrawer(!showThemesDrawer);
-              setShowShapesDrawer(false);
+              setShowArchDrawer(false);
+              setShowGeomDrawer(false);
             }}
             style={{
               fontSize: '9px',
@@ -1370,9 +1203,8 @@ export const WhiteboardCanvas: React.FC = () => {
           </button>
         </div>
 
-        {/* Action Controls: Privacy Mode, Undo, Clear, Save */}
+        {/* Right Actions: Collab / Personal Mode, Undo/Redo, Clear, Save */}
         <div style={{ display: 'flex', gap: '3px', alignItems: 'center' }}>
-          {/* Privacy Mode */}
           <div style={{ display: 'flex', gap: '1px', background: 'rgba(0,0,0,0.4)', padding: '2px', borderRadius: '4px', border: '1px solid var(--border-subtle)' }}>
             <button
               type="button"
@@ -1460,185 +1292,120 @@ export const WhiteboardCanvas: React.FC = () => {
         </div>
       </div>
 
-      {/* ─── 3. Collapsible Drawer: System Design Architecture Shapes ─── */}
-      {showShapesDrawer && (
+      {/* ─── 3. Drawer: Geometric & Flowchart Shapes ─── */}
+      {showGeomDrawer && (
         <div
           style={{
             display: 'flex',
             alignItems: 'center',
             gap: '4px',
             padding: '3px 8px',
-            background: 'rgba(0, 0, 0, 0.75)',
+            background: 'rgba(0, 0, 0, 0.85)',
             borderBottom: '1px solid var(--border-subtle)',
             overflowX: 'auto',
             flexShrink: 0,
           }}
         >
-          <span style={{ fontSize: '8.5px', color: 'var(--text-muted)', fontWeight: 600 }}>Arch Shapes:</span>
-          {/* Database */}
-          <button
-            type="button"
-            className={`btn-icon ${activeTool === 'db_cylinder' ? 'active' : ''}`}
-            onClick={() => setActiveTool('db_cylinder')}
-            title="🗄️ Database Cylinder"
-            style={{
-              padding: '2px 5px',
-              borderRadius: '4px',
-              border: activeTool === 'db_cylinder' ? '1px solid #10b981' : '1px solid transparent',
-              background: activeTool === 'db_cylinder' ? 'rgba(16, 185, 129, 0.25)' : 'transparent',
-              color: activeTool === 'db_cylinder' ? '#6ee7b7' : 'var(--text-muted)',
-              cursor: 'pointer',
-              fontSize: '9px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '3px',
-            }}
-          >
-            <Database size={10} color="#10b981" />
-            <span>DB</span>
-          </button>
-
-          {/* Cloud */}
-          <button
-            type="button"
-            className={`btn-icon ${activeTool === 'cloud' ? 'active' : ''}`}
-            onClick={() => setActiveTool('cloud')}
-            title="☁️ Cloud Gateway"
-            style={{
-              padding: '2px 5px',
-              borderRadius: '4px',
-              border: activeTool === 'cloud' ? '1px solid #38bdf8' : '1px solid transparent',
-              background: activeTool === 'cloud' ? 'rgba(56, 189, 248, 0.25)' : 'transparent',
-              color: activeTool === 'cloud' ? '#7dd3fc' : 'var(--text-muted)',
-              cursor: 'pointer',
-              fontSize: '9px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '3px',
-            }}
-          >
-            <Cloud size={10} color="#38bdf8" />
-            <span>Cloud</span>
-          </button>
-
-          {/* Load Balancer */}
-          <button
-            type="button"
-            className={`btn-icon ${activeTool === 'load_balancer' ? 'active' : ''}`}
-            onClick={() => setActiveTool('load_balancer')}
-            title="⚖️ Load Balancer"
-            style={{
-              padding: '2px 5px',
-              borderRadius: '4px',
-              border: activeTool === 'load_balancer' ? '1px solid #f59e0b' : '1px solid transparent',
-              background: activeTool === 'load_balancer' ? 'rgba(245, 158, 11, 0.25)' : 'transparent',
-              color: activeTool === 'load_balancer' ? '#fcd34d' : 'var(--text-muted)',
-              cursor: 'pointer',
-              fontSize: '9px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '3px',
-            }}
-          >
-            <Scale size={10} color="#f59e0b" />
-            <span>LB</span>
-          </button>
-
-          {/* Message Queue */}
-          <button
-            type="button"
-            className={`btn-icon ${activeTool === 'message_queue' ? 'active' : ''}`}
-            onClick={() => setActiveTool('message_queue')}
-            title="📨 Message Queue / Kafka Buffer"
-            style={{
-              padding: '2px 5px',
-              borderRadius: '4px',
-              border: activeTool === 'message_queue' ? '1px solid #a855f7' : '1px solid transparent',
-              background: activeTool === 'message_queue' ? 'rgba(168, 85, 247, 0.25)' : 'transparent',
-              color: activeTool === 'message_queue' ? '#d8b4fe' : 'var(--text-muted)',
-              cursor: 'pointer',
-              fontSize: '9px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '3px',
-            }}
-          >
-            <Layers size={10} color="#a855f7" />
-            <span>Queue</span>
-          </button>
-
-          {/* Server Container */}
-          <button
-            type="button"
-            className={`btn-icon ${activeTool === 'server_box' ? 'active' : ''}`}
-            onClick={() => setActiveTool('server_box')}
-            title="📦 App Server Container"
-            style={{
-              padding: '2px 5px',
-              borderRadius: '4px',
-              border: activeTool === 'server_box' ? '1px solid var(--primary)' : '1px solid transparent',
-              background: activeTool === 'server_box' ? 'rgba(99, 102, 241, 0.25)' : 'transparent',
-              color: activeTool === 'server_box' ? '#c7d2fe' : 'var(--text-muted)',
-              cursor: 'pointer',
-              fontSize: '9px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '3px',
-            }}
-          >
-            <Server size={10} color="#818cf8" />
-            <span>Server</span>
-          </button>
-
-          {/* Cache */}
-          <button
-            type="button"
-            className={`btn-icon ${activeTool === 'cache_mem' ? 'active' : ''}`}
-            onClick={() => setActiveTool('cache_mem')}
-            title="⚡ In-Memory Cache / Redis"
-            style={{
-              padding: '2px 5px',
-              borderRadius: '4px',
-              border: activeTool === 'cache_mem' ? '1px solid #f43f5e' : '1px solid transparent',
-              background: activeTool === 'cache_mem' ? 'rgba(244, 63, 94, 0.25)' : 'transparent',
-              color: activeTool === 'cache_mem' ? '#fda4af' : 'var(--text-muted)',
-              cursor: 'pointer',
-              fontSize: '9px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '3px',
-            }}
-          >
-            <Zap size={10} color="#f43f5e" />
-            <span>Cache</span>
-          </button>
-
-          {/* Client Actor */}
-          <button
-            type="button"
-            className={`btn-icon ${activeTool === 'user_client' ? 'active' : ''}`}
-            onClick={() => setActiveTool('user_client')}
-            title="👤 Client Actor"
-            style={{
-              padding: '2px 5px',
-              borderRadius: '4px',
-              border: activeTool === 'user_client' ? '1px solid #3b82f6' : '1px solid transparent',
-              background: activeTool === 'user_client' ? 'rgba(59, 130, 246, 0.25)' : 'transparent',
-              color: activeTool === 'user_client' ? '#93c5fd' : 'var(--text-muted)',
-              cursor: 'pointer',
-              fontSize: '9px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '3px',
-            }}
-          >
-            <User size={10} color="#3b82f6" />
-            <span>Client</span>
-          </button>
+          <span style={{ fontSize: '8.5px', color: 'var(--text-muted)', fontWeight: 600 }}>Shapes:</span>
+          {[
+            { id: 'line', icon: Minus, label: 'Line' },
+            { id: 'arrow', icon: MoveRight, label: 'Arrow (➡️)' },
+            { id: 'arrow_bi', icon: MoveRight, label: 'Bi-Arrow (↔️)' },
+            { id: 'rect', icon: Square, label: 'Rectangle' },
+            { id: 'circle', icon: Circle, label: 'Circle' },
+            { id: 'decision_diamond', icon: HelpCircle, label: 'Diamond (Decision)' },
+            { id: 'tree_node', icon: GitBranch, label: 'Tree / Graph Node' },
+            { id: 'sticky_note', icon: StickyNote, label: 'Sticky Note Card' },
+          ].map((t) => {
+            const Icon = t.icon;
+            const isActive = activeTool === t.id;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                className={`btn-icon ${isActive ? 'active' : ''}`}
+                onClick={() => setActiveTool(t.id as any)}
+                title={t.label}
+                style={{
+                  padding: '2px 5px',
+                  borderRadius: '4px',
+                  border: isActive ? '1px solid var(--primary)' : '1px solid transparent',
+                  background: isActive ? 'rgba(99, 102, 241, 0.25)' : 'transparent',
+                  color: isActive ? '#c7d2fe' : 'var(--text-muted)',
+                  cursor: 'pointer',
+                  fontSize: '9px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '3px',
+                }}
+              >
+                <Icon size={10} />
+                <span>{t.label.split(' ')[0]}</span>
+              </button>
+            );
+          })}
         </div>
       )}
 
-      {/* ─── 4. Collapsible Drawer: Background Themes, BG Colors & Color Palette ─── */}
+      {/* ─── 4. Drawer: Architecture & Cloud Shapes ─── */}
+      {showArchDrawer && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            padding: '3px 8px',
+            background: 'rgba(0, 0, 0, 0.85)',
+            borderBottom: '1px solid var(--border-subtle)',
+            overflowX: 'auto',
+            flexShrink: 0,
+          }}
+        >
+          <span style={{ fontSize: '8.5px', color: 'var(--text-muted)', fontWeight: 600 }}>Arch:</span>
+          {[
+            { id: 'db_cylinder', icon: Database, label: 'SQL DB', color: '#10b981' },
+            { id: 'db_nosql', icon: Database, label: 'NoSQL DB', color: '#34d399' },
+            { id: 'cache_mem', icon: Zap, label: 'Redis Cache', color: '#f43f5e' },
+            { id: 'message_queue', icon: Layers, label: 'Kafka Queue', color: '#a855f7' },
+            { id: 'load_balancer', icon: Scale, label: 'Load Balancer', color: '#f59e0b' },
+            { id: 'server_box', icon: Server, label: 'App Server', color: '#818cf8' },
+            { id: 'cloud', icon: Cloud, label: 'Cloud Gateway', color: '#38bdf8' },
+            { id: 'dns_router', icon: Globe, label: 'DNS / Router', color: '#38bdf8' },
+            { id: 'firewall', icon: Shield, label: 'Firewall', color: '#f43f5e' },
+            { id: 'user_client', icon: User, label: 'User Client', color: '#3b82f6' },
+            { id: 'mobile_client', icon: Smartphone, label: 'Mobile Device', color: '#06b6d4' },
+          ].map((t) => {
+            const Icon = t.icon;
+            const isActive = activeTool === t.id;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                className={`btn-icon ${isActive ? 'active' : ''}`}
+                onClick={() => setActiveTool(t.id as any)}
+                title={t.label}
+                style={{
+                  padding: '2px 5px',
+                  borderRadius: '4px',
+                  border: isActive ? `1px solid ${t.color}` : '1px solid transparent',
+                  background: isActive ? `${t.color}33` : 'transparent',
+                  color: isActive ? '#ffffff' : 'var(--text-muted)',
+                  cursor: 'pointer',
+                  fontSize: '9px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '3px',
+                }}
+              >
+                <Icon size={10} color={t.color} />
+                <span>{t.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ─── 5. Drawer: Themes & Swatches ─── */}
       {showThemesDrawer && (
         <div
           style={{
@@ -1646,203 +1413,148 @@ export const WhiteboardCanvas: React.FC = () => {
             alignItems: 'center',
             justifyContent: 'space-between',
             padding: '3px 8px',
-            background: 'rgba(0, 0, 0, 0.75)',
+            background: 'rgba(0, 0, 0, 0.85)',
             borderBottom: '1px solid var(--border-subtle)',
             flexWrap: 'wrap',
-            gap: '4px',
+            gap: '6px',
             flexShrink: 0,
           }}
         >
-          {/* Background Patterns & Background Color Swatches */}
-          <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '8.5px', color: 'var(--text-muted)', fontWeight: 600 }}>Pattern:</span>
+          {/* Background Textures */}
+          <div style={{ display: 'flex', gap: '3px', alignItems: 'center' }}>
+            <span style={{ fontSize: '8.5px', color: 'var(--text-muted)' }}>Texture:</span>
             {[
               { id: 'grid', label: 'Grid' },
               { id: 'ruled', label: 'Ruled' },
-              { id: 'plot', label: 'Plot' },
+              { id: 'plot', label: 'Cartesian Plot' },
               { id: 'dotted', label: 'Dots' },
-              { id: 'matrix', label: 'Matrix' },
               { id: 'blank', label: 'Blank' },
-            ].map((p) => (
+            ].map((bg) => (
               <button
-                key={p.id}
+                key={bg.id}
                 type="button"
-                onClick={() => handleSelectBackground(p.id as any)}
+                onClick={() => handleSelectBackground(bg.id as any)}
                 style={{
+                  padding: '1px 5px',
                   fontSize: '8.5px',
-                  padding: '1px 4px',
                   borderRadius: '3px',
-                  background: backgroundType === p.id ? 'var(--primary)' : 'rgba(255,255,255,0.06)',
-                  color: '#ffffff',
-                  border: 'none',
+                  border: backgroundType === bg.id ? '1px solid var(--primary)' : '1px solid transparent',
+                  background: backgroundType === bg.id ? 'rgba(99, 102, 241, 0.25)' : 'transparent',
+                  color: backgroundType === bg.id ? '#fff' : 'var(--text-muted)',
                   cursor: 'pointer',
                 }}
               >
-                {p.label}
+                {bg.label}
               </button>
             ))}
+          </div>
 
-            <div style={{ width: '1px', height: '10px', background: 'var(--border-subtle)', margin: '0 1px' }} />
-
-            <span style={{ fontSize: '8.5px', color: 'var(--text-muted)', fontWeight: 600 }}>BG:</span>
+          {/* Background Color Swatches */}
+          <div style={{ display: 'flex', gap: '3px', alignItems: 'center' }}>
+            <span style={{ fontSize: '8.5px', color: 'var(--text-muted)' }}>BG:</span>
             {BG_COLORS.map((bg) => (
-              <button
+              <span
                 key={bg.color}
-                type="button"
                 onClick={() => handleSelectBgColor(bg.color)}
                 title={bg.label}
                 style={{
                   width: '11px',
                   height: '11px',
-                  borderRadius: '3px',
+                  borderRadius: '50%',
                   background: bg.color,
-                  border: bgColor === bg.color ? '2px solid #6366f1' : '1px solid rgba(255,255,255,0.25)',
                   cursor: 'pointer',
-                  padding: 0,
+                  border: bgColor === bg.color ? '2px solid var(--primary)' : '1px solid rgba(255,255,255,0.2)',
+                  display: 'inline-block',
                 }}
               />
             ))}
           </div>
 
-          {/* Pen Colors & Sizes */}
-          <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
-            <div style={{ display: 'flex', gap: '2px', alignItems: 'center' }}>
-              {PEN_COLORS.map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  onClick={() => setActiveColor(c)}
-                  style={{
-                    width: '10px',
-                    height: '10px',
-                    borderRadius: '50%',
-                    background: c,
-                    border: activeColor === c ? '2px solid #ffffff' : '1px solid rgba(255,255,255,0.2)',
-                    cursor: 'pointer',
-                    padding: 0,
-                  }}
-                />
-              ))}
-            </div>
-
-            <div style={{ display: 'flex', gap: '1px', alignItems: 'center' }}>
-              {PEN_SIZES.map((p) => (
-                <button
-                  key={p.label}
-                  type="button"
-                  onClick={() => setActiveWidth(p.size)}
-                  style={{
-                    fontSize: '8px',
-                    fontWeight: 700,
-                    padding: '1px 3px',
-                    borderRadius: '3px',
-                    background: activeWidth === p.size ? 'rgba(99, 102, 241, 0.4)' : 'rgba(255,255,255,0.05)',
-                    border: activeWidth === p.size ? '1px solid var(--primary)' : '1px solid transparent',
-                    color: activeWidth === p.size ? '#fff' : 'var(--text-dim)',
-                    cursor: 'pointer',
-                  }}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
+          {/* Pen Color Swatches */}
+          <div style={{ display: 'flex', gap: '3px', alignItems: 'center' }}>
+            <span style={{ fontSize: '8.5px', color: 'var(--text-muted)' }}>Ink:</span>
+            {PEN_COLORS.map((c) => (
+              <span
+                key={c}
+                onClick={() => setActiveColor(c)}
+                style={{
+                  width: '11px',
+                  height: '11px',
+                  borderRadius: '50%',
+                  background: c,
+                  cursor: 'pointer',
+                  border: activeColor === c ? '2px solid #ffffff' : '1px solid rgba(255,255,255,0.2)',
+                  transform: activeColor === c ? 'scale(1.2)' : 'none',
+                }}
+              />
+            ))}
           </div>
         </div>
       )}
 
-      {/* ─── 5. Interactive HTML5 Full-Workspace Canvas ─── */}
-      <div style={{ flex: 1, width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}>
+      {/* ─── 6. Master Canvas Drawing Workspace ─── */}
+      <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
         <canvas
           ref={canvasRef}
           onMouseDown={handlePointerDown}
           onMouseMove={handlePointerMove}
           onMouseUp={handlePointerUp}
-          onMouseLeave={handlePointerUp}
           onTouchStart={handlePointerDown}
           onTouchMove={handlePointerMove}
           onTouchEnd={handlePointerUp}
-          style={{
-            display: 'block',
-            width: '100%',
-            height: '100%',
-            cursor:
-              activeTool === 'eraser'
-                ? 'cell'
-                : activeTool === 'laser' || activeTool === 'torch'
-                ? 'crosshair'
-                : activeTool === 'text'
-                ? 'text'
-                : 'crosshair',
-          }}
+          style={{ width: '100%', height: '100%', display: 'block', cursor: activeTool === 'text' ? 'text' : 'crosshair' }}
         />
-      </div>
 
-      {/* ─── 4. Text Prompt Modal ─── */}
-      {textModalPos && (
-        <div
-          style={{
-            position: 'absolute',
-            top: `${Math.min(textModalPos.y, 250)}px`,
-            left: `${Math.min(textModalPos.x, 220)}px`,
-            zIndex: 100,
-            background: 'rgba(15, 23, 42, 0.95)',
-            border: '1px solid var(--primary)',
-            borderRadius: '6px',
-            padding: '6px',
-            boxShadow: '0 10px 25px rgba(0,0,0,0.8)',
-            display: 'flex',
-            gap: '4px',
-          }}
-        >
-          <input
-            type="text"
-            className="input-glass"
-            placeholder="Type text note..."
-            value={textInput}
-            onChange={(e) => setTextInput(e.target.value)}
-            autoFocus
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') handleConfirmTextNote();
-              if (e.key === 'Escape') setTextModalPos(null);
+        {/* Inline On-Canvas Text Input Tool Popover */}
+        {textModalPos && (
+          <div
+            style={{
+              position: 'absolute',
+              left: `${Math.min(textModalPos.x, (containerRef.current?.clientWidth || 300) - 220)}px`,
+              top: `${Math.max(10, textModalPos.y - 38)}px`,
+              zIndex: 50,
+              background: 'rgba(15, 23, 42, 0.95)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: '6px',
+              padding: '4px 6px',
+              display: 'flex',
+              gap: '4px',
+              boxShadow: '0 10px 25px rgba(0,0,0,0.8)',
             }}
-            style={{ fontSize: '11px', padding: '4px 6px', width: '140px' }}
-          />
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            onClick={handleConfirmTextNote}
-            style={{ fontSize: '10px', padding: '2px 6px' }}
           >
-            Add
-          </button>
-        </div>
-      )}
-
-      {/* ─── 5. HTML5 Canvas ─── */}
-      <canvas
-        ref={canvasRef}
-        onMouseDown={handlePointerDown}
-        onMouseMove={handlePointerMove}
-        onMouseUp={handlePointerUp}
-        onMouseLeave={handlePointerUp}
-        onTouchStart={handlePointerDown}
-        onTouchMove={handlePointerMove}
-        onTouchEnd={handlePointerUp}
-        style={{
-          flexGrow: 1,
-          width: '100%',
-          height: '100%',
-          cursor:
-            activeTool === 'laser' || activeTool === 'temp_pen'
-              ? 'crosshair'
-              : activeTool === 'torch'
-              ? 'none'
-              : activeTool === 'text'
-              ? 'text'
-              : 'crosshair',
-          touchAction: 'none',
-        }}
-      />
+            <input
+              type="text"
+              placeholder="Type label text..."
+              value={textInput}
+              onChange={(e) => setTextInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleConfirmText();
+                if (e.key === 'Escape') setTextModalPos(null);
+              }}
+              autoFocus
+              style={{
+                background: 'rgba(0,0,0,0.5)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: '4px',
+                color: activeColor,
+                fontSize: '11px',
+                fontWeight: 600,
+                padding: '2px 6px',
+                width: '140px',
+                outline: 'none',
+              }}
+            />
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={handleConfirmText}
+              style={{ fontSize: '9px', padding: '2px 6px' }}
+            >
+              Add
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 };

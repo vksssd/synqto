@@ -1,6 +1,6 @@
-// ─── Synqto Personal Diary & Journal Notebook View ───
+// ─── Synqto Personal Diary & Journal Notebook View (Text + Whiteboard + PDF Export) ───
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   BookOpen,
   Plus,
@@ -8,8 +8,6 @@ import {
   Download,
   Search,
   Tag,
-  Smile,
-  Calendar,
   ExternalLink,
   ChevronDown,
   Edit3,
@@ -17,9 +15,15 @@ import {
   CheckSquare,
   List,
   Check,
+  FileText,
+  Palette,
+  Columns,
+  Printer,
+  Sparkles,
 } from 'lucide-react';
 import { DiaryService } from './diary.service';
-import { DiaryBook, DiaryEntry, DiaryMood } from './diary.types';
+import { DiaryBook, DiaryEntry, DiaryMood, DiaryWhiteboardData } from './diary.types';
+import { DiaryWhiteboardCanvas } from './DiaryWhiteboardCanvas';
 
 const MOODS: { id: DiaryMood; icon: string; label: string; color: string }[] = [
   { id: 'productive', icon: '🚀', label: 'Productive', color: '#10b981' },
@@ -29,11 +33,21 @@ const MOODS: { id: DiaryMood; icon: string; label: string; color: string }[] = [
   { id: 'review_needed', icon: '⚠️', label: 'Review Needed', color: '#f43f5e' },
 ];
 
+type EntryViewMode = 'text' | 'whiteboard' | 'split';
+
 export const DiaryView: React.FC = () => {
   const diaryService = DiaryService.getInstance();
   const [diaries, setDiaries] = useState<DiaryBook[]>(diaryService.getDiaries());
   const [activeDiary, setActiveDiary] = useState<DiaryBook>(diaryService.getActiveDiary());
   const [activeEntry, setActiveEntry] = useState<DiaryEntry | null>(diaryService.getActiveEntry());
+
+  // Local state for smooth typing without cursor jumping or re-render stutter
+  const [localTitle, setLocalTitle] = useState<string>('');
+  const [localContent, setLocalContent] = useState<string>('');
+  const saveTimeoutRef = useRef<any>(null);
+
+  // View mode inside entry: 'text' | 'whiteboard' | 'split'
+  const [entryMode, setEntryMode] = useState<EntryViewMode>('text');
 
   const [searchQuery, setSearchQuery] = useState('');
   const [isDiaryDropdownOpen, setIsDiaryDropdownOpen] = useState(false);
@@ -43,8 +57,20 @@ export const DiaryView: React.FC = () => {
   const [newDiaryColor, setNewDiaryColor] = useState('#6366f1');
 
   const [newTagInput, setNewTagInput] = useState('');
-  const [copiedToast, setCopiedToast] = useState(false);
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
 
+  // Initialize local text state when activeEntry changes
+  useEffect(() => {
+    if (activeEntry) {
+      setLocalTitle(activeEntry.title || '');
+      setLocalContent(activeEntry.content || '');
+    } else {
+      setLocalTitle('');
+      setLocalContent('');
+    }
+  }, [activeEntry?.id]);
+
+  // Subscribe to DiaryService state changes
   useEffect(() => {
     return diaryService.onStateChange((state) => {
       setDiaries(state.diaries);
@@ -55,9 +81,75 @@ export const DiaryView: React.FC = () => {
     });
   }, [diaryService]);
 
+  // Debounced auto-save for typing
+  const debouncedSave = useCallback(
+    (title: string, content: string) => {
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = setTimeout(() => {
+        if (activeDiary && activeEntry) {
+          diaryService.updateEntry(activeDiary.id, activeEntry.id, { title, content });
+        }
+      }, 350);
+    },
+    [activeDiary, activeEntry, diaryService]
+  );
+
+  const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setLocalTitle(val);
+    debouncedSave(val, localContent);
+  };
+
+  const handleContentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setLocalContent(val);
+    debouncedSave(localTitle, val);
+  };
+
+  // Immediate save on Blur
+  const handleBlur = () => {
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    if (activeDiary && activeEntry) {
+      diaryService.updateEntry(activeDiary.id, activeEntry.id, {
+        title: localTitle,
+        content: localContent,
+      });
+    }
+  };
+
+  // Whiteboard changes in diary
+  const handleWhiteboardChange = (wbData: DiaryWhiteboardData) => {
+    if (activeDiary && activeEntry) {
+      diaryService.updateEntry(activeDiary.id, activeEntry.id, {
+        whiteboard: wbData,
+      });
+    }
+  };
+
+  // Markdown format helpers
+  const insertMarkdownSnippet = (prefix: string, suffix = '') => {
+    const textarea = document.getElementById('diary-content-textarea') as HTMLTextAreaElement | null;
+    if (!textarea) return;
+
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const selected = localContent.substring(start, end);
+    const updated = localContent.substring(0, start) + prefix + selected + suffix + localContent.substring(end);
+
+    setLocalContent(updated);
+    debouncedSave(localTitle, updated);
+
+    setTimeout(() => {
+      textarea.focus();
+      textarea.setSelectionRange(start + prefix.length, end + prefix.length);
+    }, 10);
+  };
+
   // Create New Entry
   const handleCreateNewEntry = () => {
-    diaryService.createEntry(activeDiary.id);
+    const newEntry = diaryService.createEntry(activeDiary.id);
+    setLocalTitle(newEntry.title);
+    setLocalContent(newEntry.content);
   };
 
   // Create New Diary Book
@@ -71,19 +163,25 @@ export const DiaryView: React.FC = () => {
     }
   };
 
-  // Export Diary to Markdown
+  // Export as PDF
+  const handleExportPdf = () => {
+    diaryService.exportDiaryPdf(activeDiary.id, activeEntry?.id);
+    setExportMenuOpen(false);
+  };
+
+  // Export as Markdown
   const handleExportMarkdown = () => {
     const md = diaryService.exportDiaryMarkdown(activeDiary.id);
     const blob = new Blob([md], { type: 'text/markdown' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.download = `${activeDiary.title.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}.md`;
-    a.href = url;
     a.click();
     URL.revokeObjectURL(url);
+    setExportMenuOpen(false);
   };
 
-  // Add Tag to Active Entry
+  // Add Tag
   const handleAddTag = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && newTagInput.trim() && activeEntry) {
       e.preventDefault();
@@ -103,17 +201,18 @@ export const DiaryView: React.FC = () => {
     diaryService.updateEntry(activeDiary.id, activeEntry.id, { tags: updated });
   };
 
-  // Filter entries
-  const filteredEntries = activeDiary?.entries.filter((entry) => {
-    if (!searchQuery.trim()) return true;
-    const q = searchQuery.toLowerCase();
-    return (
-      entry.title.toLowerCase().includes(q) ||
-      entry.content.toLowerCase().includes(q) ||
-      entry.tags.some((t) => t.toLowerCase().includes(q)) ||
-      (entry.problemTitle && entry.problemTitle.toLowerCase().includes(q))
-    );
-  }) || [];
+  // Filter entries by search
+  const filteredEntries =
+    activeDiary?.entries.filter((entry) => {
+      if (!searchQuery.trim()) return true;
+      const q = searchQuery.toLowerCase();
+      return (
+        entry.title.toLowerCase().includes(q) ||
+        entry.content.toLowerCase().includes(q) ||
+        entry.tags.some((t) => t.toLowerCase().includes(q)) ||
+        (entry.problemTitle && entry.problemTitle.toLowerCase().includes(q))
+      );
+    }) || [];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#090d16', overflow: 'hidden' }}>
@@ -153,7 +252,7 @@ export const DiaryView: React.FC = () => {
             <ChevronDown size={11} color="#c7d2fe" />
           </button>
 
-          {/* Diary Books Dropdown Menu */}
+          {/* Diary Dropdown */}
           {isDiaryDropdownOpen && (
             <div
               style={{
@@ -218,7 +317,7 @@ export const DiaryView: React.FC = () => {
                 ))}
               </div>
 
-              {/* Create New Diary Button */}
+              {/* Create New Diary Form */}
               {!isCreatingDiary ? (
                 <button
                   type="button"
@@ -244,7 +343,7 @@ export const DiaryView: React.FC = () => {
                     <input
                       type="text"
                       className="input-glass"
-                      placeholder="Diary Title (e.g. Graph DP Notes)"
+                      placeholder="Diary Title..."
                       value={newDiaryTitle}
                       onChange={(e) => setNewDiaryTitle(e.target.value)}
                       autoFocus
@@ -265,7 +364,7 @@ export const DiaryView: React.FC = () => {
           )}
         </div>
 
-        {/* Right Actions: ➕ New Page / Entry & Export .md */}
+        {/* Right Header Actions: ➕ New Page & 📄 Export PDF Button */}
         <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
           <button
             type="button"
@@ -285,15 +384,65 @@ export const DiaryView: React.FC = () => {
             <span>New Page</span>
           </button>
 
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={handleExportMarkdown}
-            title="Download Diary as Markdown (.md)"
-            style={{ fontSize: '11px', padding: '4px 8px' }}
-          >
-            <Download size={12} />
-          </button>
+          {/* Export PDF Button */}
+          <div style={{ position: 'relative' }}>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => setExportMenuOpen(!exportMenuOpen)}
+              title="Export as PDF / Markdown"
+              style={{
+                fontSize: '11px',
+                padding: '4px 8px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                background: 'rgba(16, 185, 129, 0.15)',
+                borderColor: 'rgba(16, 185, 129, 0.4)',
+                color: '#34d399',
+              }}
+            >
+              <Printer size={12} />
+              <span>PDF</span>
+              <ChevronDown size={10} />
+            </button>
+
+            {exportMenuOpen && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: '32px',
+                  right: 0,
+                  zIndex: 100,
+                  width: '160px',
+                  background: 'rgba(15, 23, 42, 0.98)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: '6px',
+                  padding: '4px',
+                  boxShadow: '0 10px 25px rgba(0,0,0,0.8)',
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={handleExportPdf}
+                  className="btn btn-ghost btn-sm"
+                  style={{ width: '100%', justifyContent: 'flex-start', fontSize: '10px', gap: '6px', color: '#34d399' }}
+                >
+                  <Printer size={12} />
+                  <span>Save as PDF (.pdf)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExportMarkdown}
+                  className="btn btn-ghost btn-sm"
+                  style={{ width: '100%', justifyContent: 'flex-start', fontSize: '10px', gap: '6px', color: '#c7d2fe' }}
+                >
+                  <FileText size={12} />
+                  <span>Download Markdown (.md)</span>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -304,7 +453,7 @@ export const DiaryView: React.FC = () => {
           <input
             type="text"
             className="input-glass"
-            placeholder={`Search ${activeDiary.entries.length} entries by title, tag, or code...`}
+            placeholder={`Search ${activeDiary.entries.length} entries...`}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             style={{ fontSize: '11px', padding: '4px 8px 4px 26px', width: '100%' }}
@@ -312,12 +461,12 @@ export const DiaryView: React.FC = () => {
         </div>
       </div>
 
-      {/* ─── 3. Main Workspace: Entries List + Active Page Editor ─── */}
+      {/* ─── 3. Main Workspace: Entries List + Dual-Mode Editor ─── */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        {/* Left Side: Entries List (Compact Timeline) */}
+        {/* Left Side: Entries Timeline */}
         <div
           style={{
-            width: '160px',
+            width: '150px',
             borderRight: '1px solid var(--border-subtle)',
             background: 'rgba(15, 23, 42, 0.4)',
             overflowY: 'auto',
@@ -375,27 +524,86 @@ export const DiaryView: React.FC = () => {
           )}
         </div>
 
-        {/* Right Side: Active Page / Entry Editor */}
+        {/* Right Side: Active Page Dual-Mode Editor */}
         {activeEntry ? (
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto', padding: '12px', gap: '10px' }}>
-            {/* Title & Delete Header */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#090d16' }}>
+            {/* Top Editor Bar: Title + Dual Mode Toggle [✍️ Text | 🎨 Whiteboard | 🌗 Split] */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '8px 12px',
+                borderBottom: '1px solid var(--border-subtle)',
+                background: 'rgba(15, 23, 42, 0.7)',
+                gap: '8px',
+                flexWrap: 'wrap',
+              }}
+            >
+              {/* Title Input */}
               <input
                 type="text"
-                value={activeEntry.title}
-                onChange={(e) => diaryService.updateEntry(activeDiary.id, activeEntry.id, { title: e.target.value })}
-                placeholder="Entry Title..."
+                value={localTitle}
+                onChange={handleTitleChange}
+                onBlur={handleBlur}
+                placeholder="Entry Title (e.g. Binary Search Patterns)..."
                 style={{
-                  fontSize: '15px',
+                  fontSize: '14px',
                   fontWeight: 700,
                   color: '#ffffff',
                   background: 'transparent',
                   border: 'none',
                   outline: 'none',
-                  width: '100%',
+                  flex: 1,
+                  minWidth: '150px',
                 }}
               />
 
+              {/* Mode Switcher Pills */}
+              <div
+                style={{
+                  display: 'flex',
+                  gap: '2px',
+                  background: 'rgba(0,0,0,0.5)',
+                  padding: '2px',
+                  borderRadius: '6px',
+                  border: '1px solid var(--border-subtle)',
+                }}
+              >
+                {[
+                  { id: 'text' as const, icon: FileText, label: 'Text' },
+                  { id: 'whiteboard' as const, icon: Palette, label: 'Board' },
+                  { id: 'split' as const, icon: Columns, label: 'Split' },
+                ].map((m) => {
+                  const Icon = m.icon;
+                  const isActive = entryMode === m.id;
+                  return (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => setEntryMode(m.id)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        padding: '3px 8px',
+                        fontSize: '10px',
+                        fontWeight: 600,
+                        borderRadius: '4px',
+                        border: 'none',
+                        background: isActive ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'transparent',
+                        color: isActive ? '#ffffff' : 'var(--text-muted)',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <Icon size={11} />
+                      <span>{m.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Delete Entry */}
               <button
                 type="button"
                 onClick={() => {
@@ -404,15 +612,26 @@ export const DiaryView: React.FC = () => {
                   }
                 }}
                 title="Delete Entry"
-                style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', padding: '4px' }}
+                style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', padding: '2px' }}
               >
-                <Trash2 size={14} />
+                <Trash2 size={13} />
               </button>
             </div>
 
-            {/* Metadata Bar: Mood Selector, Tags, Problem Link */}
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', fontSize: '10px' }}>
-              {/* Mood Dropdown */}
+            {/* Metadata Bar: Mood & Tags */}
+            <div
+              style={{
+                display: 'flex',
+                gap: '8px',
+                alignItems: 'center',
+                padding: '6px 12px',
+                borderBottom: '1px solid rgba(255,255,255,0.04)',
+                background: 'rgba(0,0,0,0.2)',
+                flexWrap: 'wrap',
+                fontSize: '10px',
+              }}
+            >
+              {/* Mood Selector */}
               <select
                 value={activeEntry.mood}
                 onChange={(e) => diaryService.updateEntry(activeDiary.id, activeEntry.id, { mood: e.target.value as any })}
@@ -421,7 +640,7 @@ export const DiaryView: React.FC = () => {
                   color: '#fff',
                   border: '1px solid var(--border-subtle)',
                   borderRadius: '4px',
-                  padding: '3px 6px',
+                  padding: '2px 6px',
                   fontSize: '10px',
                 }}
               >
@@ -432,7 +651,7 @@ export const DiaryView: React.FC = () => {
                 ))}
               </select>
 
-              {/* Tags List */}
+              {/* Tags */}
               <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexWrap: 'wrap' }}>
                 {activeEntry.tags.map((t) => (
                   <span
@@ -460,10 +679,9 @@ export const DiaryView: React.FC = () => {
                   </span>
                 ))}
 
-                {/* Add Tag Input */}
                 <input
                   type="text"
-                  placeholder="+ Add #tag (Enter)"
+                  placeholder="+ #tag (Enter)"
                   value={newTagInput}
                   onChange={(e) => setNewTagInput(e.target.value)}
                   onKeyDown={handleAddTag}
@@ -474,33 +692,134 @@ export const DiaryView: React.FC = () => {
                     color: '#fff',
                     padding: '2px 5px',
                     fontSize: '9px',
-                    width: '90px',
+                    width: '80px',
                   }}
                 />
               </div>
             </div>
 
-            {/* Markdown Text Editor */}
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: '260px' }}>
-              <textarea
-                value={activeEntry.content}
-                onChange={(e) => diaryService.updateEntry(activeDiary.id, activeEntry.id, { content: e.target.value })}
-                placeholder="Write your thoughts, code, dry run notes, key takeaways, and checklists..."
-                style={{
-                  flex: 1,
-                  width: '100%',
-                  background: 'rgba(0, 0, 0, 0.25)',
-                  border: '1px solid var(--border-subtle)',
-                  borderRadius: '6px',
-                  padding: '10px',
-                  color: '#f8fafc',
-                  fontSize: '12px',
-                  fontFamily: 'monospace',
-                  lineHeight: '1.6',
-                  resize: 'none',
-                  outline: 'none',
-                }}
-              />
+            {/* Main Content Area: Text / Board / Split */}
+            <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+              {/* Text Editor Pane */}
+              {(entryMode === 'text' || entryMode === 'split') && (
+                <div
+                  style={{
+                    flex: entryMode === 'split' ? '1 1 50%' : '1 1 100%',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    borderRight: entryMode === 'split' ? '1px solid var(--border-subtle)' : 'none',
+                    height: '100%',
+                    background: '#090d16',
+                  }}
+                >
+                  {/* Markdown Quick Toolbar */}
+                  <div
+                    style={{
+                      display: 'flex',
+                      gap: '4px',
+                      padding: '4px 8px',
+                      background: 'rgba(15, 23, 42, 0.5)',
+                      borderBottom: '1px solid rgba(255,255,255,0.04)',
+                      alignItems: 'center',
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => insertMarkdownSnippet('**', '**')}
+                      title="Bold"
+                      className="btn btn-ghost btn-sm"
+                      style={{ padding: '2px 6px', fontSize: '10px', fontWeight: 700 }}
+                    >
+                      B
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => insertMarkdownSnippet('`', '`')}
+                      title="Inline Code"
+                      className="btn btn-ghost btn-sm"
+                      style={{ padding: '2px 6px', fontSize: '10px', fontFamily: 'monospace' }}
+                    >
+                      &lt;/&gt;
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => insertMarkdownSnippet('```python\n', '\n```')}
+                      title="Code Block"
+                      className="btn btn-ghost btn-sm"
+                      style={{ padding: '2px 6px', fontSize: '10px' }}
+                    >
+                      <Code size={11} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => insertMarkdownSnippet('- [ ] ')}
+                      title="Checklist"
+                      className="btn btn-ghost btn-sm"
+                      style={{ padding: '2px 6px', fontSize: '10px' }}
+                    >
+                      <CheckSquare size={11} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => insertMarkdownSnippet('### ')}
+                      title="Heading"
+                      className="btn btn-ghost btn-sm"
+                      style={{ padding: '2px 6px', fontSize: '10px' }}
+                    >
+                      H3
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => insertMarkdownSnippet('- ')}
+                      title="Bullet List"
+                      className="btn btn-ghost btn-sm"
+                      style={{ padding: '2px 6px', fontSize: '10px' }}
+                    >
+                      <List size={11} />
+                    </button>
+                  </div>
+
+                  {/* Fluid Textarea */}
+                  <textarea
+                    id="diary-content-textarea"
+                    value={localContent}
+                    onChange={handleContentChange}
+                    onBlur={handleBlur}
+                    placeholder="Write your problem notes, approach, complexity, code snippets, dry runs, and checklists..."
+                    style={{
+                      flex: 1,
+                      width: '100%',
+                      background: 'transparent',
+                      border: 'none',
+                      padding: '12px',
+                      color: '#f8fafc',
+                      fontSize: '12px',
+                      fontFamily: 'monospace',
+                      lineHeight: '1.6',
+                      resize: 'none',
+                      outline: 'none',
+                    }}
+                  />
+                </div>
+              )}
+
+              {/* Whiteboard Sketchpad Pane */}
+              {(entryMode === 'whiteboard' || entryMode === 'split') && (
+                <div
+                  style={{
+                    flex: entryMode === 'split' ? '1 1 50%' : '1 1 100%',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    height: '100%',
+                    position: 'relative',
+                  }}
+                >
+                  <DiaryWhiteboardCanvas
+                    whiteboardData={activeEntry.whiteboard}
+                    onChange={handleWhiteboardChange}
+                  />
+                </div>
+              )}
             </div>
           </div>
         ) : (

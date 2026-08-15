@@ -6,11 +6,13 @@ import { PeerIdentity } from '@/core/network/packet';
 import { OnlinePeer } from '@/features/discovery/discovery.service';
 import { RoomCard } from './RoomCard';
 import { ChatView } from '@/features/chat/ChatView';
+import { WhiteboardCanvas } from '@/features/whiteboard/WhiteboardCanvas';
 import { TutorStage } from '@/features/tutor/TutorStage';
 import { TutorService } from '@/features/tutor/tutor.service';
 import { VoiceRoom } from '@/features/voice/VoiceRoom';
 import { RoomService } from './room.service';
-import { Plus, ArrowRight } from 'lucide-react';
+import { Plus, ArrowRight, MessageSquare, Palette } from 'lucide-react';
+import { FAB_STORAGE_KEY } from '@/features/settings/fab-settings.types';
 
 interface ProblemRoomChatViewProps {
   room: RoomContext | null;
@@ -30,6 +32,28 @@ export const ProblemRoomChatView: React.FC<ProblemRoomChatViewProps> = ({
   const roomService = RoomService.getInstance();
   const tutorService = TutorService.getInstance();
   const [customRoomInput, setCustomRoomInput] = useState('');
+  const [enableWhiteboard, setEnableWhiteboard] = useState(false);
+  const [activeTab, setActiveTab] = useState<'chat' | 'whiteboard'>('chat');
+
+  // Check if whiteboard is enabled in settings
+  useEffect(() => {
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      chrome.storage.local.get([FAB_STORAGE_KEY], (res) => {
+        if (res[FAB_STORAGE_KEY]?.enableWhiteboard) {
+          setEnableWhiteboard(true);
+        }
+      });
+
+      const handleStorage = (changes: any, area: string) => {
+        if (area === 'local' && changes[FAB_STORAGE_KEY]) {
+          setEnableWhiteboard(Boolean(changes[FAB_STORAGE_KEY].newValue?.enableWhiteboard));
+        }
+      };
+
+      chrome.storage.onChanged.addListener(handleStorage);
+      return () => chrome.storage.onChanged.removeListener(handleStorage);
+    }
+  }, []);
 
   // Listen for local mouse moves & clicks from content script to broadcast over P2P DataChannel
   useEffect(() => {
@@ -105,12 +129,77 @@ export const ProblemRoomChatView: React.FC<ProblemRoomChatViewProps> = ({
         />
       )}
 
-      {/* Integrated Real-time P2P Chat Stream */}
-      <div style={{ flex: 1, minHeight: '260px', display: 'flex', flexDirection: 'column' }}>
-        <ChatView
-          myIdentity={identity}
-          roomId={room?.roomId || 'global-lobby'}
-        />
+      {/* Segmented Switcher when Whiteboard is Enabled in Settings */}
+      {enableWhiteboard && (
+        <div
+          style={{
+            display: 'flex',
+            background: 'rgba(15, 23, 42, 0.8)',
+            padding: '3px',
+            borderRadius: 'var(--radius-sm)',
+            border: '1px solid var(--border-subtle)',
+            gap: '4px',
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setActiveTab('chat')}
+            style={{
+              flex: 1,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px',
+              padding: '5px',
+              fontSize: '11px',
+              fontWeight: 600,
+              borderRadius: '4px',
+              background: activeTab === 'chat' ? 'var(--primary)' : 'transparent',
+              color: activeTab === 'chat' ? '#ffffff' : 'var(--text-muted)',
+              border: 'none',
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+            }}
+          >
+            <MessageSquare size={13} />
+            <span>Live Chat</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('whiteboard')}
+            style={{
+              flex: 1,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px',
+              padding: '5px',
+              fontSize: '11px',
+              fontWeight: 600,
+              borderRadius: '4px',
+              background: activeTab === 'whiteboard' ? 'var(--primary)' : 'transparent',
+              color: activeTab === 'whiteboard' ? '#ffffff' : 'var(--text-muted)',
+              border: 'none',
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+            }}
+          >
+            <Palette size={13} />
+            <span>Whiteboard</span>
+          </button>
+        </div>
+      )}
+
+      {/* Main Content Area: Chat or Collaborative Whiteboard */}
+      <div style={{ flex: 1, minHeight: '280px', display: 'flex', flexDirection: 'column' }}>
+        {enableWhiteboard && activeTab === 'whiteboard' ? (
+          <WhiteboardCanvas />
+        ) : (
+          <ChatView
+            myIdentity={identity}
+            roomId={room?.roomId || 'global-lobby'}
+          />
+        )}
       </div>
     </div>
   );

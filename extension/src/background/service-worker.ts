@@ -44,7 +44,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         nerd_buddy_active_url: message.payload.url,
       });
     }
-  } else if (message.type === 'LOCAL_CURSOR_MOVE' || message.type === 'LOCAL_CLICK_PULSE') {
+  } else if (
+    message.type === 'LOCAL_CURSOR_MOVE' ||
+    message.type === 'LOCAL_CLICK_PULSE' ||
+    message.type === 'WHITEBOARD_STROKE_LOCAL' ||
+    message.type === 'WHITEBOARD_CLEAR_LOCAL' ||
+    message.type === 'WHITEBOARD_UNDO_LOCAL'
+  ) {
     // Forward to sidepanel / offscreen for DataChannel broadcast
     chrome.runtime.sendMessage(message).catch(() => {});
   } else if (message.type === 'OPEN_SIDEPANEL') {

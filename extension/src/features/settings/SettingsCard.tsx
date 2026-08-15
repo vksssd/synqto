@@ -259,6 +259,71 @@ export const SettingsCard: React.FC = () => {
             </div>
           </div>
         )}
+
+        {/* Collaborative Whiteboard Capability Toggle */}
+        <div style={{ marginTop: '14px', borderTop: '1px solid var(--border-subtle)', paddingTop: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ fontSize: '14px' }}>🎨</span>
+              <span style={{ fontSize: '11px', fontWeight: 600, color: '#f8fafc' }}>
+                Collaborative Whiteboard
+              </span>
+            </div>
+
+            <label
+              style={{
+                position: 'relative',
+                display: 'inline-block',
+                width: '36px',
+                height: '20px',
+                cursor: 'pointer',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={Boolean(fabSettings.enableWhiteboard)}
+                onChange={(e) => {
+                  const updated: FabSettings = { ...fabSettings, enableWhiteboard: e.target.checked };
+                  setFabSettings(updated);
+                  saveFabSettings(updated);
+                }}
+                style={{ opacity: 0, width: 0, height: 0 }}
+              />
+              <span
+                style={{
+                  position: 'absolute',
+                  cursor: 'pointer',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  backgroundColor: fabSettings.enableWhiteboard ? '#6366f1' : 'rgba(255, 255, 255, 0.1)',
+                  borderRadius: '20px',
+                  transition: '0.3s',
+                  border: '1px solid rgba(255, 255, 255, 0.15)',
+                }}
+              >
+                <span
+                  style={{
+                    position: 'absolute',
+                    content: '""',
+                    height: '14px',
+                    width: '14px',
+                    left: fabSettings.enableWhiteboard ? '18px' : '3px',
+                    bottom: '2px',
+                    backgroundColor: 'white',
+                    borderRadius: '50%',
+                    transition: '0.3s',
+                  }}
+                />
+              </span>
+            </label>
+          </div>
+
+          <div style={{ fontSize: '10px', color: 'var(--text-muted)', lineHeight: '1.4' }}>
+            Enables an interactive drawing canvas with pens, highlighters, geometric shapes (trees, lines, boxes), and P2P synchronization in the popup &amp; sidepanel.
+          </div>
+        </div>
       </div>
 
       {/* Signaling Server Configuration */}

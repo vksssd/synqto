@@ -1,4 +1,4 @@
-// ─── In-Browser Floating Action Button & Pixel-Perfect Problem Chat Popup ───
+// ─── In-Browser Floating Action Button, Problem Chat & Collaborative Whiteboard Popup ───
 
 import { FabSettings, DEFAULT_FAB_SETTINGS, FAB_STORAGE_KEY } from '@/features/settings/fab-settings.types';
 import { detectResource } from './resource-detector';
@@ -20,6 +20,21 @@ interface ChatMessageData {
   isSelf?: boolean;
 }
 
+interface WhiteboardPoint {
+  x: number;
+  y: number;
+}
+
+interface InPageStroke {
+  id: string;
+  tool: 'pen' | 'highlighter' | 'eraser' | 'line' | 'arrow' | 'rect' | 'circle' | 'tree_node';
+  color: string;
+  width: number;
+  opacity: number;
+  points: WhiteboardPoint[];
+  geometry?: { x1: number; y1: number; x2: number; y2: number; label?: string };
+}
+
 export class FloatingWidget {
   private hostElement: HTMLElement | null = null;
   private shadow: ShadowRoot | null = null;
@@ -35,6 +50,17 @@ export class FloatingWidget {
   private replyingTo: ChatMessageData | null = null;
   private revealedSpoilers: Record<string, boolean> = {};
 
+  // Whiteboard State
+  private activeTab: 'chat' | 'whiteboard' = 'chat';
+  private wbTool: 'pen' | 'highlighter' | 'eraser' | 'line' | 'arrow' | 'rect' | 'circle' | 'tree_node' = 'pen';
+  private wbColor: string = '#6366f1';
+  private wbWidth: number = 4;
+  private wbStrokes: InPageStroke[] = [];
+  private wbRedoStack: InPageStroke[] = [];
+  private isWbDrawing: boolean = false;
+  private wbCurrentPoints: WhiteboardPoint[] = [];
+  private wbStartPoint: WhiteboardPoint | null = null;
+
   constructor() {
     this.init();
   }
@@ -45,13 +71,14 @@ export class FloatingWidget {
     this.detectCurrentPageProblem();
     this.checkVisibilityAndRender();
     this.listenToStorageChanges();
+    this.listenForRuntimeMessages();
   }
 
   private async loadIdentity() {
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-      const res = await chrome.storage.local.get(['nerd_buddy_identity']);
-      if (res.nerd_buddy_identity) {
-        this.myIdentity = res.nerd_buddy_identity;
+      const res = await chrome.storage.local.get(['synqto_identity', 'nerd_buddy_identity']);
+      if (res.synqto_identity || res.nerd_buddy_identity) {
+        this.myIdentity = res.synqto_identity || res.nerd_buddy_identity;
       }
     }
 
@@ -69,7 +96,9 @@ export class FloatingWidget {
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       const res = await chrome.storage.local.get([
         FAB_STORAGE_KEY,
+        'synqto_active_problem',
         'nerd_buddy_active_problem',
+        'synqto_live_stage',
         'nerd_buddy_live_stage',
         'nerd_buddy_sidepanel_open',
         'nerd_buddy_peer_count',
@@ -78,13 +107,14 @@ export class FloatingWidget {
       if (res[FAB_STORAGE_KEY]) {
         this.settings = res[FAB_STORAGE_KEY];
       }
-      if (res.nerd_buddy_active_problem) {
-        this.currentProblem = res.nerd_buddy_active_problem;
-        this.currentRoomStorageKey = `nerd_buddy_chat_${this.currentProblem?.roomId || ''}`;
+      const problem = res.synqto_active_problem || res.nerd_buddy_active_problem;
+      if (problem) {
+        this.currentProblem = problem;
+        this.currentRoomStorageKey = `synqto_chat_${this.currentProblem?.roomId || ''}`;
         await this.loadMessages();
       }
-      if (res.nerd_buddy_live_stage) {
-        this.liveStage = res.nerd_buddy_live_stage;
+      if (res.synqto_live_stage || res.nerd_buddy_live_stage) {
+        this.liveStage = res.synqto_live_stage || res.nerd_buddy_live_stage;
       }
       if (typeof res.nerd_buddy_peer_count === 'number') {
         this.peerCount = Math.max(1, res.nerd_buddy_peer_count);
@@ -103,7 +133,7 @@ export class FloatingWidget {
         canonicalUrl: detected.canonicalUrl,
         roomId,
       };
-      this.currentRoomStorageKey = `nerd_buddy_chat_${roomId}`;
+      this.currentRoomStorageKey = `synqto_chat_${roomId}`;
       this.loadMessages();
     }
   }
@@ -150,103 +180,98 @@ export class FloatingWidget {
   }
 
   private createWidgetDOM() {
-    if (document.getElementById('nerd-buddy-floating-root')) return;
+    if (document.getElementById('synqto-floating-host')) return;
 
-    this.hostElement = document.createElement('div');
-    this.hostElement.id = 'nerd-buddy-floating-root';
-    this.hostElement.style.cssText = `
+    const host = document.createElement('div');
+    host.id = 'synqto-floating-host';
+    host.style.cssText = `
       position: fixed;
       bottom: 24px;
       right: 24px;
-      z-index: 2147483645;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      z-index: 2147483640;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
     `;
+    document.body.appendChild(host);
+    this.hostElement = host;
+    this.shadow = host.attachShadow({ mode: 'open' });
 
-    document.body.appendChild(this.hostElement);
-    this.shadow = this.hostElement.attachShadow({ mode: 'open' });
     this.render();
   }
 
   private render() {
     if (!this.shadow) return;
 
-    const problemTitle = this.currentProblem ? this.currentProblem.title : 'Study Circle';
-    const problemPlatform = this.currentProblem ? this.currentProblem.platform : 'General';
-    const platformColor = getPlatformBadgeColor(problemPlatform);
     const isLive = Boolean(this.liveStage && this.liveStage.isActive);
-    const tutorName = isLive ? this.liveStage.tutorIdentity?.nickname || 'Tutor' : '';
-    const broadcastType = isLive ? (this.liveStage.broadcastType || 'Audio').toUpperCase() : '';
+    const tutorName = this.liveStage?.tutorIdentity?.nickname || 'Tutor';
+    const broadcastType = this.liveStage?.broadcastType === 'screen' ? '🖥️ Screen' : this.liveStage?.broadcastType === 'camera' ? '📹 Camera' : '🎙️ Audio';
+    const problemTitle = this.currentProblem?.title || 'Global Problem Lobby';
+    const platform = this.currentProblem?.platform || 'LeetCode';
+    const platformColor = getPlatformBadgeColor(platform);
+    const isWhiteboardTab = this.settings.enableWhiteboard && this.activeTab === 'whiteboard';
 
     this.shadow.innerHTML = `
       <style>
         :host {
-          --bg-app: #030712;
-          --bg-surface: rgba(15, 23, 42, 0.85);
-          --bg-surface-elevated: rgba(30, 41, 59, 0.92);
-          --bg-glass-input: rgba(3, 7, 18, 0.7);
-          --border-subtle: rgba(255, 255, 255, 0.08);
-          --border-medium: rgba(255, 255, 255, 0.14);
-          --border-focus: rgba(99, 102, 241, 0.5);
           --primary: #6366f1;
-          --primary-glow: rgba(99, 102, 241, 0.35);
-          --accent-purple: #8b5cf6;
-          --accent-emerald: #10b981;
-          --accent-rose: #f43f5e;
-          --accent-cyan: #06b6d4;
+          --primary-hover: #4f46e5;
+          --bg-card: rgba(15, 23, 42, 0.96);
+          --bg-surface-elevated: rgba(30, 41, 59, 0.85);
+          --border-subtle: rgba(255, 255, 255, 0.1);
           --text-primary: #f8fafc;
           --text-secondary: #94a3b8;
           --text-muted: #64748b;
           --text-dim: #475569;
-          --font-mono: 'JetBrains Mono', 'Fira Code', Consolas, Monaco, monospace;
+          --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
         }
 
-        * { box-sizing: border-box; margin: 0; padding: 0; }
+        * {
+          box-sizing: border-box;
+          margin: 0;
+          padding: 0;
+        }
 
-        /* Custom Scrollbar */
-        ::-webkit-scrollbar { width: 5px; height: 5px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 4px; }
-        ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.25); }
-
-        /* Floating Action Button */
+        /* Floating Action Button (FAB) */
         .fab-button {
+          position: relative;
           display: flex;
           align-items: center;
           gap: 8px;
           padding: 10px 16px;
           border-radius: 9999px;
-          background: ${isLive ? 'linear-gradient(135deg, #ef4444, #dc2626)' : 'linear-gradient(135deg, #4f46e5, #7c3aed)'};
+          background: linear-gradient(135deg, #4f46e5, #7c3aed);
+          border: 1px solid rgba(255, 255, 255, 0.2);
+          box-shadow: 0 10px 25px -5px rgba(99, 102, 241, 0.5), 0 0 15px rgba(124, 58, 237, 0.3);
           color: #ffffff;
-          border: 1px solid rgba(255, 255, 255, 0.25);
-          box-shadow: ${isLive ? '0 0 24px rgba(239, 68, 68, 0.65)' : '0 10px 25px -5px rgba(79, 70, 229, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.3)'};
-          cursor: pointer;
           font-size: 13px;
-          font-weight: 600;
-          transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+          font-weight: 700;
+          cursor: pointer;
+          transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
           user-select: none;
-          backdrop-filter: blur(12px);
         }
 
         .fab-button:hover {
           transform: translateY(-2px) scale(1.03);
-          box-shadow: ${isLive ? '0 0 32px rgba(239, 68, 68, 0.85)' : '0 14px 28px -5px rgba(79, 70, 229, 0.65)'};
+          box-shadow: 0 14px 28px -5px rgba(99, 102, 241, 0.65), 0 0 20px rgba(124, 58, 237, 0.4);
         }
 
         .live-dot {
           width: 8px;
           height: 8px;
           border-radius: 50%;
-          background: #ffffff;
-          box-shadow: 0 0 8px #ffffff;
-          animation: pulse 1.2s infinite;
+          background: #ef4444;
+          box-shadow: 0 0 10px #ef4444;
+          animation: livePulse 1.5s infinite;
         }
 
-        @keyframes pulse {
+        @keyframes livePulse {
           0%, 100% { opacity: 1; transform: scale(1); }
-          50% { opacity: 0.4; transform: scale(0.85); }
+          50% { opacity: 0.4; transform: scale(1.2); }
         }
 
         .fab-badge {
+          position: absolute;
+          top: -4px;
+          right: -4px;
           background: #f59e0b;
           color: #ffffff;
           font-size: 10px;
@@ -255,16 +280,16 @@ export class FloatingWidget {
           border-radius: 9999px;
         }
 
-        /* In-Page Popup Card (Identical to Sidepanel Chat View) */
+        /* In-Page Popup Card */
         .popup-card {
           display: ${this.isOpen ? 'flex' : 'none'};
           flex-direction: column;
           position: absolute;
           bottom: 56px;
           right: 0;
-          width: 380px;
-          height: 520px;
-          max-height: 82vh;
+          width: 400px;
+          height: 540px;
+          max-height: 84vh;
           background: rgba(15, 23, 42, 0.96);
           border: 1px solid ${isLive ? 'rgba(239, 68, 68, 0.45)' : 'rgba(99, 102, 241, 0.35)'};
           border-radius: 16px;
@@ -281,7 +306,7 @@ export class FloatingWidget {
           to { opacity: 1; transform: translateY(0) scale(1); }
         }
 
-        /* Room Header (Matches RoomCard) */
+        /* Room Header */
         .room-header {
           display: flex;
           align-items: center;
@@ -299,15 +324,15 @@ export class FloatingWidget {
         }
 
         .platform-icon-box {
-          width: 34px;
-          height: 34px;
-          border-radius: 10px;
+          width: 32px;
+          height: 32px;
+          border-radius: 8px;
           background: rgba(99, 102, 241, 0.15);
           border: 1px solid rgba(255, 255, 255, 0.1);
           display: flex;
           align-items: center;
           justify-content: center;
-          font-size: 18px;
+          font-size: 16px;
           flex-shrink: 0;
         }
 
@@ -371,19 +396,38 @@ export class FloatingWidget {
           color: #ffffff;
         }
 
-        /* Live Broadcast Alert Bar */
-        .live-stage-banner {
-          background: linear-gradient(135deg, rgba(239, 68, 68, 0.25), rgba(139, 92, 246, 0.2));
-          border-bottom: 1px solid rgba(239, 68, 68, 0.35);
-          padding: 6px 12px;
+        /* Segmented View Switcher */
+        .tab-switcher {
           display: flex;
-          align-items: center;
-          justify-content: space-between;
-          font-size: 11px;
-          color: #fca5a5;
+          background: rgba(15, 23, 42, 0.9);
+          padding: 3px 6px;
+          border-bottom: 1px solid var(--border-subtle);
+          gap: 4px;
         }
 
-        /* Messages List (Matches ChatCard.tsx exactly) */
+        .tab-btn {
+          flex: 1;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+          padding: 5px 8px;
+          font-size: 11px;
+          font-weight: 600;
+          border-radius: 6px;
+          border: none;
+          cursor: pointer;
+          transition: all 0.15s;
+          background: transparent;
+          color: var(--text-muted);
+        }
+
+        .tab-btn.active {
+          background: var(--primary);
+          color: #ffffff;
+        }
+
+        /* Messages List */
         .message-list {
           flex: 1;
           overflow-y: auto;
@@ -442,129 +486,186 @@ export class FloatingWidget {
           font-size: 10px;
         }
 
-        .reply-quote-preview {
-          border-left: 2px solid var(--primary);
-          padding-left: 6px;
-          margin-bottom: 4px;
-          font-size: 10px;
-          color: var(--text-muted);
-          font-style: italic;
-        }
-
         .chat-footer {
+          margin-top: 3px;
           display: flex;
           align-items: center;
           justify-content: flex-end;
-          gap: 4px;
-          margin-top: 4px;
           font-size: 10px;
-          color: var(--text-dim);
         }
 
         .ack-read {
-          color: var(--accent-cyan);
-          font-weight: bold;
+          color: #38bdf8;
+          font-weight: 700;
         }
 
-        /* Reply Banner */
-        .replying-banner {
+        /* Whiteboard Toolbar & Canvas in Popup */
+        .whiteboard-container {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          background: #090d16;
+          overflow: hidden;
+          position: relative;
+        }
+
+        .wb-toolbar {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          background: rgba(99, 102, 241, 0.15);
-          border: 1px solid rgba(99, 102, 241, 0.3);
-          border-radius: 6px;
-          padding: 4px 8px;
-          font-size: 11px;
-          color: var(--text-secondary);
-          margin: 0 10px;
+          padding: 6px 8px;
+          background: rgba(15, 23, 42, 0.95);
+          border-bottom: 1px solid var(--border-subtle);
+          flex-wrap: wrap;
+          gap: 4px;
         }
 
-        /* Quick Strategy Prompt Pills (Matches ChatInput.tsx) */
-        .prompt-pills-row {
+        .wb-tool-group {
           display: flex;
-          gap: 5px;
-          padding: 6px 10px;
-          overflow-x: auto;
-          background: rgba(15, 23, 42, 0.4);
-          border-top: 1px solid var(--border-subtle);
+          gap: 3px;
+          align-items: center;
         }
 
-        .prompt-pill {
-          white-space: nowrap;
-          background: rgba(255, 255, 255, 0.05);
-          border: 1px solid var(--border-subtle);
-          border-radius: 9999px;
-          padding: 3px 8px;
-          font-size: 10px;
-          color: var(--text-secondary);
+        .wb-tool-btn {
+          padding: 4px 6px;
+          border-radius: 4px;
+          border: 1px solid transparent;
+          background: transparent;
+          color: var(--text-muted);
           cursor: pointer;
-          transition: all 0.15s ease;
+          font-size: 11px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
         }
 
-        .prompt-pill:hover {
-          background: rgba(99, 102, 241, 0.2);
-          border-color: rgba(99, 102, 241, 0.4);
+        .wb-tool-btn.active {
+          border-color: var(--primary);
+          background: rgba(99, 102, 241, 0.25);
+          color: #c7d2fe;
+        }
+
+        .wb-palette-bar {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 3px 8px;
+          background: rgba(0, 0, 0, 0.3);
+          border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .color-dot {
+          width: 13px;
+          height: 13px;
+          border-radius: 50%;
+          border: 1px solid rgba(255, 255, 255, 0.2);
+          cursor: pointer;
+        }
+
+        .color-dot.active {
+          border: 2px solid #ffffff;
+          box-shadow: 0 0 6px rgba(255, 255, 255, 0.5);
+        }
+
+        .size-pill {
+          font-size: 9px;
+          font-weight: 700;
+          padding: 1px 4px;
+          border-radius: 3px;
+          background: rgba(255, 255, 255, 0.05);
+          border: 1px solid transparent;
+          color: var(--text-dim);
+          cursor: pointer;
+        }
+
+        .size-pill.active {
+          background: rgba(99, 102, 241, 0.3);
+          border-color: var(--primary);
           color: #ffffff;
         }
 
-        /* Composer Toolbar (Matches ChatInput.tsx) */
+        #nb-whiteboard-canvas {
+          flex-grow: 1;
+          width: 100%;
+          height: 100%;
+          cursor: crosshair;
+          touch-action: none;
+        }
+
+        /* Input Composer */
         .composer-box {
           display: flex;
           align-items: center;
           gap: 6px;
           padding: 8px 10px;
-          background: rgba(30, 41, 59, 0.92);
+          background: rgba(15, 23, 42, 0.95);
           border-top: 1px solid var(--border-subtle);
         }
 
         .input-glass {
           flex: 1;
-          background: var(--bg-glass-input);
-          border: 1px solid var(--border-medium);
+          background: rgba(0, 0, 0, 0.4);
+          border: 1px solid var(--border-subtle);
           border-radius: 8px;
-          color: #ffffff;
-          font-size: 12px;
           padding: 7px 10px;
+          color: #ffffff;
+          font-size: 11px;
           outline: none;
-          font-family: inherit;
         }
 
         .input-glass:focus {
-          border-color: var(--border-focus);
-          box-shadow: 0 0 10px var(--primary-glow);
+          border-color: var(--primary);
         }
 
         .btn-send {
-          background: linear-gradient(135deg, var(--primary), var(--accent-purple));
-          border: 1px solid rgba(255, 255, 255, 0.15);
+          background: var(--primary);
+          border: none;
           color: #ffffff;
-          padding: 7px 12px;
+          padding: 6px 10px;
           border-radius: 8px;
           cursor: pointer;
-          font-size: 12px;
-          font-weight: 600;
           display: flex;
           align-items: center;
           justify-content: center;
-          transition: all 0.15s ease;
         }
 
-        .btn-send:hover {
-          filter: brightness(1.1);
+        .prompt-pills-row {
+          display: flex;
+          gap: 4px;
+          padding: 4px 8px;
+          overflow-x: auto;
+          background: rgba(0, 0, 0, 0.3);
+          border-top: 1px solid var(--border-subtle);
+        }
+
+        .prompt-pill {
+          background: rgba(255, 255, 255, 0.06);
+          border: 1px solid var(--border-subtle);
+          color: var(--text-secondary);
+          font-size: 9px;
+          font-weight: 600;
+          padding: 2px 6px;
+          border-radius: 4px;
+          cursor: pointer;
+          white-space: nowrap;
+        }
+
+        .prompt-pill:hover {
+          background: rgba(99, 102, 241, 0.2);
+          color: #ffffff;
         }
       </style>
 
-      <!-- In-Page Chat Popup -->
-      <div class="popup-card" id="nb-popup">
-        <!-- Room Header -->
+      <!-- In-Page Popup Card Window -->
+      <div class="popup-card" id="nb-popup-card">
+        <!-- Room Header Bar -->
         <div class="room-header">
           <div class="room-info">
             <div class="platform-icon-box">⚡</div>
             <div>
-              <div class="problem-title">${problemTitle}</div>
+              <div class="problem-title">${this.escapeHtml(problemTitle)}</div>
               <div class="badges-row">
-                <span class="platform-pill">${problemPlatform}</span>
+                <span class="platform-pill">${platform}</span>
                 <span class="peer-count-pill">
                   <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#10b981;"></span>
                   <span>${this.peerCount} Online</span>
@@ -587,106 +688,153 @@ export class FloatingWidget {
           </div>
         </div>
 
-        <!-- Live Broadcaster Banner if Active -->
-        ${isLive ? `
-          <div class="live-stage-banner">
-            <div style="display:flex;align-items:center;gap:6px;">
-              <span class="live-dot"></span>
-              <span><strong>${tutorName}</strong> is broadcasting ${broadcastType}</span>
-            </div>
-            <button id="nb-live-tunein" style="background:#ef4444;color:#fff;border:none;padding:3px 8px;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer;">
-              Watch Stream 📺
+        <!-- Segmented Switcher when Whiteboard is Enabled in Settings -->
+        ${this.settings.enableWhiteboard ? `
+          <div class="tab-switcher">
+            <button class="tab-btn ${this.activeTab === 'chat' ? 'active' : ''}" id="nb-tab-chat">
+              <span>💬 Live Chat</span>
+            </button>
+            <button class="tab-btn ${this.activeTab === 'whiteboard' ? 'active' : ''}" id="nb-tab-whiteboard">
+              <span>🎨 Whiteboard</span>
             </button>
           </div>
         ` : ''}
 
-        <!-- Message List -->
-        <div class="message-list" id="nb-messages">
-          ${this.messages.length === 0 ? `
-            <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--text-muted);gap:8px;padding:30px 10px;text-align:center;">
-              <div style="font-size:28px;">💬</div>
-              <div style="font-size:13px;font-weight:600;color:var(--text-secondary);">No messages yet</div>
-              <div style="font-size:11px;max-width:220px;">Say hello or ask for a hint! Messages are synchronized P2P across all peers.</div>
+        <!-- Live Broadcaster Banner if Active -->
+        ${isLive ? `
+          <div style="background:linear-gradient(135deg, rgba(239, 68, 68, 0.25), rgba(139, 92, 246, 0.2));border-bottom:1px solid rgba(239, 68, 68, 0.35);padding:6px 12px;display:flex;align-items:center;justify-content:space-between;font-size:11px;color:#fca5a5;">
+            <div style="display:flex;align-items:center;gap:6px;">
+              <span class="live-dot"></span>
+              <span><strong>${tutorName}</strong> broadcasting ${broadcastType}</span>
             </div>
-          ` : this.messages.map((m, idx) => `
-            <div class="chat-bubble ${m.isSelf ? 'self' : 'other'}">
-              ${m.replyPreview ? `<div class="reply-quote-preview">${this.escapeHtml(m.replyPreview)}</div>` : ''}
-              
-              <div class="chat-header">
-                <div class="chat-author">
-                  <span>${m.from?.avatar || '👤'}</span>
-                  <span style="color:${m.isSelf ? '#ffffff' : m.from?.color || '#a5b4fc'}">
-                    ${m.isSelf ? 'You' : m.from?.nickname || 'Buddy'}
-                  </span>
-                </div>
-                <div style="display:flex;align-items:center;gap:4px;">
-                  <span class="chat-timestamp">${this.formatTimestamp(m.timestamp)}</span>
-                  <button class="icon-btn nb-reply-trigger" data-id="${m.id}" data-text="${this.escapeHtml(m.text.slice(0, 35))}" data-nick="${this.escapeHtml(m.from?.nickname || 'Buddy')}" style="padding:0;width:18px;height:18px;" title="Reply">
-                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <path d="M9 14L4 9l5-5"/>
-                      <path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v5.5"/>
-                    </svg>
-                  </button>
-                </div>
-              </div>
-
-              <div class="chat-body">${this.renderFormattedText(m.text, idx)}</div>
-
-              ${m.isSelf ? `
-                <div class="chat-footer">
-                  ${m.status === 'pending' ? '<span>⏳</span>' : ''}
-                  ${m.status === 'sent' ? '<span style="color:var(--text-dim);">✓</span>' : ''}
-                  ${m.status === 'delivered' ? '<span style="color:var(--text-secondary);">✓✓</span>' : ''}
-                  ${m.status === 'read' ? '<span class="ack-read">✓✓</span>' : ''}
-                </div>
-              ` : ''}
-            </div>
-          `).join('')}
-        </div>
-
-        <!-- Replying Banner -->
-        ${this.replyingTo ? `
-          <div class="replying-banner">
-            <span>Replying to <strong>${this.replyingTo.from.nickname}</strong>: ${this.escapeHtml(this.replyingTo.text.slice(0, 30))}...</span>
-            <button class="icon-btn" id="nb-cancel-reply" style="padding:0;width:18px;height:18px;">✕</button>
+            <button id="nb-live-tunein" style="background:#ef4444;color:#fff;border:none;padding:3px 8px;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer;">
+              Watch 📺
+            </button>
           </div>
         ` : ''}
 
-        <!-- Quick Strategy Prompt Pills -->
-        <div class="prompt-pills-row">
-          <button class="prompt-pill" data-text="⚡ O(N) Time">⚡ O(N) Time</button>
-          <button class="prompt-pill" data-text="💾 O(1) Space">💾 O(1) Space</button>
-          <button class="prompt-pill" data-text="👉 Two Pointers">👉 Two Pointers</button>
-          <button class="prompt-pill" data-text="🔍 Binary Search">🔍 Binary Search</button>
-          <button class="prompt-pill" data-text="🧠 DP / Memo">🧠 DP / Memo</button>
-          <button class="prompt-pill" data-text="💡 Sliding Window">💡 Sliding Window</button>
-          <button class="prompt-pill" data-text="⏳ Anyone stuck?">⏳ Anyone stuck?</button>
-        </div>
+        <!-- Main Body: Chat or Whiteboard -->
+        ${isWhiteboardTab ? `
+          <!-- Whiteboard View -->
+          <div class="whiteboard-container">
+            <!-- Whiteboard Toolbar -->
+            <div class="wb-toolbar">
+              <div class="wb-tool-group">
+                <button class="wb-tool-btn ${this.wbTool === 'pen' ? 'active' : ''}" data-wbtool="pen" title="Pen">✏️</button>
+                <button class="wb-tool-btn ${this.wbTool === 'highlighter' ? 'active' : ''}" data-wbtool="highlighter" title="Highlighter">🖍️</button>
+                <button class="wb-tool-btn ${this.wbTool === 'eraser' ? 'active' : ''}" data-wbtool="eraser" title="Eraser">🧹</button>
+                <button class="wb-tool-btn ${this.wbTool === 'line' ? 'active' : ''}" data-wbtool="line" title="Line">📏</button>
+                <button class="wb-tool-btn ${this.wbTool === 'arrow' ? 'active' : ''}" data-wbtool="arrow" title="Arrow">➡️</button>
+                <button class="wb-tool-btn ${this.wbTool === 'rect' ? 'active' : ''}" data-wbtool="rect" title="Box">🔲</button>
+                <button class="wb-tool-btn ${this.wbTool === 'circle' ? 'active' : ''}" data-wbtool="circle" title="Node">⭕</button>
+                <button class="wb-tool-btn ${this.wbTool === 'tree_node' ? 'active' : ''}" data-wbtool="tree_node" title="Tree Node">🌳</button>
+              </div>
 
-        <!-- Input Box & Composer -->
-        <form class="composer-box" id="nb-composer">
-          <button type="button" class="icon-btn" id="nb-spoiler-insert" title="Insert Spoiler Blur ||text||" style="width:28px;height:28px;flex-shrink:0;">
-            👁️‍🗨️
-          </button>
-          <input type="text" class="input-glass" id="nb-input" placeholder="Type a hint, code snippet, or ||spoiler||..." />
-          <button type="submit" class="btn-send">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="22" y1="2" x2="11" y2="13"></line>
-              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-            </svg>
-          </button>
-        </form>
+              <div class="wb-tool-group">
+                <button class="wb-tool-btn" id="nb-wb-undo" title="Undo">↩️</button>
+                <button class="wb-tool-btn" id="nb-wb-redo" title="Redo">↪️</button>
+                <button class="wb-tool-btn" id="nb-wb-clear" title="Clear Canvas" style="color:#f87171;">🗑️</button>
+                <button class="wb-tool-btn" id="nb-wb-save" title="Export PNG">💾</button>
+              </div>
+            </div>
+
+            <!-- Color Palette & Widths -->
+            <div class="wb-palette-bar">
+              <div style="display:flex;gap:5px;align-items:center;">
+                ${['#6366f1', '#06b6d4', '#10b981', '#f59e0b', '#f43f5e', '#ffffff'].map((c) => `
+                  <div class="color-dot ${this.wbColor === c ? 'active' : ''}" data-color="${c}" style="background:${c};"></div>
+                `).join('')}
+              </div>
+              <div style="display:flex;gap:3px;align-items:center;">
+                <button class="size-pill ${this.wbWidth === 2 ? 'active' : ''}" data-size="2">S</button>
+                <button class="size-pill ${this.wbWidth === 4 ? 'active' : ''}" data-size="4">M</button>
+                <button class="size-pill ${this.wbWidth === 8 ? 'active' : ''}" data-size="8">L</button>
+              </div>
+            </div>
+
+            <!-- HTML5 Interactive Canvas -->
+            <canvas id="nb-whiteboard-canvas"></canvas>
+          </div>
+        ` : `
+          <!-- Chat Messages View -->
+          <div class="message-list" id="nb-messages">
+            ${this.messages.length === 0 ? `
+              <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--text-muted);gap:8px;padding:30px 10px;text-align:center;">
+                <div style="font-size:28px;">💬</div>
+                <div style="font-size:13px;font-weight:600;color:var(--text-secondary);">No messages yet</div>
+                <div style="font-size:11px;max-width:220px;">Say hello or ask for a hint! Messages are synchronized P2P across all peers.</div>
+              </div>
+            ` : this.messages.map((m, idx) => `
+              <div class="chat-bubble ${m.isSelf ? 'self' : 'other'}">
+                ${m.replyPreview ? `<div style="border-left:2px solid var(--primary);padding-left:6px;margin-bottom:4px;font-size:10px;color:var(--text-muted);">${this.escapeHtml(m.replyPreview)}</div>` : ''}
+                
+                <div class="chat-header">
+                  <div class="chat-author">
+                    <span>${m.from?.avatar || '👤'}</span>
+                    <span style="color:${m.isSelf ? '#ffffff' : m.from?.color || '#a5b4fc'}">
+                      ${m.isSelf ? 'You' : m.from?.nickname || 'Buddy'}
+                    </span>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:4px;">
+                    <span class="chat-timestamp">${this.formatTimestamp(m.timestamp)}</span>
+                    <button class="icon-btn nb-reply-trigger" data-id="${m.id}" data-text="${this.escapeHtml(m.text.slice(0, 35))}" data-nick="${this.escapeHtml(m.from?.nickname || 'Buddy')}" style="padding:0;width:18px;height:18px;" title="Reply">
+                      ↩
+                    </button>
+                  </div>
+                </div>
+
+                <div class="chat-body">${this.renderFormattedText(m.text, idx)}</div>
+
+                ${m.isSelf ? `
+                  <div class="chat-footer">
+                    ${m.status === 'pending' ? '<span>⏳</span>' : ''}
+                    ${m.status === 'sent' ? '<span style="color:var(--text-dim);">✓</span>' : ''}
+                    ${m.status === 'delivered' ? '<span style="color:var(--text-secondary);">✓✓</span>' : ''}
+                    ${m.status === 'read' ? '<span class="ack-read">✓✓</span>' : ''}
+                  </div>
+                ` : ''}
+              </div>
+            `).join('')}
+          </div>
+
+          <!-- Quick Strategy Prompt Pills -->
+          <div class="prompt-pills-row">
+            <button class="prompt-pill" data-text="⚡ O(N) Time">⚡ O(N) Time</button>
+            <button class="prompt-pill" data-text="💾 O(1) Space">💾 O(1) Space</button>
+            <button class="prompt-pill" data-text="👉 Two Pointers">👉 Two Pointers</button>
+            <button class="prompt-pill" data-text="🔍 Binary Search">🔍 Binary Search</button>
+            <button class="prompt-pill" data-text="🧠 DP / Memo">🧠 DP / Memo</button>
+            <button class="prompt-pill" data-text="💡 Sliding Window">💡 Sliding Window</button>
+          </div>
+
+          <!-- Input Box & Composer -->
+          <form class="composer-box" id="nb-composer">
+            <button type="button" class="icon-btn" id="nb-spoiler-insert" title="Insert Spoiler Blur ||text||" style="width:28px;height:28px;flex-shrink:0;">
+              👁️
+            </button>
+            <input type="text" class="input-glass" id="nb-input" placeholder="Type a hint, code snippet, or ||spoiler||..." />
+            <button type="submit" class="btn-send">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="22" y1="2" x2="11" y2="13"></line>
+                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+              </svg>
+            </button>
+          </form>
+        `}
       </div>
 
       <!-- Floating Action Button (FAB) -->
       <button class="fab-button" id="nb-fab-trigger">
         ${isLive ? `<span class="live-dot"></span>` : `<span>⚡</span>`}
-        <span>${isLive ? `LIVE (${tutorName})` : 'Nerd Buddy'}</span>
+        <span>${isLive ? `LIVE (${tutorName})` : 'Synqto'}</span>
         ${this.unreadCount > 0 ? `<span class="fab-badge">${this.unreadCount}</span>` : ''}
       </button>
     `;
 
     this.attachEventListeners();
+    if (isWhiteboardTab) {
+      this.initWhiteboardCanvas();
+    }
   }
 
   private attachEventListeners() {
@@ -705,7 +853,7 @@ export class FloatingWidget {
       this.isOpen = !this.isOpen;
       this.unreadCount = 0;
       this.render();
-      if (this.isOpen) {
+      if (this.isOpen && this.activeTab === 'chat') {
         this.scrollToBottom();
       }
     });
@@ -717,7 +865,7 @@ export class FloatingWidget {
       this.render();
     });
 
-    // Open Full Side Panel Button (Automatically minimizes popup)
+    // Open Full Side Panel Button
     const openPanelBtn = this.shadow.getElementById('nb-open-sidepanel');
     openPanelBtn?.addEventListener('click', () => {
       this.isOpen = false;
@@ -725,6 +873,20 @@ export class FloatingWidget {
       if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
         chrome.runtime.sendMessage({ type: 'OPEN_SIDEPANEL' }).catch(() => {});
       }
+    });
+
+    // Tab Switchers
+    const tabChat = this.shadow.getElementById('nb-tab-chat');
+    tabChat?.addEventListener('click', () => {
+      this.activeTab = 'chat';
+      this.render();
+      this.scrollToBottom();
+    });
+
+    const tabWb = this.shadow.getElementById('nb-tab-whiteboard');
+    tabWb?.addEventListener('click', () => {
+      this.activeTab = 'whiteboard';
+      this.render();
     });
 
     // Live Tune In Button
@@ -735,33 +897,6 @@ export class FloatingWidget {
       if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
         chrome.runtime.sendMessage({ type: 'OPEN_SIDEPANEL' }).catch(() => {});
       }
-    });
-
-    // Cancel Reply Button
-    const cancelReplyBtn = this.shadow.getElementById('nb-cancel-reply');
-    cancelReplyBtn?.addEventListener('click', () => {
-      this.replyingTo = null;
-      this.render();
-    });
-
-    // Reply Triggers
-    const replyBtns = this.shadow.querySelectorAll('.nb-reply-trigger');
-    replyBtns.forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        const target = (e.currentTarget as HTMLElement);
-        const id = target.getAttribute('data-id') || '';
-        const text = target.getAttribute('data-text') || '';
-        const nick = target.getAttribute('data-nick') || '';
-        this.replyingTo = {
-          id,
-          text,
-          from: { nickname: nick, avatar: '👤', color: '#a5b4fc', peerId: '' },
-          timestamp: Date.now(),
-        };
-        this.render();
-        const input = this.shadow?.getElementById('nb-input') as HTMLInputElement;
-        input?.focus();
-      });
     });
 
     // Quick Strategy Pills
@@ -785,31 +920,6 @@ export class FloatingWidget {
       }
     });
 
-    // Spoiler Click-to-Reveal
-    const spoilerSpans = this.shadow.querySelectorAll('.nb-spoiler-tag');
-    spoilerSpans.forEach((span) => {
-      span.addEventListener('click', (e) => {
-        const sKey = (e.currentTarget as HTMLElement).getAttribute('data-skey') || '';
-        this.revealedSpoilers[sKey] = !this.revealedSpoilers[sKey];
-        this.render();
-      });
-    });
-
-    // Code Copy Buttons
-    const copyBtns = this.shadow.querySelectorAll('.nb-copy-code');
-    copyBtns.forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        const code = (e.currentTarget as HTMLElement).getAttribute('data-code') || '';
-        if (code) {
-          navigator.clipboard.writeText(code);
-          (e.currentTarget as HTMLElement).innerText = '✓ Copied';
-          setTimeout(() => {
-            (e.currentTarget as HTMLElement).innerText = '📋 Copy';
-          }, 1500);
-        }
-      });
-    });
-
     // Composer Form Submit
     const composer = this.shadow.getElementById('nb-composer') as HTMLFormElement;
     composer?.addEventListener('submit', (e) => {
@@ -821,6 +931,323 @@ export class FloatingWidget {
         this.replyingTo = null;
       }
     });
+  }
+
+  // In-Page Canvas Whiteboard Initialization & Event Handling
+  private initWhiteboardCanvas() {
+    if (!this.shadow) return;
+    const canvas = this.shadow.getElementById('nb-whiteboard-canvas') as HTMLCanvasElement;
+    if (!canvas) return;
+
+    // Attach Tool Selector
+    const toolBtns = this.shadow.querySelectorAll('.wb-tool-btn[data-wbtool]');
+    toolBtns.forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const tool = (e.currentTarget as HTMLElement).getAttribute('data-wbtool') as any;
+        if (tool) {
+          this.wbTool = tool;
+          this.render();
+        }
+      });
+    });
+
+    // Attach Color Selector
+    const colorDots = this.shadow.querySelectorAll('.color-dot');
+    colorDots.forEach((dot) => {
+      dot.addEventListener('click', (e) => {
+        const col = (e.currentTarget as HTMLElement).getAttribute('data-color');
+        if (col) {
+          this.wbColor = col;
+          this.render();
+        }
+      });
+    });
+
+    // Attach Size Selector
+    const sizePills = this.shadow.querySelectorAll('.size-pill');
+    sizePills.forEach((p) => {
+      p.addEventListener('click', (e) => {
+        const sz = Number((e.currentTarget as HTMLElement).getAttribute('data-size'));
+        if (sz) {
+          this.wbWidth = sz;
+          this.render();
+        }
+      });
+    });
+
+    // Undo / Redo / Clear / Export
+    this.shadow.getElementById('nb-wb-undo')?.addEventListener('click', () => {
+      if (this.wbStrokes.length > 0) {
+        const removed = this.wbStrokes.pop();
+        if (removed) {
+          this.wbRedoStack.push(removed);
+          this.drawWbCanvas();
+          if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+            chrome.runtime.sendMessage({ type: 'WHITEBOARD_UNDO_LOCAL', strokeId: removed.id }).catch(() => {});
+          }
+        }
+      }
+    });
+
+    this.shadow.getElementById('nb-wb-redo')?.addEventListener('click', () => {
+      if (this.wbRedoStack.length > 0) {
+        const restored = this.wbRedoStack.pop();
+        if (restored) {
+          this.wbStrokes.push(restored);
+          this.drawWbCanvas();
+          if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+            chrome.runtime.sendMessage({ type: 'WHITEBOARD_STROKE_LOCAL', stroke: restored }).catch(() => {});
+          }
+        }
+      }
+    });
+
+    this.shadow.getElementById('nb-wb-clear')?.addEventListener('click', () => {
+      if (confirm('Clear collaborative whiteboard canvas?')) {
+        this.wbStrokes = [];
+        this.wbRedoStack = [];
+        this.drawWbCanvas();
+        if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+          chrome.runtime.sendMessage({ type: 'WHITEBOARD_CLEAR_LOCAL' }).catch(() => {});
+        }
+      }
+    });
+
+    this.shadow.getElementById('nb-wb-save')?.addEventListener('click', () => {
+      const dataUrl = canvas.toDataURL('image/png');
+      const a = document.createElement('a');
+      a.download = `synqto-whiteboard-${Date.now()}.png`;
+      a.href = dataUrl;
+      a.click();
+    });
+
+    // Setup Canvas Dimensions
+    setTimeout(() => {
+      const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = (rect.width || 380) * dpr;
+      canvas.height = (rect.height || 360) * dpr;
+
+      const ctx = canvas.getContext('2d');
+      if (ctx) ctx.scale(dpr, dpr);
+
+      this.drawWbCanvas();
+    }, 30);
+
+    // Pointer Event Listeners
+    const getCoords = (e: MouseEvent | TouchEvent): WhiteboardPoint => {
+      const rect = canvas.getBoundingClientRect();
+      let cx = 0, cy = 0;
+      if ('touches' in e && e.touches.length > 0) {
+        cx = e.touches[0].clientX;
+        cy = e.touches[0].clientY;
+      } else if ('clientX' in e) {
+        cx = (e as MouseEvent).clientX;
+        cy = (e as MouseEvent).clientY;
+      }
+      return { x: cx - rect.left, y: cy - rect.top };
+    };
+
+    canvas.addEventListener('mousedown', (e) => {
+      const pt = getCoords(e);
+      this.isWbDrawing = true;
+      this.wbStartPoint = pt;
+      this.wbCurrentPoints = [pt];
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+      if (!this.isWbDrawing) return;
+      const pt = getCoords(e);
+      const isGeom = ['line', 'arrow', 'rect', 'circle', 'tree_node'].includes(this.wbTool);
+
+      if (isGeom && this.wbStartPoint) {
+        this.drawWbCanvas(undefined, {
+          x1: this.wbStartPoint.x,
+          y1: this.wbStartPoint.y,
+          x2: pt.x,
+          y2: pt.y,
+          label: this.wbTool === 'tree_node' ? 'val' : undefined,
+        });
+      } else {
+        this.wbCurrentPoints.push(pt);
+        this.drawWbCanvas(this.wbCurrentPoints);
+      }
+    });
+
+    const handleMouseUp = (e: MouseEvent | TouchEvent) => {
+      if (!this.isWbDrawing) return;
+      this.isWbDrawing = false;
+      const endPt = getCoords(e);
+      const isGeom = ['line', 'arrow', 'rect', 'circle', 'tree_node'].includes(this.wbTool);
+      const width = this.wbTool === 'highlighter' ? 14 : this.wbWidth;
+
+      const stroke: InPageStroke = {
+        id: 'stroke-' + Math.random().toString(36).slice(2, 10),
+        tool: this.wbTool,
+        color: this.wbColor,
+        width,
+        opacity: this.wbTool === 'highlighter' ? 0.35 : 1.0,
+        points: isGeom ? [] : [...this.wbCurrentPoints],
+        geometry: isGeom && this.wbStartPoint ? {
+          x1: this.wbStartPoint.x,
+          y1: this.wbStartPoint.y,
+          x2: endPt.x,
+          y2: endPt.y,
+          label: this.wbTool === 'tree_node' ? String(Math.floor(Math.random() * 50) + 1) : undefined,
+        } : undefined,
+      };
+
+      this.wbStrokes.push(stroke);
+      this.wbRedoStack = [];
+      this.wbCurrentPoints = [];
+      this.wbStartPoint = null;
+      this.drawWbCanvas();
+
+      if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+        chrome.runtime.sendMessage({ type: 'WHITEBOARD_STROKE_LOCAL', stroke }).catch(() => {});
+      }
+    };
+
+    canvas.addEventListener('mouseup', handleMouseUp);
+    canvas.addEventListener('mouseleave', handleMouseUp);
+  }
+
+  private drawWbCanvas(previewPoints?: WhiteboardPoint[], previewGeometry?: any) {
+    if (!this.shadow) return;
+    const canvas = this.shadow.getElementById('nb-whiteboard-canvas') as HTMLCanvasElement;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Subtle background grid
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
+    ctx.lineWidth = 1;
+    const gridSize = 20;
+    for (let x = 0; x < canvas.width; x += gridSize) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, canvas.height);
+      ctx.stroke();
+    }
+    for (let y = 0; y < canvas.height; y += gridSize) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(canvas.width, y);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    const render = (s: InPageStroke) => {
+      ctx.save();
+      ctx.strokeStyle = s.color;
+      ctx.fillStyle = s.color;
+      ctx.lineWidth = s.width;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.globalAlpha = s.opacity;
+
+      if (s.tool === 'eraser') {
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.lineWidth = s.width * 3;
+      }
+
+      if (s.geometry) {
+        const { x1, y1, x2, y2 } = s.geometry;
+        if (s.tool === 'line') {
+          ctx.beginPath();
+          ctx.moveTo(x1, y1);
+          ctx.lineTo(x2, y2);
+          ctx.stroke();
+        } else if (s.tool === 'arrow') {
+          ctx.beginPath();
+          ctx.moveTo(x1, y1);
+          ctx.lineTo(x2, y2);
+          ctx.stroke();
+          const angle = Math.atan2(y2 - y1, x2 - x1);
+          const headLen = Math.max(10, s.width * 3);
+          ctx.beginPath();
+          ctx.moveTo(x2, y2);
+          ctx.lineTo(x2 - headLen * Math.cos(angle - Math.PI / 6), y2 - headLen * Math.sin(angle - Math.PI / 6));
+          ctx.moveTo(x2, y2);
+          ctx.lineTo(x2 - headLen * Math.cos(angle + Math.PI / 6), y2 - headLen * Math.sin(angle + Math.PI / 6));
+          ctx.stroke();
+        } else if (s.tool === 'rect') {
+          ctx.strokeRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1));
+        } else if (s.tool === 'circle') {
+          const rx = Math.abs(x2 - x1) / 2;
+          const ry = Math.abs(y2 - y1) / 2;
+          ctx.beginPath();
+          ctx.ellipse(Math.min(x1, x2) + rx, Math.min(y1, y2) + ry, rx, ry, 0, 0, Math.PI * 2);
+          ctx.stroke();
+        } else if (s.tool === 'tree_node') {
+          const r = Math.max(16, s.width * 3.5);
+          ctx.beginPath();
+          ctx.arc(x1, y1, r, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = '#ffffff';
+          ctx.font = 'bold 11px monospace';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(s.geometry.label || 'N', x1, y1);
+        }
+      } else if (s.points && s.points.length > 1) {
+        ctx.beginPath();
+        ctx.moveTo(s.points[0].x, s.points[0].y);
+        for (let i = 1; i < s.points.length; i++) {
+          ctx.lineTo(s.points[i].x, s.points[i].y);
+        }
+        ctx.stroke();
+      }
+      ctx.restore();
+    };
+
+    this.wbStrokes.forEach(render);
+
+    if (previewGeometry) {
+      render({
+        id: 'preview',
+        tool: this.wbTool,
+        color: this.wbColor,
+        width: this.wbTool === 'highlighter' ? 14 : this.wbWidth,
+        opacity: this.wbTool === 'highlighter' ? 0.35 : 1.0,
+        points: [],
+        geometry: previewGeometry,
+      });
+    } else if (previewPoints && previewPoints.length > 1) {
+      render({
+        id: 'preview',
+        tool: this.wbTool,
+        color: this.wbColor,
+        width: this.wbTool === 'highlighter' ? 14 : this.wbWidth,
+        opacity: this.wbTool === 'highlighter' ? 0.35 : 1.0,
+        points: previewPoints,
+      });
+    }
+  }
+
+  private listenForRuntimeMessages() {
+    if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
+      chrome.runtime.onMessage.addListener((msg) => {
+        if (msg.type === 'WHITEBOARD_STROKE_LOCAL' && msg.stroke) {
+          if (!this.wbStrokes.some((s) => s.id === msg.stroke.id)) {
+            this.wbStrokes.push(msg.stroke);
+            if (this.activeTab === 'whiteboard') this.drawWbCanvas();
+          }
+        } else if (msg.type === 'WHITEBOARD_CLEAR_LOCAL') {
+          this.wbStrokes = [];
+          this.wbRedoStack = [];
+          if (this.activeTab === 'whiteboard') this.drawWbCanvas();
+        } else if (msg.type === 'WHITEBOARD_UNDO_LOCAL' && msg.strokeId) {
+          this.wbStrokes = this.wbStrokes.filter((s) => s.id !== msg.strokeId);
+          if (this.activeTab === 'whiteboard') this.drawWbCanvas();
+        }
+      });
+    }
   }
 
   private escapeHtml(text: string): string {
@@ -836,20 +1263,15 @@ export class FloatingWidget {
     const lines = text.split('\n');
 
     return lines.map((line, lIdx) => {
-      // Code block detection
       if (line.startsWith('```') && line.endsWith('```') && line.length > 6) {
         const codeText = line.slice(3, -3);
         return `
           <div style="background:rgba(0,0,0,0.45);padding:6px 8px;border-radius:6px;margin:4px 0;font-family:var(--font-mono);font-size:11px;position:relative;">
             <pre style="margin:0;white-space:pre-wrap;word-break:break-all;">${this.escapeHtml(codeText)}</pre>
-            <button class="nb-copy-code" data-code="${this.escapeHtml(codeText)}" style="position:absolute;top:4px;right:4px;background:rgba(255,255,255,0.1);border:none;color:#fff;border-radius:4px;padding:2px 6px;font-size:10px;cursor:pointer;">
-              📋 Copy
-            </button>
           </div>
         `;
       }
 
-      // Check for inline spoilers ||spoiler text||
       if (line.includes('||')) {
         const parts = line.split(/(\|\|.*?\|\|)/g);
         const renderedParts = parts.map((part, pIdx) => {
@@ -859,7 +1281,7 @@ export class FloatingWidget {
             const isRevealed = Boolean(this.revealedSpoilers[sKey]);
 
             return `
-              <span class="nb-spoiler-tag" data-skey="${sKey}" style="display:inline-block;padding:1px 6px;border-radius:4px;background:${isRevealed ? 'rgba(99, 102, 241, 0.25)' : 'rgba(255, 255, 255, 0.15)'};border:1px solid rgba(255, 255, 255, 0.1);filter:${isRevealed ? 'none' : 'blur(4px)'};cursor:pointer;user-select:${isRevealed ? 'text' : 'none'};color:${isRevealed ? 'var(--text-primary)' : 'transparent'};">
+              <span style="display:inline-block;padding:1px 6px;border-radius:4px;background:${isRevealed ? 'rgba(99, 102, 241, 0.25)' : 'rgba(255, 255, 255, 0.15)'};filter:${isRevealed ? 'none' : 'blur(4px)'};cursor:pointer;">
                 ${this.escapeHtml(spoilerContent)}
               </span>
             `;
@@ -895,7 +1317,7 @@ export class FloatingWidget {
     if (!text.trim()) return;
 
     if (!this.currentRoomStorageKey && this.currentProblem?.roomId) {
-      this.currentRoomStorageKey = `nerd_buddy_chat_${this.currentProblem.roomId}`;
+      this.currentRoomStorageKey = `synqto_chat_${this.currentProblem.roomId}`;
     }
 
     const trimmed = text.trim();
@@ -911,13 +1333,11 @@ export class FloatingWidget {
       isSelf: true,
     };
 
-    // 1. Immediate optimistic UI render
     this.messages.push(myMsg);
     this.messages = this.deduplicateMessages(this.messages);
     this.render();
     this.scrollToBottom();
 
-    // 2. Persist to storage
     if (this.currentRoomStorageKey && typeof chrome !== 'undefined' && chrome.storage?.local) {
       try {
         const res = await chrome.storage.local.get([this.currentRoomStorageKey]);
@@ -929,7 +1349,6 @@ export class FloatingWidget {
       } catch (e) {}
     }
 
-    // 3. Broadcast across P2P network via service worker
     if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
       chrome.runtime.sendMessage({
         type: 'SEND_PAGE_CHAT_MESSAGE',
@@ -949,7 +1368,7 @@ export class FloatingWidget {
       const res = await chrome.storage.local.get([this.currentRoomStorageKey]);
       if (res[this.currentRoomStorageKey] && Array.isArray(res[this.currentRoomStorageKey])) {
         this.messages = this.deduplicateMessages(res[this.currentRoomStorageKey]);
-        if (this.isOpen) {
+        if (this.isOpen && this.activeTab === 'chat') {
           this.render();
           this.scrollToBottom();
         }
@@ -970,55 +1389,41 @@ export class FloatingWidget {
     if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) {
       chrome.storage.onChanged.addListener((changes, area) => {
         if (area === 'local') {
-          // 1. Auto-minimize popup when sidepanel is opened
           if (changes.nerd_buddy_sidepanel_open) {
             if (changes.nerd_buddy_sidepanel_open.newValue === true && this.isOpen) {
               this.isOpen = false;
               this.render();
             }
           }
-
-          // 2. Live stage awareness
-          if (changes.nerd_buddy_live_stage) {
-            this.liveStage = changes.nerd_buddy_live_stage.newValue;
+          if (changes.synqto_live_stage || changes.nerd_buddy_live_stage) {
+            this.liveStage = (changes.synqto_live_stage || changes.nerd_buddy_live_stage).newValue;
             this.render();
           }
-
-          // 3. User identity sync
-          if (changes.nerd_buddy_identity) {
-            this.myIdentity = changes.nerd_buddy_identity.newValue;
+          if (changes.synqto_identity || changes.nerd_buddy_identity) {
+            this.myIdentity = (changes.synqto_identity || changes.nerd_buddy_identity).newValue;
           }
-
-          // 4. Widget settings change
           if (changes[FAB_STORAGE_KEY]) {
             this.settings = changes[FAB_STORAGE_KEY].newValue;
             this.checkVisibilityAndRender();
           }
-
-          // 5. Active problem change
-          if (changes.nerd_buddy_active_problem) {
-            this.currentProblem = changes.nerd_buddy_active_problem.newValue;
-            this.currentRoomStorageKey = `nerd_buddy_chat_${this.currentProblem?.roomId || ''}`;
+          if (changes.synqto_active_problem || changes.nerd_buddy_active_problem) {
+            this.currentProblem = (changes.synqto_active_problem || changes.nerd_buddy_active_problem).newValue;
+            this.currentRoomStorageKey = `synqto_chat_${this.currentProblem?.roomId || ''}`;
             this.loadMessages();
             this.checkVisibilityAndRender();
           }
-
-          // 6. Online peer count sync
           if (changes.nerd_buddy_peer_count) {
             this.peerCount = Math.max(1, changes.nerd_buddy_peer_count.newValue || 1);
             this.render();
           }
-
-          // 7. Real-time chat sync across sidepanel and in-page popup
           if (this.currentRoomStorageKey && changes[this.currentRoomStorageKey]) {
             const raw = changes[this.currentRoomStorageKey].newValue || [];
             this.messages = this.deduplicateMessages(raw);
-
             if (!this.isOpen && changes[this.currentRoomStorageKey].newValue?.length > (changes[this.currentRoomStorageKey].oldValue?.length || 0)) {
               this.unreadCount++;
             }
             this.render();
-            if (this.isOpen) {
+            if (this.isOpen && this.activeTab === 'chat') {
               this.scrollToBottom();
             }
           }

@@ -1,6 +1,6 @@
 // ─── In-Browser Floating Action Button, Problem Chat, Draggable Positioning & Collaborative Whiteboard Popup ───
 
-import { FabSettings, DEFAULT_FAB_SETTINGS, FAB_STORAGE_KEY, FabPosition } from '@/features/settings/fab-settings.types';
+import { FabSettings, DEFAULT_FAB_SETTINGS, FAB_STORAGE_KEY, SYNQTO_FAB_STORAGE_KEY, FabPosition } from '@/features/settings/fab-settings.types';
 import { detectResource } from './resource-detector';
 import { getPlatformBadgeColor, computeRoomId } from '@/features/room/room-utils';
 
@@ -132,6 +132,7 @@ export class FloatingWidget {
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       const res = await chrome.storage.local.get([
         FAB_STORAGE_KEY,
+        SYNQTO_FAB_STORAGE_KEY,
         'synqto_active_problem',
         'nerd_buddy_active_problem',
         'synqto_live_stage',
@@ -140,8 +141,8 @@ export class FloatingWidget {
         'nerd_buddy_peer_count',
       ]);
 
-      if (res[FAB_STORAGE_KEY]) {
-        this.settings = res[FAB_STORAGE_KEY];
+      if (res[SYNQTO_FAB_STORAGE_KEY] || res[FAB_STORAGE_KEY]) {
+        this.settings = { ...DEFAULT_FAB_SETTINGS, ...(res[SYNQTO_FAB_STORAGE_KEY] || res[FAB_STORAGE_KEY]) };
       }
 
       // Initialize position based on persistence mode
@@ -183,7 +184,7 @@ export class FloatingWidget {
   }
 
   private shouldShow(): boolean {
-    if (this.settings.mode === 'disabled') return false;
+    if (this.settings.mode === 'disabled' || this.settings.popupContentMode === 'none') return false;
     if (this.settings.mode === 'all_sites') return true;
 
     const hostname = window.location.hostname.toLowerCase();
@@ -217,6 +218,12 @@ export class FloatingWidget {
     if (shouldDisplay && !this.hostElement) {
       this.createWidgetDOM();
     } else if (!shouldDisplay && this.hostElement) {
+      this.destroyWidgetDOM();
+    }
+  }
+
+  private destroyWidgetDOM() {
+    if (this.hostElement) {
       this.hostElement.remove();
       this.hostElement = null;
       this.shadow = null;
@@ -253,6 +260,11 @@ export class FloatingWidget {
 
   private render() {
     if (!this.shadow) return;
+    const contentMode = this.settings.popupContentMode || (this.settings.enableWhiteboard ? 'both' : 'chat_only');
+    if (contentMode === 'none' || this.settings.mode === 'disabled') {
+      this.destroyWidgetDOM();
+      return;
+    }
     this.applyHostPosition();
 
     const isLive = Boolean(this.liveStage && this.liveStage.isActive);
@@ -260,7 +272,16 @@ export class FloatingWidget {
     const problemTitle = this.currentProblem?.title || 'Global Problem Lobby';
     const platform = this.currentProblem?.platform || 'LeetCode';
     const platformColor = getPlatformBadgeColor(platform);
-    const isWhiteboardTab = this.settings.enableWhiteboard && this.activeTab === 'whiteboard';
+    const isWhiteboardTab = contentMode === 'whiteboard_only' || (contentMode === 'both' && this.activeTab === 'whiteboard');
+
+    const fabIcon = contentMode === 'whiteboard_only' ? '🎨' : '⚡';
+    const fabLabel = isLive
+      ? `LIVE (${tutorName})`
+      : contentMode === 'whiteboard_only'
+      ? 'Board'
+      : contentMode === 'chat_only'
+      ? `Chat (${this.peerCount})`
+      : `Synqto (${this.peerCount})`;
 
     // Dynamic positioning for popup card based on where the FAB is dragged
     const isNearTop = this.currentPosition.bottom > (window.innerHeight - 540);
@@ -765,8 +786,8 @@ export class FloatingWidget {
           </div>
         </div>
 
-        <!-- Segmented Switcher when Whiteboard is Enabled in Settings -->
-        ${this.settings.enableWhiteboard ? `
+        <!-- Segmented Switcher when Both Chat and Whiteboard are Enabled -->
+        ${contentMode === 'both' ? `
           <div class="tab-switcher">
             <button class="tab-btn ${this.activeTab === 'chat' ? 'active' : ''}" id="nb-tab-chat">
               <span>💬 Live Chat</span>
@@ -951,8 +972,8 @@ export class FloatingWidget {
       <!-- Draggable Floating Action Button (FAB) -->
       <button class="fab-button" id="nb-fab-trigger" title="Drag anywhere or click to open">
         <span class="drag-grip">⠿</span>
-        ${isLive ? `<span class="live-dot"></span>` : `<span>⚡</span>`}
-        <span>${isLive ? `LIVE (${tutorName})` : 'Synqto'}</span>
+        ${isLive ? `<span class="live-dot"></span>` : `<span>${fabIcon}</span>`}
+        <span>${fabLabel}</span>
         ${this.unreadCount > 0 ? `<span class="fab-badge">${this.unreadCount}</span>` : ''}
       </button>
     `;
@@ -1134,6 +1155,13 @@ export class FloatingWidget {
         input.focus();
       }
     });
+
+    if (input) {
+      const stopProp = (e: Event) => e.stopPropagation();
+      input.addEventListener('keydown', stopProp);
+      input.addEventListener('keyup', stopProp);
+      input.addEventListener('keypress', stopProp);
+    }
 
     // Composer Form Submit
     const composer = this.shadow.getElementById('nb-composer') as HTMLFormElement;
@@ -2023,12 +2051,18 @@ export class FloatingWidget {
           if (changes.synqto_identity || changes.nerd_buddy_identity) {
             this.myIdentity = (changes.synqto_identity || changes.nerd_buddy_identity).newValue;
           }
-          if (changes[FAB_STORAGE_KEY]) {
-            this.settings = changes[FAB_STORAGE_KEY].newValue;
-            if (this.settings.positionMode === 'permanent' && this.settings.savedPosition) {
-              this.currentPosition = { ...this.settings.savedPosition };
+          if (changes[SYNQTO_FAB_STORAGE_KEY] || changes[FAB_STORAGE_KEY]) {
+            const raw = (changes[SYNQTO_FAB_STORAGE_KEY] || changes[FAB_STORAGE_KEY])?.newValue;
+            if (raw) {
+              this.settings = { ...DEFAULT_FAB_SETTINGS, ...raw };
+              if (this.settings.positionMode === 'permanent' && this.settings.savedPosition) {
+                this.currentPosition = { ...this.settings.savedPosition };
+              }
+              this.checkVisibilityAndRender();
+              if (this.hostElement) {
+                this.render();
+              }
             }
-            this.checkVisibilityAndRender();
           }
           if (changes.synqto_active_problem || changes.nerd_buddy_active_problem) {
             this.currentProblem = (changes.synqto_active_problem || changes.nerd_buddy_active_problem).newValue;

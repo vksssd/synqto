@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { Server, Trash2, Shield, Info, Check, MessageSquare, Plus, X, Layers, ExternalLink } from 'lucide-react';
 import { SignalingService } from '@/core/network/signaling.service';
-import { FabSettings, DEFAULT_FAB_SETTINGS, FAB_STORAGE_KEY, FabDisplayMode, FabClickAction } from './fab-settings.types';
+import { FabSettings, DEFAULT_FAB_SETTINGS, FAB_STORAGE_KEY, SYNQTO_FAB_STORAGE_KEY, FabDisplayMode, FabClickAction } from './fab-settings.types';
 
 export const SettingsCard: React.FC = () => {
   const signaling = SignalingService.getInstance();
@@ -19,9 +19,10 @@ export const SettingsCard: React.FC = () => {
 
   useEffect(() => {
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-      chrome.storage.local.get([FAB_STORAGE_KEY], (res) => {
-        if (res[FAB_STORAGE_KEY]) {
-          setFabSettings(res[FAB_STORAGE_KEY]);
+      chrome.storage.local.get([SYNQTO_FAB_STORAGE_KEY, FAB_STORAGE_KEY], (res) => {
+        const saved = res[SYNQTO_FAB_STORAGE_KEY] || res[FAB_STORAGE_KEY];
+        if (saved) {
+          setFabSettings({ ...DEFAULT_FAB_SETTINGS, ...saved });
         }
       });
     }
@@ -72,7 +73,10 @@ export const SettingsCard: React.FC = () => {
 
   const saveFabSettings = (settings: FabSettings) => {
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-      chrome.storage.local.set({ [FAB_STORAGE_KEY]: settings }, () => {
+      chrome.storage.local.set({
+        [FAB_STORAGE_KEY]: settings,
+        [SYNQTO_FAB_STORAGE_KEY]: settings,
+      }, () => {
         setSavedFab(true);
         setTimeout(() => setSavedFab(false), 1500);
       });
@@ -345,76 +349,85 @@ export const SettingsCard: React.FC = () => {
           </div>
         )}
 
-        {/* Collaborative Whiteboard Capability Toggle */}
-        <div style={{ marginTop: '14px', borderTop: '1px solid var(--border-subtle)', paddingTop: '12px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ fontSize: '14px' }}>🎨</span>
-              <span style={{ fontSize: '11px', fontWeight: 600, color: '#f8fafc' }}>
-                Collaborative Whiteboard
-              </span>
-            </div>
+        {/* In-Page Popup Content Mode: Both / Only Chat / Only Whiteboard / None */}
+        <div style={{ marginTop: '12px', borderTop: '1px solid var(--border-subtle)', paddingTop: '10px' }}>
+          <div style={{ fontSize: '11px', fontWeight: 600, color: '#f8fafc', marginBottom: '4px' }}>
+            🎯 In-Page Popup Content:
+          </div>
+          <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '8px' }}>
+            Choose what opens when clicking the on-screen floating button on problem pages.
+          </div>
 
-            <label
-              style={{
-                position: 'relative',
-                display: 'inline-block',
-                width: '36px',
-                height: '20px',
-                cursor: 'pointer',
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={Boolean(fabSettings.enableWhiteboard)}
-                onChange={(e) => {
-                  const updated: FabSettings = { ...fabSettings, enableWhiteboard: e.target.checked };
-                  setFabSettings(updated);
-                  saveFabSettings(updated);
-                }}
-                style={{ opacity: 0, width: 0, height: 0 }}
-              />
-              <span
-                style={{
-                  position: 'absolute',
-                  cursor: 'pointer',
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  backgroundColor: fabSettings.enableWhiteboard ? '#6366f1' : 'rgba(255, 255, 255, 0.1)',
-                  borderRadius: '20px',
-                  transition: '0.3s',
-                  border: '1px solid rgba(255, 255, 255, 0.15)',
-                }}
-              >
-                <span
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+            {[
+              {
+                id: 'both' as const,
+                label: '💬 + 🎨 Both (Chat & Board)',
+                desc: 'Tabs to toggle between chat and whiteboard',
+              },
+              {
+                id: 'chat_only' as const,
+                label: '💬 Only Chat',
+                desc: 'Direct peer discussion & live hints overlay',
+              },
+              {
+                id: 'whiteboard_only' as const,
+                label: '🎨 Only Whiteboard',
+                desc: 'Direct drawing canvas & system scratchpad',
+              },
+              {
+                id: 'none' as const,
+                label: '🚫 None (Hide Widget)',
+                desc: 'Completely hide on-page popup widget',
+              },
+            ].map((item) => {
+              const currentContentMode = fabSettings.popupContentMode || (fabSettings.enableWhiteboard ? 'both' : 'chat_only');
+              const isSelected = currentContentMode === item.id;
+              return (
+                <label
+                  key={item.id}
                   style={{
-                    position: 'absolute',
-                    content: '""',
-                    height: '14px',
-                    width: '14px',
-                    left: fabSettings.enableWhiteboard ? '18px' : '3px',
-                    bottom: '2px',
-                    backgroundColor: 'white',
-                    borderRadius: '50%',
-                    transition: '0.3s',
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '6px',
+                    padding: '6px 8px',
+                    borderRadius: 'var(--radius-sm)',
+                    background: isSelected ? 'rgba(99, 102, 241, 0.18)' : 'rgba(255, 255, 255, 0.02)',
+                    border: isSelected ? '1px solid var(--primary)' : '1px solid var(--border-subtle)',
+                    cursor: 'pointer',
                   }}
-                />
-              </span>
-            </label>
+                >
+                  <input
+                    type="radio"
+                    name="popup_content_mode"
+                    checked={isSelected}
+                    onChange={() => {
+                      const updated: FabSettings = {
+                        ...fabSettings,
+                        popupContentMode: item.id,
+                        enableWhiteboard: item.id === 'both' || item.id === 'whiteboard_only',
+                      };
+                      setFabSettings(updated);
+                      saveFabSettings(updated);
+                    }}
+                    style={{ marginTop: '2px', accentColor: 'var(--primary)' }}
+                  />
+                  <div>
+                    <div style={{ fontSize: '11px', fontWeight: 600, color: '#f8fafc' }}>{item.label}</div>
+                    <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>{item.desc}</div>
+                  </div>
+                </label>
+              );
+            })}
           </div>
+        </div>
 
-          <div style={{ fontSize: '10px', color: 'var(--text-muted)', lineHeight: '1.4' }}>
-            Enables an interactive drawing canvas with pens, highlighters, geometric shapes (trees, lines, boxes), system design architecture components, and multi-page notebooks.
-          </div>
-
-          {/* Whiteboard Preferences Sub-Panel */}
-          {fabSettings.enableWhiteboard && (
-            <div style={{ marginTop: '10px', background: 'rgba(0, 0, 0, 0.3)', padding: '10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)' }}>
-              <div style={{ fontSize: '11px', fontWeight: 700, color: '#c7d2fe', marginBottom: '8px' }}>
-                ⚙️ Default Whiteboard &amp; Notebook Settings
-              </div>
+        {/* Whiteboard Preferences Sub-Panel */}
+        {(fabSettings.popupContentMode === 'both' || fabSettings.popupContentMode === 'whiteboard_only' || fabSettings.enableWhiteboard) && (
+          <div style={{ marginTop: '14px', borderTop: '1px solid var(--border-subtle)', paddingTop: '12px' }}>
+            <div style={{ fontSize: '11px', fontWeight: 700, color: '#c7d2fe', marginBottom: '8px' }}>
+              ⚙️ Default Whiteboard &amp; Notebook Settings
+            </div>
 
               {/* 1. Default Privacy Mode */}
               <div style={{ marginBottom: '10px' }}>
@@ -582,7 +595,6 @@ export const SettingsCard: React.FC = () => {
               </div>
             </div>
           )}
-        </div>
       </div>
 
       {/* Signaling Server Configuration */}

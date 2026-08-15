@@ -38,6 +38,13 @@ func (h *Hub) GetOrCreateRoom(roomID string) *Room {
 	return room
 }
 
+// RoomCount returns the current count of active rooms.
+func (h *Hub) RoomCount() int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return len(h.rooms)
+}
+
 // Register adds a peer to their room.
 func (h *Hub) Register(p *Peer) {
 	room := h.GetOrCreateRoom(p.RoomID)

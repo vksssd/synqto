@@ -215,6 +215,160 @@ export class DiaryService {
     return md;
   }
 
+  private escapeHtml(text: string): string {
+    return (text || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  private renderMarkdownToHtml(mdText: string): string {
+    if (!mdText) return '';
+    let html = mdText;
+
+    // Code blocks ```...```
+    html = html.replace(/```([a-z0-9_-]*)\n([\s\S]*?)```/g, (_match, _lang, code) => {
+      return `<pre><code>${this.escapeHtml(code.trim())}</code></pre>`;
+    });
+
+    // Inline code `...`
+    html = html.replace(/`([^`]+)`/g, (_match, code) => {
+      return `<code>${this.escapeHtml(code)}</code>`;
+    });
+
+    // Checkboxes
+    html = html.replace(/^- \[ \] (.*)$/gm, '<div style="display:flex;align-items:center;gap:6px;margin:3px 0;"><input type="checkbox" disabled style="margin:0;" /> <span>$1</span></div>');
+    html = html.replace(/^- \[x\] (.*)$/gm, '<div style="display:flex;align-items:center;gap:6px;margin:3px 0;"><input type="checkbox" checked disabled style="margin:0;" /> <span style="text-decoration:line-through;color:#94a3b8;">$1</span></div>');
+
+    // Headers
+    html = html.replace(/^### (.*$)/gm, '<h3 style="font-size:15px;font-weight:700;margin:14px 0 6px;color:#1e293b;">$1</h3>');
+    html = html.replace(/^## (.*$)/gm, '<h2 style="font-size:17px;font-weight:700;margin:18px 0 8px;color:#0f172a;">$1</h2>');
+    html = html.replace(/^# (.*$)/gm, '<h1 style="font-size:20px;font-weight:800;margin:20px 0 10px;color:#0f172a;">$1</h1>');
+
+    // Bold & Italic
+    html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+
+    // Unordered lists
+    html = html.replace(/^- (.*$)/gm, '<li style="margin-left:18px;margin-bottom:3px;">$1</li>');
+
+    // Line breaks
+    html = html.replace(/\n\n/g, '<p style="margin:8px 0;"></p>');
+    html = html.replace(/\n/g, '<br/>');
+
+    return html;
+  }
+
+  private renderWhiteboardToDataUrl(wbData?: { strokes: any[]; bgColor?: string }): string | null {
+    if (!wbData || !Array.isArray(wbData.strokes) || wbData.strokes.length === 0) {
+      return null;
+    }
+
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = 800;
+      canvas.height = 420;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return null;
+
+      // Fill background
+      ctx.fillStyle = wbData.bgColor || '#090d16';
+      ctx.fillRect(0, 0, 800, 420);
+
+      // Draw subtle grid dots
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+      for (let x = 20; x < 800; x += 20) {
+        for (let y = 20; y < 420; y += 20) {
+          ctx.beginPath();
+          ctx.arc(x, y, 1, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      // Render strokes
+      wbData.strokes.forEach((stroke: any) => {
+        if (!stroke) return;
+        ctx.save();
+        ctx.strokeStyle = stroke.color || '#6366f1';
+        ctx.fillStyle = stroke.color || '#6366f1';
+        ctx.lineWidth = stroke.width || 3;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        if (stroke.tool === 'highlighter') {
+          ctx.globalAlpha = 0.35;
+          ctx.lineWidth = Math.max(12, stroke.width || 16);
+        }
+
+        if (stroke.points && stroke.points.length > 1) {
+          ctx.beginPath();
+          ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
+          for (let i = 1; i < stroke.points.length; i++) {
+            ctx.lineTo(stroke.points[i].x, stroke.points[i].y);
+          }
+          ctx.stroke();
+        } else if (stroke.start && stroke.end) {
+          const { start, end } = stroke;
+          if (stroke.tool === 'line' || stroke.tool === 'arrow') {
+            ctx.beginPath();
+            ctx.moveTo(start.x, start.y);
+            ctx.lineTo(end.x, end.y);
+            ctx.stroke();
+            if (stroke.tool === 'arrow') {
+              const angle = Math.atan2(end.y - start.y, end.x - start.x);
+              const headLen = 12;
+              ctx.beginPath();
+              ctx.moveTo(end.x, end.y);
+              ctx.lineTo(end.x - headLen * Math.cos(angle - Math.PI / 6), end.y - headLen * Math.sin(angle - Math.PI / 6));
+              ctx.lineTo(end.x - headLen * Math.cos(angle + Math.PI / 6), end.y - headLen * Math.sin(angle + Math.PI / 6));
+              ctx.closePath();
+              ctx.fill();
+            }
+          } else if (stroke.tool === 'rect') {
+            const rx = Math.min(start.x, end.x);
+            const ry = Math.min(start.y, end.y);
+            const rw = Math.abs(end.x - start.x);
+            const rh = Math.abs(end.y - start.y);
+            ctx.strokeRect(rx, ry, rw, rh);
+          } else if (stroke.tool === 'circle') {
+            const rx = (start.x + end.x) / 2;
+            const ry = (start.y + end.y) / 2;
+            const rw = Math.abs(end.x - start.x) / 2;
+            const rh = Math.abs(end.y - start.y) / 2;
+            ctx.beginPath();
+            ctx.ellipse(rx, ry, Math.max(1, rw), Math.max(1, rh), 0, 0, Math.PI * 2);
+            ctx.stroke();
+          } else if (stroke.tool === 'tree_node') {
+            const cx = (start.x + end.x) / 2;
+            const cy = (start.y + end.y) / 2;
+            const r = Math.max(14, Math.hypot(end.x - start.x, end.y - start.y) / 2);
+            ctx.beginPath();
+            ctx.arc(cx, cy, r, 0, Math.PI * 2);
+            ctx.stroke();
+            if (stroke.text) {
+              ctx.font = 'bold 13px Inter, sans-serif';
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(stroke.text, cx, cy);
+            }
+          }
+        } else if (stroke.text && stroke.start) {
+          ctx.font = '14px Inter, sans-serif';
+          ctx.fillText(stroke.text, stroke.start.x, stroke.start.y);
+        }
+
+        ctx.restore();
+      });
+
+      return canvas.toDataURL('image/png');
+    } catch (err) {
+      console.warn('[DiaryService] Failed to render whiteboard canvas for PDF export:', err);
+      return null;
+    }
+  }
+
   /**
    * Generates a styled, print-optimized HTML document for instant PDF export
    */
@@ -334,8 +488,8 @@ export class DiaryService {
     .entry-body {
       font-size: 13px;
       color: #334155;
-      white-space: pre-wrap;
       font-family: inherit;
+      line-height: 1.6;
     }
     code, pre {
       font-family: 'JetBrains Mono', monospace;
@@ -348,6 +502,28 @@ export class DiaryService {
       font-size: 12px;
       margin: 10px 0;
       line-height: 1.5;
+    }
+    .whiteboard-attachment {
+      margin-top: 16px;
+      padding-top: 14px;
+      border-top: 1px dashed #cbd5e1;
+    }
+    .wb-label {
+      font-size: 11px;
+      font-weight: 700;
+      color: #6366f1;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .wb-img {
+      width: 100%;
+      max-height: 380px;
+      object-fit: contain;
+      border-radius: 6px;
+      border: 1px solid #cbd5e1;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
     }
     .footer {
       text-align: center;
@@ -372,22 +548,29 @@ export class DiaryService {
   </div>
 
   ${entriesToExport
-    .map(
-      (e) => `
+    .map((e) => {
+      const wbDataUrl = this.renderWhiteboardToDataUrl(e.whiteboard);
+      return `
     <div class="entry-card">
       <div class="entry-header">
-        <div class="entry-title">${e.title}</div>
+        <div class="entry-title">${this.escapeHtml(e.title)}</div>
         <div class="entry-date">${new Date(e.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</div>
       </div>
       <div class="entry-meta">
         <span class="mood-tag">Mood: ${e.mood}</span>
-        ${e.problemTitle ? `<span class="prob-link">Problem: ${e.problemTitle}</span>` : ''}
-        ${e.tags.map((t) => `<span class="tag">${t}</span>`).join(' ')}
+        ${e.problemTitle ? `<span class="prob-link">Problem: ${this.escapeHtml(e.problemTitle)}</span>` : ''}
+        ${e.tags.map((t) => `<span class="tag">${this.escapeHtml(t)}</span>`).join(' ')}
       </div>
-      <div class="entry-body">${e.content}</div>
+      <div class="entry-body">${this.renderMarkdownToHtml(e.content)}</div>
+      ${wbDataUrl ? `
+        <div class="whiteboard-attachment">
+          <div class="wb-label">🎨 Attached Architecture Sketch / Canvas:</div>
+          <img class="wb-img" src="${wbDataUrl}" alt="Whiteboard Sketch" />
+        </div>
+      ` : ''}
     </div>
-  `
-    )
+  `;
+    })
     .join('')}
 
   <div class="footer">
@@ -398,7 +581,7 @@ export class DiaryService {
     window.onload = () => {
       setTimeout(() => {
         window.print();
-      }, 400);
+      }, 500);
     };
   </script>
 </body>

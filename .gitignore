@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+vendor/
+
+# Build artifacts
+dist/
+dist-zip/
+bin/
+server/bin/
+
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# IDE & Editor
+.vscode/
+.idea/
+*.swp
+*.swo

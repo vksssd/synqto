@@ -1,0 +1,432 @@
+// ─── WebRTC Peer Connection & Multi-Subscriber Media Mesh Service ───
+
+import { NetworkPacket } from './packet';
+
+export interface PeerConnectionWrapper {
+  peerId: string;
+  pc: RTCPeerConnection;
+  dataChannel: RTCDataChannel | null;
+  remoteStream: MediaStream | null;
+  isInitiator: boolean;
+  status: 'connecting' | 'connected' | 'disconnected' | 'failed';
+}
+
+export class WebRTCService {
+  private static instance: WebRTCService | null = null;
+  private connections: Map<string, PeerConnectionWrapper> = new Map();
+  private localMediaStream: MediaStream | null = null;
+
+  // Event listener sets for multi-service subscription without overwrite
+  private packetListeners: Set<(fromPeerId: string, packet: NetworkPacket) => void> = new Set();
+  private connectionStateListeners: Set<
+    (peerId: string, status: 'connecting' | 'connected' | 'disconnected' | 'failed') => void
+  > = new Set();
+  private remoteStreamListeners: Set<(peerId: string, stream: MediaStream) => void> = new Set();
+  private remoteStreamRemovedListeners: Set<(peerId: string) => void> = new Set();
+  private signalNeededListeners: Set<
+    (targetPeerId: string, type: 'offer' | 'answer' | 'ice', payload: any) => void
+  > = new Set();
+
+  private iceServers: RTCIceServer[] = [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun.cloudflare.com:3478' },
+  ];
+
+  private constructor() {}
+
+  public static getInstance(): WebRTCService {
+    if (!WebRTCService.instance) {
+      WebRTCService.instance = new WebRTCService();
+    }
+    return WebRTCService.instance;
+  }
+
+  public onRemoteStream(fn: (peerId: string, stream: MediaStream) => void): () => void {
+    this.remoteStreamListeners.add(fn);
+    return () => this.remoteStreamListeners.delete(fn);
+  }
+
+  public onRemoteStreamRemoved(fn: (peerId: string) => void): () => void {
+    this.remoteStreamRemovedListeners.add(fn);
+    return () => this.remoteStreamRemovedListeners.delete(fn);
+  }
+
+  public onPacket(fn: (fromPeerId: string, packet: NetworkPacket) => void): () => void {
+    this.packetListeners.add(fn);
+    return () => this.packetListeners.delete(fn);
+  }
+
+  public onConnectionState(
+    fn: (peerId: string, status: 'connecting' | 'connected' | 'disconnected' | 'failed') => void
+  ): () => void {
+    this.connectionStateListeners.add(fn);
+    return () => this.connectionStateListeners.delete(fn);
+  }
+
+  public onSignalNeeded(
+    fn: (targetPeerId: string, type: 'offer' | 'answer' | 'ice', payload: any) => void
+  ): () => void {
+    this.signalNeededListeners.add(fn);
+    return () => this.signalNeededListeners.delete(fn);
+  }
+
+  public setCallbacks(callbacks: {
+    onPacketReceived?: (fromPeerId: string, packet: NetworkPacket) => void;
+    onConnectionStateChange?: (
+      peerId: string,
+      status: 'connecting' | 'connected' | 'disconnected' | 'failed'
+    ) => void;
+    onRemoteStreamReceived?: (peerId: string, stream: MediaStream) => void;
+    onRemoteStreamRemoved?: (peerId: string) => void;
+    onSignalNeeded?: (targetPeerId: string, type: 'offer' | 'answer' | 'ice', payload: any) => void;
+  }) {
+    if (callbacks.onPacketReceived) this.packetListeners.add(callbacks.onPacketReceived);
+    if (callbacks.onConnectionStateChange) this.connectionStateListeners.add(callbacks.onConnectionStateChange);
+    if (callbacks.onRemoteStreamReceived) this.remoteStreamListeners.add(callbacks.onRemoteStreamReceived);
+    if (callbacks.onRemoteStreamRemoved) this.remoteStreamRemovedListeners.add(callbacks.onRemoteStreamRemoved);
+    if (callbacks.onSignalNeeded) this.signalNeededListeners.add(callbacks.onSignalNeeded);
+  }
+
+  public setLocalMediaStream(stream: MediaStream | null) {
+    this.localMediaStream = stream;
+
+    // Attach local stream tracks to all active peer connections & trigger renegotiation
+    this.connections.forEach(async (wrapper, peerId) => {
+      if (wrapper.pc && wrapper.pc.connectionState !== 'closed') {
+        const senders = wrapper.pc.getSenders();
+
+        if (stream) {
+          stream.getTracks().forEach((track) => {
+            const existingSender = senders.find((s) => s.track?.kind === track.kind);
+            if (existingSender) {
+              existingSender.replaceTrack(track).catch(() => {});
+            } else {
+              try {
+                wrapper.pc.addTrack(track, stream);
+              } catch (e) {}
+            }
+          });
+        } else {
+          // Remove sender tracks when stopping stream
+          senders.forEach((sender) => {
+            if (sender.track) {
+              try {
+                wrapper.pc.removeTrack(sender);
+              } catch (e) {}
+            }
+          });
+        }
+
+        // Trigger renegotiation offer
+        await this.renegotiate(peerId);
+      }
+    });
+  }
+
+  /**
+   * Renegotiates SDP offer with a remote peer when tracks are added/removed.
+   */
+  public async renegotiate(remotePeerId: string): Promise<void> {
+    const wrapper = this.connections.get(remotePeerId);
+    if (!wrapper || !wrapper.pc || wrapper.pc.signalingState === 'closed') return;
+
+    try {
+      const offer = await wrapper.pc.createOffer({
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: true,
+      });
+      await wrapper.pc.setLocalDescription(offer);
+
+      this.signalNeededListeners.forEach((fn) => fn(remotePeerId, 'offer', offer));
+    } catch (err) {
+      console.warn(`[WebRTCService] Renegotiation offer error for ${remotePeerId}:`, err);
+    }
+  }
+
+  /**
+   * Initiates a WebRTC connection to a remote peer (creates Offer and DataChannel)
+   */
+  public async initiateConnection(remotePeerId: string): Promise<void> {
+    if (this.connections.has(remotePeerId)) {
+      const existing = this.connections.get(remotePeerId)!;
+      if (existing.status === 'connected' || existing.status === 'connecting') {
+        return;
+      }
+      this.closeConnection(remotePeerId);
+    }
+
+    const pc = this.createPeerConnection(remotePeerId, true);
+    const dc = pc.createDataChannel('nerd-buddy-data', {
+      ordered: true,
+    });
+    this.setupDataChannel(remotePeerId, dc);
+
+    const wrapper: PeerConnectionWrapper = {
+      peerId: remotePeerId,
+      pc,
+      dataChannel: dc,
+      remoteStream: null,
+      isInitiator: true,
+      status: 'connecting',
+    };
+    this.connections.set(remotePeerId, wrapper);
+
+    try {
+      const offer = await pc.createOffer({
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: true,
+      });
+      await pc.setLocalDescription(offer);
+
+      this.signalNeededListeners.forEach((fn) => fn(remotePeerId, 'offer', offer));
+    } catch (err) {
+      console.error(`[WebRTCService] Failed to create offer for ${remotePeerId}:`, err);
+      this.handleConnectionFailure(remotePeerId);
+    }
+  }
+
+  /**
+   * Handles incoming SDP offer (supports initial connection and renegotiation)
+   */
+  public async handleIncomingOffer(
+    remotePeerId: string,
+    offer: RTCSessionDescriptionInit
+  ): Promise<void> {
+    let wrapper = this.connections.get(remotePeerId);
+
+    // If existing active connection, handle as renegotiation without tearing down
+    if (wrapper && wrapper.pc && wrapper.pc.signalingState !== 'closed') {
+      try {
+        await wrapper.pc.setRemoteDescription(new RTCSessionDescription(offer));
+        const answer = await wrapper.pc.createAnswer();
+        await wrapper.pc.setLocalDescription(answer);
+
+        this.signalNeededListeners.forEach((fn) => fn(remotePeerId, 'answer', answer));
+        return;
+      } catch (err) {
+        console.warn(`[WebRTCService] Renegotiation answer failed for ${remotePeerId}, recreating connection:`, err);
+      }
+    }
+
+    // Otherwise initialize new peer connection
+    if (wrapper) {
+      this.closeConnection(remotePeerId);
+    }
+
+    const pc = this.createPeerConnection(remotePeerId, false);
+    wrapper = {
+      peerId: remotePeerId,
+      pc,
+      dataChannel: null, // Will be set in ondatachannel
+      remoteStream: null,
+      isInitiator: false,
+      status: 'connecting',
+    };
+    this.connections.set(remotePeerId, wrapper);
+
+    try {
+      await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+
+      this.signalNeededListeners.forEach((fn) => fn(remotePeerId, 'answer', answer));
+    } catch (err) {
+      console.error(`[WebRTCService] Failed to handle offer from ${remotePeerId}:`, err);
+      this.handleConnectionFailure(remotePeerId);
+    }
+  }
+
+  /**
+   * Handles incoming SDP answer
+   */
+  public async handleIncomingAnswer(
+    remotePeerId: string,
+    answer: RTCSessionDescriptionInit
+  ): Promise<void> {
+    const wrapper = this.connections.get(remotePeerId);
+    if (!wrapper || !wrapper.pc || wrapper.pc.signalingState === 'closed') return;
+
+    try {
+      await wrapper.pc.setRemoteDescription(new RTCSessionDescription(answer));
+    } catch (err) {
+      console.error(`[WebRTCService] Failed to set remote description for ${remotePeerId}:`, err);
+    }
+  }
+
+  /**
+   * Handles incoming ICE candidate
+   */
+  public async handleIncomingIce(
+    remotePeerId: string,
+    candidate: RTCIceCandidateInit
+  ): Promise<void> {
+    const wrapper = this.connections.get(remotePeerId);
+    if (!wrapper || !wrapper.pc || wrapper.pc.signalingState === 'closed') return;
+
+    try {
+      await wrapper.pc.addIceCandidate(new RTCIceCandidate(candidate));
+    } catch (err) {
+      console.warn(`[WebRTCService] Failed to add ICE candidate for ${remotePeerId}:`, err);
+    }
+  }
+
+  private createPeerConnection(remotePeerId: string, isInitiator: boolean): RTCPeerConnection {
+    const pc = new RTCPeerConnection({
+      iceServers: this.iceServers,
+      iceCandidatePoolSize: 2,
+    });
+
+    // Ensure audio & video transceivers are configured to receive stream tracks
+    try {
+      pc.addTransceiver('audio', { direction: 'sendrecv' });
+      pc.addTransceiver('video', { direction: 'sendrecv' });
+    } catch (e) {}
+
+    // Add local media stream tracks if active
+    if (this.localMediaStream) {
+      this.localMediaStream.getTracks().forEach((track) => {
+        try {
+          pc.addTrack(track, this.localMediaStream!);
+        } catch (e) {}
+      });
+    }
+
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        this.signalNeededListeners.forEach((fn) => fn(remotePeerId, 'ice', event.candidate?.toJSON()));
+      }
+    };
+
+    pc.onconnectionstatechange = () => {
+      const state = pc.connectionState;
+      let status: 'connecting' | 'connected' | 'disconnected' | 'failed' = 'connecting';
+      if (state === 'connected') status = 'connected';
+      else if (state === 'disconnected') status = 'disconnected';
+      else if (state === 'failed' || state === 'closed') status = 'failed';
+
+      const wrapper = this.connections.get(remotePeerId);
+      if (wrapper) {
+        wrapper.status = status;
+      }
+
+      this.connectionStateListeners.forEach((fn) => fn(remotePeerId, status));
+
+      if (state === 'failed' || state === 'closed') {
+        this.closeConnection(remotePeerId);
+      }
+    };
+
+    pc.ondatachannel = (event) => {
+      const dc = event.channel;
+      const wrapper = this.connections.get(remotePeerId);
+      if (wrapper) {
+        wrapper.dataChannel = dc;
+      }
+      this.setupDataChannel(remotePeerId, dc);
+    };
+
+    // Remote media track received (Screen share / Camera / Mic)
+    pc.ontrack = (event) => {
+      const wrapper = this.connections.get(remotePeerId);
+      const stream = event.streams && event.streams[0] ? event.streams[0] : new MediaStream([event.track]);
+
+      if (wrapper) {
+        wrapper.remoteStream = stream;
+      }
+
+      this.remoteStreamListeners.forEach((fn) => fn(remotePeerId, stream));
+    };
+
+    return pc;
+  }
+
+  private setupDataChannel(remotePeerId: string, dc: RTCDataChannel) {
+    dc.onopen = () => {
+      const wrapper = this.connections.get(remotePeerId);
+      if (wrapper) {
+        wrapper.status = 'connected';
+        this.connectionStateListeners.forEach((fn) => fn(remotePeerId, 'connected'));
+      }
+    };
+
+    dc.onmessage = (event) => {
+      try {
+        const packet: NetworkPacket = JSON.parse(event.data);
+        this.packetListeners.forEach((fn) => fn(remotePeerId, packet));
+      } catch (err) {}
+    };
+
+    dc.onclose = () => {
+      const wrapper = this.connections.get(remotePeerId);
+      if (wrapper) {
+        wrapper.status = 'disconnected';
+      }
+    };
+
+    dc.onerror = (err) => {
+      // Clean error catch
+    };
+  }
+
+  public sendPacket(remotePeerId: string, packet: NetworkPacket): boolean {
+    const wrapper = this.connections.get(remotePeerId);
+    if (!wrapper || !wrapper.dataChannel || wrapper.dataChannel.readyState !== 'open') {
+      return false;
+    }
+
+    try {
+      wrapper.dataChannel.send(JSON.stringify(packet));
+      return true;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  public isConnected(remotePeerId: string): boolean {
+    const wrapper = this.connections.get(remotePeerId);
+    return Boolean(wrapper && wrapper.dataChannel && wrapper.dataChannel.readyState === 'open');
+  }
+
+  public getConnectedPeers(): string[] {
+    const result: string[] = [];
+    this.connections.forEach((wrapper, peerId) => {
+      if (wrapper.dataChannel && wrapper.dataChannel.readyState === 'open') {
+        result.push(peerId);
+      }
+    });
+    return result;
+  }
+
+  public closeConnection(remotePeerId: string) {
+    const wrapper = this.connections.get(remotePeerId);
+    if (!wrapper) return;
+
+    if (wrapper.dataChannel) {
+      try {
+        wrapper.dataChannel.close();
+      } catch (e) {}
+    }
+    if (wrapper.pc) {
+      try {
+        wrapper.pc.close();
+      } catch (e) {}
+    }
+    if (wrapper.remoteStream) {
+      this.remoteStreamRemovedListeners.forEach((fn) => fn(remotePeerId));
+    }
+
+    this.connections.delete(remotePeerId);
+  }
+
+  public closeAll() {
+    const peerIds = Array.from(this.connections.keys());
+    peerIds.forEach((id) => this.closeConnection(id));
+  }
+
+  private handleConnectionFailure(remotePeerId: string) {
+    this.closeConnection(remotePeerId);
+    this.connectionStateListeners.forEach((fn) => fn(remotePeerId, 'failed'));
+  }
+}

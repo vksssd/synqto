@@ -1,0 +1,13 @@
+# ─── Render.com Infrastructure as Code Blueprint ───
+services:
+  - type: web
+    name: nerd-buddy-signal
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    region: oregon
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: 8080

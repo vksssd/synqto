@@ -1,9 +1,9 @@
-// ─── Bottom Navigation Bar Component ───
+// ─── Navigation Bar Component with Dedicated Whiteboard Tab ───
 
 import React from 'react';
-import { MessageSquare, Users, Compass, Flame, Settings } from 'lucide-react';
+import { MessageSquare, Palette, Users, Compass, Flame } from 'lucide-react';
 
-export type NavTabType = 'chat' | 'groups' | 'peers' | 'profile';
+export type NavTabType = 'chat' | 'whiteboard' | 'groups' | 'peers' | 'profile';
 
 interface NavBarProps {
   currentTab: NavTabType;
@@ -32,7 +32,16 @@ export const NavBar: React.FC<NavBarProps> = ({
         {unreadCount > 0 && <span className="nav-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>}
       </button>
 
-      {/* 2. Squads / Communities Hub */}
+      {/* 2. Full Collaborative Whiteboard */}
+      <button
+        className={`nav-tab ${currentTab === 'whiteboard' ? 'active' : ''}`}
+        onClick={() => onSelectTab('whiteboard')}
+      >
+        <Palette size={17} />
+        <span>Board</span>
+      </button>
+
+      {/* 3. Squads / Communities Hub */}
       <button
         className={`nav-tab ${currentTab === 'groups' ? 'active' : ''}`}
         onClick={() => onSelectTab('groups')}
@@ -41,7 +50,7 @@ export const NavBar: React.FC<NavBarProps> = ({
         <span>Squads</span>
       </button>
 
-      {/* 3. Online Buddies / Peers */}
+      {/* 4. Online Buddies / Peers */}
       <button
         className={`nav-tab ${currentTab === 'peers' ? 'active' : ''}`}
         onClick={() => onSelectTab('peers')}
@@ -51,7 +60,7 @@ export const NavBar: React.FC<NavBarProps> = ({
         {peerCount > 0 && <span className="nav-badge" style={{ background: '#6366f1' }}>{peerCount}</span>}
       </button>
 
-      {/* 4. Merged Profile, Streaks, Badges & Settings */}
+      {/* 5. Profile & Settings */}
       <button
         className={`nav-tab ${currentTab === 'profile' ? 'active' : ''}`}
         onClick={() => onSelectTab('profile')}

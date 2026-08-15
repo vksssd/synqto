@@ -14,10 +14,11 @@ import { RoomContext } from '@/features/room/room-utils';
 
 import { NavBar, NavTabType } from '@/features/navigation/NavBar';
 import { ProblemRoomChatView } from '@/features/room/ProblemRoomChatView';
+import { WhiteboardCanvas } from '@/features/whiteboard/WhiteboardCanvas';
 import { GroupHubView } from '@/features/group/GroupHubView';
 import { ProfileSettingsView } from '@/features/settings/ProfileSettingsView';
 import { PeerListModal } from '@/features/discovery/PeerListModal';
-import { Sparkles, RefreshCw, Radio } from 'lucide-react';
+import { Sparkles, RefreshCw, Radio, Palette } from 'lucide-react';
 
 export const App: React.FC = () => {
   const identityService = IdentityService.getInstance();
@@ -209,7 +210,7 @@ export const App: React.FC = () => {
 
   return (
     <div className="app-container">
-      {/* Top Header Bar with Brand & Force Detect Button */}
+      {/* Top Header Bar with Brand, Whiteboard & Force Detect Button */}
       <header
         style={{
           display: 'flex',
@@ -225,7 +226,7 @@ export const App: React.FC = () => {
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <span style={{ fontSize: '15px' }}>⚡</span>
           <span style={{ fontWeight: 700, fontSize: '13px', color: '#f8fafc', letterSpacing: '-0.01em' }}>
-            Nerd Buddy
+            Synqto
           </span>
           <span
             className="status-dot pulse"
@@ -234,32 +235,56 @@ export const App: React.FC = () => {
           />
         </div>
 
-        <button
-          type="button"
-          className="btn btn-secondary btn-sm"
-          onClick={handleForceDetectProblem}
-          disabled={isDetecting}
-          title="Force scan active tab to auto-detect and join problem room"
-          style={{
-            fontSize: '11px',
-            padding: '3px 8px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '4px',
-            background: isDetecting ? 'rgba(99, 102, 241, 0.25)' : 'rgba(255, 255, 255, 0.04)',
-            borderColor: 'rgba(99, 102, 241, 0.35)',
-            color: '#c4b5fd',
-          }}
-        >
-          <RefreshCw
-            size={12}
-            color="var(--primary)"
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          {/* Top Bar Quick-Launch Whiteboard Button */}
+          <button
+            type="button"
+            className={`btn ${currentTab === 'whiteboard' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
+            onClick={() => setCurrentTab(currentTab === 'whiteboard' ? 'chat' : 'whiteboard')}
+            title="Open Collaborative Whiteboard"
             style={{
-              animation: isDetecting ? 'spin 1s linear infinite' : 'none',
+              fontSize: '11px',
+              padding: '3px 8px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              background: currentTab === 'whiteboard' ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'rgba(255, 255, 255, 0.05)',
+              borderColor: currentTab === 'whiteboard' ? 'transparent' : 'rgba(99, 102, 241, 0.35)',
+              color: currentTab === 'whiteboard' ? '#ffffff' : '#c4b5fd',
             }}
-          />
-          <span>{isDetecting ? 'Scanning...' : 'Detect Tab'}</span>
-        </button>
+          >
+            <Palette size={12} />
+            <span>{currentTab === 'whiteboard' ? 'Exit Board' : 'Whiteboard 🎨'}</span>
+          </button>
+
+          {/* Detect Active Tab Button */}
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={handleForceDetectProblem}
+            disabled={isDetecting}
+            title="Force scan active tab to auto-detect and join problem room"
+            style={{
+              fontSize: '11px',
+              padding: '3px 8px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              background: isDetecting ? 'rgba(99, 102, 241, 0.25)' : 'rgba(255, 255, 255, 0.04)',
+              borderColor: 'rgba(99, 102, 241, 0.35)',
+              color: '#c4b5fd',
+            }}
+          >
+            <RefreshCw
+              size={12}
+              color="var(--primary)"
+              style={{
+                animation: isDetecting ? 'spin 1s linear infinite' : 'none',
+              }}
+            />
+            <span>{isDetecting ? 'Scanning...' : 'Detect'}</span>
+          </button>
+        </div>
       </header>
 
       {/* Alert Banner / Toast */}
@@ -300,6 +325,13 @@ export const App: React.FC = () => {
             isLeader={isLeader}
             onOpenPeers={() => setIsPeerModalOpen(true)}
           />
+        )}
+
+        {/* 2. Full Collaborative Whiteboard Screen */}
+        {currentTab === 'whiteboard' && (
+          <div style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: '8px' }}>
+            <WhiteboardCanvas />
+          </div>
         )}
 
         {/* 2. Squads / Communities Hub */}

@@ -60,6 +60,7 @@ export class FloatingWidget {
   private wbTool: 'pen' | 'highlighter' | 'eraser' | 'line' | 'arrow' | 'rect' | 'circle' | 'tree_node' = 'pen';
   private wbColor: string = '#6366f1';
   private wbWidth: number = 4;
+  private wbTheme: 'dark_grid' | 'clean_white' | 'dot_matrix' | 'isometric' = 'dark_grid';
   private wbStrokes: InPageStroke[] = [];
   private wbRedoStack: InPageStroke[] = [];
   private isWbDrawing: boolean = false;
@@ -793,14 +794,22 @@ export class FloatingWidget {
               </div>
             </div>
 
-            <!-- Color Palette & Widths -->
+            <!-- Color Palette, Widths & Board Theme Choice -->
             <div class="wb-palette-bar">
-              <div style="display:flex;gap:5px;align-items:center;">
+              <div style="display:flex;gap:3px;align-items:center;">
+                <button class="size-pill ${this.wbTheme === 'dark_grid' ? 'active' : ''}" data-wbtheme="dark_grid" title="Dark Grid">⬛</button>
+                <button class="size-pill ${this.wbTheme === 'clean_white' ? 'active' : ''}" data-wbtheme="clean_white" title="White Board">⬜</button>
+                <button class="size-pill ${this.wbTheme === 'dot_matrix' ? 'active' : ''}" data-wbtheme="dot_matrix" title="Dot Grid">🟦</button>
+                <button class="size-pill ${this.wbTheme === 'isometric' ? 'active' : ''}" data-wbtheme="isometric" title="Matrix Grid">📐</button>
+              </div>
+
+              <div style="display:flex;gap:4px;align-items:center;">
                 ${['#6366f1', '#06b6d4', '#10b981', '#f59e0b', '#f43f5e', '#ffffff'].map((c) => `
                   <div class="color-dot ${this.wbColor === c ? 'active' : ''}" data-color="${c}" style="background:${c};"></div>
                 `).join('')}
               </div>
-              <div style="display:flex;gap:3px;align-items:center;">
+
+              <div style="display:flex;gap:2px;align-items:center;">
                 <button class="size-pill ${this.wbWidth === 2 ? 'active' : ''}" data-size="2">S</button>
                 <button class="size-pill ${this.wbWidth === 4 ? 'active' : ''}" data-size="4">M</button>
                 <button class="size-pill ${this.wbWidth === 8 ? 'active' : ''}" data-size="8">L</button>
@@ -1084,6 +1093,21 @@ export class FloatingWidget {
       });
     });
 
+    // Attach Board Theme Selector
+    const themeBtns = this.shadow.querySelectorAll('.size-pill[data-wbtheme]');
+    themeBtns.forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const theme = (e.currentTarget as HTMLElement).getAttribute('data-wbtheme') as any;
+        if (theme) {
+          this.wbTheme = theme;
+          if (theme === 'clean_white' && this.wbColor === '#ffffff') {
+            this.wbColor = '#0f172a';
+          }
+          this.render();
+        }
+      });
+    });
+
     // Attach Color Selector
     const colorDots = this.shadow.querySelectorAll('.color-dot');
     colorDots.forEach((dot) => {
@@ -1097,7 +1121,7 @@ export class FloatingWidget {
     });
 
     // Attach Size Selector
-    const sizePills = this.shadow.querySelectorAll('.size-pill');
+    const sizePills = this.shadow.querySelectorAll('.size-pill[data-size]');
     sizePills.forEach((p) => {
       p.addEventListener('click', (e) => {
         const sz = Number((e.currentTarget as HTMLElement).getAttribute('data-size'));
@@ -1254,29 +1278,85 @@ export class FloatingWidget {
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Subtle background grid
+    // Draw Background Theme
     ctx.save();
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
-    ctx.lineWidth = 1;
-    const gridSize = 20;
-    for (let x = 0; x < canvas.width; x += gridSize) {
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, canvas.height);
-      ctx.stroke();
-    }
-    for (let y = 0; y < canvas.height; y += gridSize) {
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(canvas.width, y);
-      ctx.stroke();
+    if (this.wbTheme === 'clean_white') {
+      ctx.fillStyle = '#f8fafc';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.06)';
+      ctx.lineWidth = 1;
+      const gridSize = 20;
+      for (let x = 0; x < canvas.width; x += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvas.height);
+        ctx.stroke();
+      }
+      for (let y = 0; y < canvas.height; y += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
+        ctx.stroke();
+      }
+    } else if (this.wbTheme === 'dot_matrix') {
+      ctx.fillStyle = '#090d16';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+      for (let x = 10; x < canvas.width; x += 18) {
+        for (let y = 10; y < canvas.height; y += 18) {
+          ctx.beginPath();
+          ctx.arc(x, y, 1, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    } else if (this.wbTheme === 'isometric') {
+      ctx.fillStyle = '#090d16';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.strokeStyle = 'rgba(99, 102, 241, 0.08)';
+      ctx.lineWidth = 1;
+      const cell = 22;
+      for (let x = 0; x < canvas.width; x += cell) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvas.height);
+        ctx.stroke();
+      }
+      for (let y = 0; y < canvas.height; y += cell) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
+        ctx.stroke();
+      }
+    } else {
+      // Default: Dark Grid
+      ctx.fillStyle = '#090d16';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
+      ctx.lineWidth = 1;
+      const gridSize = 20;
+      for (let x = 0; x < canvas.width; x += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvas.height);
+        ctx.stroke();
+      }
+      for (let y = 0; y < canvas.height; y += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
+        ctx.stroke();
+      }
     }
     ctx.restore();
 
     const render = (s: InPageStroke) => {
       ctx.save();
-      ctx.strokeStyle = s.color;
-      ctx.fillStyle = s.color;
+      let drawColor = s.color;
+      if (this.wbTheme === 'clean_white' && (drawColor === '#ffffff' || drawColor === '#fff')) {
+        drawColor = '#0f172a';
+      }
+      ctx.strokeStyle = drawColor;
+      ctx.fillStyle = drawColor;
       ctx.lineWidth = s.width;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';

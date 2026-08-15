@@ -16,6 +16,8 @@ import { ChatCard } from './ChatCard';
 import { ChatInput } from './ChatInput';
 import { PeerIdentity } from '@/core/network/packet';
 import { DiscoveryService } from '@/features/discovery/discovery.service';
+import { TutorService } from '@/features/tutor/tutor.service';
+import { VoiceService } from '@/features/voice/voice.service';
 
 interface ChatViewProps {
   myIdentity: PeerIdentity | null;
@@ -25,12 +27,16 @@ interface ChatViewProps {
 export const ChatView: React.FC<ChatViewProps> = ({ myIdentity, roomId }) => {
   const chatService = ChatService.getInstance();
   const discoveryService = DiscoveryService.getInstance();
+  const tutorService = TutorService.getInstance();
+  const voiceService = VoiceService.getInstance();
 
   const [messages, setMessages] = useState<ChatMessageItem[]>(chatService.getMessages());
   const [replyingTo, setReplyingTo] = useState<ChatMessageItem | null>(null);
   const [peers, setPeers] = useState<PeerIdentity[]>(
     discoveryService.getOnlinePeers().map((p) => p.identity)
   );
+  const [stageState, setStageState] = useState(tutorService.getState());
+  const [isInVoice, setIsInVoice] = useState(voiceService.getIsInVoice());
 
   // Modals state
   const [lightboxImage, setLightboxImage] = useState<{ url: string; caption?: string } | null>(null);
@@ -70,17 +76,44 @@ export const ChatView: React.FC<ChatViewProps> = ({ myIdentity, roomId }) => {
       setPeers(onlinePeers.map((p) => p.identity));
     });
 
+    const unsubTutor = tutorService.onStateChange((st) => {
+      setStageState(st);
+    });
+
+    const unsubVoice = voiceService.onStateChange((inVoice) => {
+      setIsInVoice(inVoice);
+    });
+
     setPeers(discoveryService.getOnlinePeers().map((p) => p.identity));
 
     return () => {
       unsubMessages();
       unsubDiscovery();
+      unsubTutor();
+      unsubVoice();
     };
-  }, [chatService, discoveryService]);
+  }, [chatService, discoveryService, tutorService, voiceService]);
 
   useEffect(() => {
     scrollEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Live Stream and Voice Lounge Handlers
+  const handleGoLive = () => {
+    if (stageState.myRole === 'tutor') {
+      tutorService.stopTutorStage(roomId);
+    } else {
+      tutorService.startTutorStage('screen', roomId, `${myIdentity?.nickname || 'Tutor'}'s Screen`);
+    }
+  };
+
+  const handleToggleVoice = async () => {
+    if (isInVoice) {
+      voiceService.leaveVoice();
+    } else {
+      await voiceService.joinVoice();
+    }
+  };
 
   // Message Send Handlers
   const handleSendMessage = (text: string, replyTo?: { id: string; preview: string }) => {
@@ -168,7 +201,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ myIdentity, roomId }) => {
   };
 
   return (
-    <div className="chat-container">
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}>
       {/* ─── Messages List ─── */}
       <div className="message-list">
         {messages.length === 0 ? (
@@ -219,6 +252,10 @@ export const ChatView: React.FC<ChatViewProps> = ({ myIdentity, roomId }) => {
         onOpenPollModal={() => setShowPollModal(true)}
         onOpenQuizModal={() => setShowQuizModal(true)}
         onAttachFile={handleAttachFile}
+        onGoLive={handleGoLive}
+        onToggleVoice={handleToggleVoice}
+        isLive={stageState.myRole === 'tutor'}
+        isInVoice={isInVoice}
         replyingTo={replyingTo}
         onCancelReply={() => setReplyingTo(null)}
         peers={peers}

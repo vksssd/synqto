@@ -14,6 +14,9 @@ import {
   Paperclip,
   Sparkles,
   Users,
+  Radio,
+  Volume2,
+  Mic,
 } from 'lucide-react';
 import { ChatMessageItem } from './chat.service';
 import { PeerIdentity } from '@/core/network/packet';
@@ -26,6 +29,10 @@ interface ChatInputProps {
   onOpenPollModal: () => void;
   onOpenQuizModal: () => void;
   onAttachFile: (file: File) => void;
+  onGoLive?: () => void;
+  onToggleVoice?: () => void;
+  isLive?: boolean;
+  isInVoice?: boolean;
   replyingTo: ChatMessageItem | null;
   onCancelReply: () => void;
   peers: PeerIdentity[];
@@ -49,6 +56,10 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   onOpenPollModal,
   onOpenQuizModal,
   onAttachFile,
+  onGoLive,
+  onToggleVoice,
+  isLive = false,
+  isInVoice = false,
   replyingTo,
   onCancelReply,
   peers,
@@ -444,6 +455,50 @@ export const ChatInput: React.FC<ChatInputProps> = ({
             <Paperclip size={13} color="#ec4899" />
             <span>Attach Document</span>
           </button>
+
+          <div style={{ height: '1px', background: 'var(--border-subtle)', margin: '3px 0' }} />
+
+          {onGoLive && (
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => {
+                setShowAttachMenu(false);
+                onGoLive();
+              }}
+              style={{
+                justifyContent: 'flex-start',
+                fontSize: '11px',
+                gap: '6px',
+                color: isLive ? '#f87171' : '#c7d2fe',
+                fontWeight: 600,
+              }}
+            >
+              <Radio size={13} color={isLive ? '#ef4444' : '#818cf8'} />
+              <span>{isLive ? '🔴 Stop Live Stream' : '🔴 Go Live (Share Screen)'}</span>
+            </button>
+          )}
+
+          {onToggleVoice && (
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => {
+                setShowAttachMenu(false);
+                onToggleVoice();
+              }}
+              style={{
+                justifyContent: 'flex-start',
+                fontSize: '11px',
+                gap: '6px',
+                color: isInVoice ? '#34d399' : 'var(--text-primary)',
+                fontWeight: 600,
+              }}
+            >
+              <Volume2 size={13} color={isInVoice ? '#10b981' : '#38bdf8'} />
+              <span>{isInVoice ? '🎙️ Leave Voice Room' : '🎙️ Start / Join Voice'}</span>
+            </button>
+          )}
         </div>
       )}
 

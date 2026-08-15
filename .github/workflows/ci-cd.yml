@@ -46,5 +46,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: synqto-chrome-extension
-          path: extension/dist-zip/synqto-v0.1.0.zip
+          path: extension/dist-zip/synqto-v*.zip
           retention-days: 30

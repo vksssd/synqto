@@ -834,7 +834,7 @@ export const SettingsCard: React.FC = () => {
           </div>
         </div>
         <div style={{ fontSize: '10.5px', color: 'var(--text-muted)', lineHeight: 1.6 }}>
-          Version: <strong>0.1.0 (Phase II Live Stage)</strong><br />
+          Version: <strong>{typeof chrome !== 'undefined' && chrome.runtime?.getManifest ? chrome.runtime.getManifest().version : '0.1.1'} (Phase II Live Stage)</strong><br />
           Network Protocol: <strong>Dual-Leader P2P Mesh with WebRTC DataChannels</strong><br />
           Signaling: <strong>Go / Gorilla WebSocket Broker</strong>
         </div>

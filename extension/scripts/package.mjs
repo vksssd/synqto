@@ -29,7 +29,7 @@ if (fs.existsSync(manifestPath)) {
   version = manifest.version || '0.1.0';
 }
 
-const zipFileName = `synqme-v${version}.zip`;
+const zipFileName = `synqto-v${version}.zip`;
 const zipFilePath = path.resolve(outputDir, zipFileName);
 
 if (fs.existsSync(zipFilePath)) {

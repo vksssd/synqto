@@ -1,14 +1,14 @@
-# ⚡ Synqme
+# ⚡ Synqto
 
 > **Live P2P Collaborative Problem Solving Platform** with a High-Performance Go Signaling Server and Chrome Extension (Manifest V3).
 
-When you open any coding problem (LeetCode, Codeforces, NeetCode, HackerRank, GeeksforGeeks), research paper (ArXiv), or educational lecture (YouTube), **Synqme automatically detects the context and connects you to a real-time study room** with peers studying the exact same material worldwide.
+When you open any coding problem (LeetCode, Codeforces, NeetCode, HackerRank, GeeksforGeeks), research paper (ArXiv), or educational lecture (YouTube), **Synqto automatically detects the context and connects you to a real-time study room** with peers studying the exact same material worldwide.
 
 ---
 
 ## ⚡ Key Architectural Innovation: Hierarchical Leader Mesh
 
-Unlike traditional full-mesh WebRTC topologies that suffer from $O(N^2)$ connection blowup and massive bandwidth requirements for every single peer, **Synqme uses a hierarchical cluster topology**:
+Unlike traditional full-mesh WebRTC topologies that suffer from $O(N^2)$ connection blowup and massive bandwidth requirements for every single peer, **Synqto uses a hierarchical cluster topology**:
 
 ```
                        ┌─────────────────────────┐

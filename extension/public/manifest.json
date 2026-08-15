@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "Synqme - Live P2P Problem Solving & Tutor Stage",
-  "short_name": "Synqme",
+  "name": "Synqto - Live P2P Problem Solving & Tutor Stage",
+  "short_name": "Synqto",
   "version": "0.1.0",
   "description": "Instant P2P study rooms that form automatically when solving LeetCode & Codeforces problems. Screen share, laser pointers & in-page chat.",
   "permissions": [
@@ -32,7 +32,7 @@
     "default_path": "sidepanel.html"
   },
   "action": {
-    "default_title": "Synqme - Live P2P Problem Solving"
+    "default_title": "Synqto - Live P2P Problem Solving"
   },
   "content_scripts": [
     {

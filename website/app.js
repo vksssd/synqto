@@ -316,7 +316,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const downloadTriggers = document.querySelectorAll('.btn-download-trigger');
   downloadTriggers.forEach((btn) => {
     btn.addEventListener('click', () => {
-      showToast('Downloading synqme-v0.1.0.zip...', 'download');
+      showToast('Downloading synqto-v0.1.0.zip...', 'download');
 
       // Automatically mark step 1 checkbox
       const chk1 = document.getElementById('chk-step-1');

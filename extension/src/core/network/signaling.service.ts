@@ -168,11 +168,15 @@ export class SignalingService {
         this.scheduleReconnect();
       };
 
-      this.ws.onerror = (err) => {
-        console.warn('[SignalingService] WebSocket error:', err);
+      this.ws.onerror = () => {
+        // Browser WebSocket error events are generic Event objects without message text.
+        // We log an informative message on initial attempt instead of printing raw '[object Event]'.
+        if (this.reconnectAttempts === 0) {
+          console.info(`[SignalingService] Signaling server not reachable at ${this.serverUrl}. Operating in offline/local peer mode.`);
+        }
       };
     } catch (err) {
-      console.error('[SignalingService] Failed to open WebSocket:', err);
+      console.info(`[SignalingService] WebSocket connection attempt failed for ${this.serverUrl}. Operating in offline mode.`);
       this.scheduleReconnect();
     }
   }
@@ -263,7 +267,10 @@ export class SignalingService {
     if (!this.currentRoomId) return;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
 
-    const delay = backoffDelay(this.reconnectAttempts, 1000, 15000, 500);
+    // If retried multiple times and server is offline, back off gracefully to avoid background resource churn
+    const baseDelay = this.reconnectAttempts > 4 ? 20000 : 1000;
+    const maxDelay = this.reconnectAttempts > 4 ? 40000 : 15000;
+    const delay = backoffDelay(this.reconnectAttempts, baseDelay, maxDelay, 500);
     this.reconnectAttempts++;
 
     this.reconnectTimer = setTimeout(() => {

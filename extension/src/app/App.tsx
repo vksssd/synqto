@@ -29,7 +29,12 @@ export const App: React.FC = () => {
   const topologyService = TopologyService.getInstance();
   const gamificationService = GamificationService.getInstance();
 
-  const [currentTab, setCurrentTab] = useState<NavTabType>('chat');
+  const signalingService = SignalingService.getInstance();
+
+  const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+  const initialTab = (urlParams?.get('view') as NavTabType) || 'chat';
+  const [currentTab, setCurrentTab] = useState<NavTabType>(initialTab);
+  const [isConnected, setIsConnected] = useState(signalingService.getIsConnected());
   const [identity, setIdentity] = useState<PeerIdentity | null>(null);
   const [room, setRoom] = useState<RoomContext | null>(null);
   const [peers, setPeers] = useState<OnlinePeer[]>([]);
@@ -40,6 +45,13 @@ export const App: React.FC = () => {
   const [alertToast, setAlertToast] = useState<string | null>(null);
   const [currentStreak, setCurrentStreak] = useState(gamificationService.getStats().currentStreak);
   const [isDetecting, setIsDetecting] = useState(false);
+
+  // Listen for Signaling connection changes
+  useEffect(() => {
+    return signalingService.on('connection:change', (data: { connected: boolean }) => {
+      setIsConnected(data.connected);
+    });
+  }, []);
 
   // 1. Initialize identity & listen for changes
   useEffect(() => {
@@ -230,8 +242,13 @@ export const App: React.FC = () => {
           </span>
           <span
             className="status-dot pulse"
-            style={{ width: '6px', height: '6px', background: '#10b981', marginLeft: '2px' }}
-            title="P2P Mesh Network Ready"
+            style={{
+              width: '6px',
+              height: '6px',
+              background: isConnected ? '#10b981' : '#f59e0b',
+              marginLeft: '2px',
+            }}
+            title={isConnected ? 'P2P Mesh Network: Connected' : 'Offline / Standalone Mode (Personal Whiteboard & Local Diary Active)'}
           />
         </div>
 

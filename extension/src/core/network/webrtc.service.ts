@@ -187,6 +187,22 @@ export class WebRTCService {
     }
   }
 
+  private pendingIceCandidates: Map<string, RTCIceCandidateInit[]> = new Map();
+
+  private async flushPendingIce(remotePeerId: string, pc: RTCPeerConnection) {
+    const candidates = this.pendingIceCandidates.get(remotePeerId) || [];
+    if (candidates.length > 0) {
+      this.pendingIceCandidates.delete(remotePeerId);
+      for (const c of candidates) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(c));
+        } catch (err) {
+          console.warn(`[WebRTCService] Failed to flush queued ICE candidate for ${remotePeerId}:`, err);
+        }
+      }
+    }
+  }
+
   /**
    * Handles incoming SDP offer (supports initial connection and renegotiation)
    */
@@ -200,6 +216,7 @@ export class WebRTCService {
     if (wrapper && wrapper.pc && wrapper.pc.signalingState !== 'closed') {
       try {
         await wrapper.pc.setRemoteDescription(new RTCSessionDescription(offer));
+        await this.flushPendingIce(remotePeerId, wrapper.pc);
         const answer = await wrapper.pc.createAnswer();
         await wrapper.pc.setLocalDescription(answer);
 
@@ -228,6 +245,7 @@ export class WebRTCService {
 
     try {
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      await this.flushPendingIce(remotePeerId, pc);
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
 
@@ -250,6 +268,7 @@ export class WebRTCService {
 
     try {
       await wrapper.pc.setRemoteDescription(new RTCSessionDescription(answer));
+      await this.flushPendingIce(remotePeerId, wrapper.pc);
     } catch (err) {
       console.error(`[WebRTCService] Failed to set remote description for ${remotePeerId}:`, err);
     }
@@ -263,7 +282,13 @@ export class WebRTCService {
     candidate: RTCIceCandidateInit
   ): Promise<void> {
     const wrapper = this.connections.get(remotePeerId);
-    if (!wrapper || !wrapper.pc || wrapper.pc.signalingState === 'closed') return;
+    if (!wrapper || !wrapper.pc || !wrapper.pc.remoteDescription || wrapper.pc.signalingState === 'closed') {
+      if (!this.pendingIceCandidates.has(remotePeerId)) {
+        this.pendingIceCandidates.set(remotePeerId, []);
+      }
+      this.pendingIceCandidates.get(remotePeerId)!.push(candidate);
+      return;
+    }
 
     try {
       await wrapper.pc.addIceCandidate(new RTCIceCandidate(candidate));
@@ -418,6 +443,7 @@ export class WebRTCService {
     }
 
     this.connections.delete(remotePeerId);
+    this.pendingIceCandidates.delete(remotePeerId);
   }
 
   public closeAll() {

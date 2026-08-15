@@ -1,8 +1,8 @@
-# 🎬 Synqto Video Recording & Live Streaming Studio — Architectural Plan
+# 🎬 Synqto Video Recording, Live Streaming & Multi-LLM AI Studio — Architectural Plan
 
 > **Document Type**: Architecture & Engineering Specification  
 > **Status**: Planned for Next Release Cycle  
-> **Target Capabilities**: Screen / Tab / Window Capture, PiP Facecam, YouTube Coding Tutorial Templates, Mouse Proximity Auto-Fade, Chroma & Geometry FX, Audio Ducking, Multi-Platform Live Streaming (YouTube Live, Twitch, LinkedIn, Kick), App Linking, and Local Diary Integration.
+> **Target Capabilities**: Screen / Tab / Window Capture, PiP Facecam, YouTube Coding Tutorial Templates, Mouse Proximity Auto-Fade, Chroma & Geometry FX, Audio Ducking, Multi-Platform Live Streaming (YouTube Live, Twitch, LinkedIn, Kick), Bring-Your-Own-LLM AI Model Linking (Google Gemini, OpenAI ChatGPT, Anthropic Claude, xAI Grok, Moonshot Kimi, DeepSeek, Local Ollama), and Local Diary Integration.
 
 ---
 
@@ -14,8 +14,9 @@ Modern coding tutorials, code reviews, live coding streams, and competitive prog
 3. **Zero code obstruction** — when the cursor moves towards the facecam to edit code underneath, the facecam must either **fade to transparent** or **intelligently dodge** to the opposite side.
 4. Professional presentation effects: mouse click ripples, keystroke shortcuts overlay, audio noise suppression, and automatic background audio ducking.
 5. **1-Click Multi-Platform Live Streaming**: Broadcast live problem-solving sessions directly to **YouTube Live**, **Twitch**, **LinkedIn Live**, **Twitter/X**, and **Kick** with synchronized multi-chat overlays, without needing heavy external tools like OBS.
+6. **Bring-Your-Own-LLM (BYOK / AI Model Linking)**: Link your personal API keys for **Google Gemini**, **OpenAI ChatGPT**, **Anthropic Claude**, **xAI Grok**, **Moonshot Kimi**, **DeepSeek**, or **Local Ollama** to have an in-chat Socratic tutor, auto-generate diary notes, and render whiteboard architecture diagrams.
 
-This plan details how Synqto will integrate an **in-browser video recording and live streaming studio** directly into the Chrome extension with zero external dependencies.
+This plan details how Synqto will integrate an **in-browser video recording, live streaming, and AI study companion studio** directly into the Chrome extension with zero external dependencies.
 
 ---
 
@@ -88,56 +89,33 @@ The compositor supports 4 preset layouts tailored for developer tutorials:
 └──────────────────────────────────────┘  └──────────────────────────────────────┘
 ```
 
-### Detailed Template Breakdown
-1. **Template 1 — Studio PiP (NeetCode / Fireship Mode)**:
-   - Fullscreen 1080p display of problem & code.
-   - Draggable camera bubble in any corner (Bottom-Right, Bottom-Left, Top-Right, Top-Left).
-   - Features **Smart Auto-Fade** when typing code underneath the bubble.
-2. **Template 2 — Split Stage (ThePrimeagen / Theo Mode)**:
-   - 75% width dedicated to code editor or terminal.
-   - 25% right column with Facecam at top and live Synqto notes/diary/chat stream below.
-3. **Template 3 — Dual-Tutor Pair Programming**:
-   - Screen share on left half; dual circular avatar bubbles on right half for peer-to-peer tutoring sessions.
-   - Active speaker detection highlights the speaking tutor's camera border with an animated glow.
-4. **Template 4 — Architecture Whiteboard Lecture**:
-   - 100% vector whiteboard drawing canvas.
-   - Floating wide 16:9 presenter video bar at the bottom with adjustable backdrop blur.
-
 ---
 
 ## 4. Smart Pro FX & Developer-First Features
 
 ### 4.1 The "Never-Block-Code" Engine (Mouse Proximity Auto-Fade & Smart Dodge)
-One of the most annoying flaws in tutorial videos is when the presenter's webcam blocks code, terminal output, or compiler errors at the bottom of the screen.
-
-**Solution: Dual-Mode Obstruction Prevention**:
 - **Mode A: Proximity Fade (Alpha Transparency)**:
   $$\text{Distance } d = \sqrt{(x_{\text{mouse}} - x_{\text{cam}})^2 + (y_{\text{mouse}} - y_{\text{cam}})^2}$$
   - If $d > 180\text{px}$: Camera opacity is $100\%$.
   - If $50\text{px} \le d \le 180\text{px}$: Camera opacity linearly scales down to $15\%$.
   - If $d < 50\text{px}$: Camera opacity drops to $5\%$ with a dotted outline so code behind is 100% readable.
 - **Mode B: Corner Smart-Dodge**:
-  - When mouse remains within the camera box for $> 400\text{ms}$ while typing, the facecam smoothly glides (CSS `cubic-bezier(0.16, 1, 0.3, 1)`) to the opposite corner.
+  - When mouse remains within the camera box for $> 400\text{ms}$ while typing, the facecam smoothly glides to the opposite corner.
 
 ### 4.2 Facecam Geometry, Shapes & Borders
 - **Circle Avatar**: Classic clean circular facecam ($120\text{px} - 280\text{px}$ diameter).
 - **Squircle (iOS Rounded Rect)**: Modern smooth corners ($r = 24\text{px}$).
 - **Hexagon / Tech Badge**: Ideal for tech reviews and livestreams.
 - **Aspect Ratio Toggles**: 1:1 Square, 4:3 Classic, 16:9 Widescreen.
-- **Border Customization**:
-  - Gradient borders (e.g. Indigo to Violet, Emerald to Cyan).
-  - Speaking indicator: Audio-reactive pulsating border ring when mic is active.
 
 ### 4.3 Virtual Background & Chroma Key
 - **Real-Time Background Blur**: Uses `@mediapipe/selfie_segmentation` to separate subject from background, blurring room background without requiring a physical green screen.
 - **Chroma Key**: 1-click green/blue color picker with tolerance and smoothness sliders.
-- **Opacity Slider**: Adjust facecam overlay opacity from $10\%$ to $100\%$.
 
 ### 4.4 Mouse Click FX & Keystroke HUD
 - **Mouse Highlight Halo**: Subtle colored halo ring following the mouse pointer.
-- **Click Ripple**: Concentric expanding ring animation on mouse clicks (Left click = Blue, Right click = Amber).
-- **Keystroke HUD Overlay**:
-  - Displays keyboard shortcuts pressed by the presenter (e.g. `Ctrl + Shift + P`, `Cmd + B`, `Alt + Enter`) in a floating glass pill in the bottom center.
+- **Click Ripple**: Concentric expanding ring animation on mouse clicks.
+- **Keystroke HUD Overlay**: Displays keyboard shortcuts pressed by the presenter (e.g. `Ctrl + Shift + P`, `Cmd + B`) in a floating glass pill.
 
 ---
 
@@ -184,11 +162,6 @@ export class VideoCompositor {
 }
 ```
 
-### 5.2 MediaRecorder & Encoding Options
-- **Container**: WebM (`video/webm;codecs=vp9,opus`) with MP4 export fallback (`video/mp4;codecs=avc1.4d002a,mp4a.40.2`).
-- **Bitrate**: Dynamic bitrate allocation ($4.5\text{ Mbps} - 8.0\text{ Mbps}$ for crisp $1080\text{p}60$).
-- **Timeslice Chunking**: Saves recording chunks every $1000\text{ms}$ into IndexedDB so video is never lost even if the tab accidentally crashes.
-
 ---
 
 ## 6. Multi-Platform Live Streaming & App Linking Architecture
@@ -217,8 +190,6 @@ flowchart LR
 ```
 
 ### 6.1 App Linking & Account Connection (OAuth2)
-To make streaming as frictionless as possible, Synqto provides a **1-Click Connect** interface:
-
 | Platform | Authentication / App Link Scope | Capabilities Enabled |
 | :--- | :--- | :--- |
 | **YouTube Live** | Google OAuth2 (`youtube.force-ssl`) | Auto-creates scheduled or instant live broadcasts, fetches RTMP stream keys, streams live chat into Synqto, and displays live viewer counts. |
@@ -226,30 +197,77 @@ To make streaming as frictionless as possible, Synqto provides a **1-Click Conne
 | **LinkedIn Live** | LinkedIn Live API / RTMP Stream Key | Broadcasts tech tutorials and resume review workshops to professional networks. |
 | **Custom RTMP / WHIP** | Direct `rtmp://` / `https://` Ingest URL + Key | Stream to Kick, Twitter/X, Facebook Live, Restream.io, or private RTMP servers. |
 
-### 6.2 Browser-to-RTMP Transmission Protocols
-Because browsers cannot open raw TCP sockets to RTMP port 1935 directly, Synqto implements two high-performance protocols:
+---
 
-1. **Protocol A — Native WHIP (WebRTC HTTP Ingestion Protocol)**:
-   - Modern streaming standard supported natively by Twitch, Cloudflare Stream, and Livepeer.
-   - Pushes WebRTC stream directly over HTTP `POST` requests.
-   - **Zero server bridge needed** — ultra-low latency ($< 500\text{ms}$).
-2. **Protocol B — Synqto Go RTMP Gateway (Pion WebRTC + FFmpeg)**:
-   - For platforms requiring RTMP/RTMPS (like YouTube and LinkedIn), the Synqto Go Server acts as a lightweight streamer.
-   - Receives the browser's WebRTC stream and repackages it into RTMP packets sent to the destination platform.
-   - Supports **Simulcasting**: Broadcasts to YouTube, Twitch, and Synqto P2P Study Rooms simultaneously with 1 single upload stream from the user!
+## 7. Bring-Your-Own-LLM (BYOK) & Multi-AI Model Linking Architecture
 
-### 6.3 Unified Multi-Platform Chat & Stream HUD
-When streaming live, creators can toggle a non-intrusive stream overlay:
-- **Unified Chat Box**: Aggregates YouTube live messages, Twitch chat, and Synqto room peer messages into a single dark-mode floating chat widget.
-- **Stream Alerts**: Animated toast overlay for new YouTube subscribers, Twitch followers, or Synqto peer room joins.
-- **Stream Health Indicator**:
-  - Live FPS counter ($60\text{ FPS}$).
-  - Output bitrate monitor ($6000\text{ kbps}$).
-  - Dropped frame alarm & audio volume VU meter.
+Synqto allows users to link their personal API keys or local models for instant, privacy-first AI pairing during problem solving.
+
+```mermaid
+flowchart TD
+    subgraph Synqto BYOK AI Hub
+        KEY[🔐 Encrypted Local Key Vault<br/>AES-GCM-256 in chrome.storage.local] --> Router[🔀 Unified LLM Router & Socratic Engine]
+        
+        Router --> M1[🔵 Google Gemini<br/>Gemini 2.0 Flash / 1.5 Pro]
+        Router --> M2[🟢 OpenAI ChatGPT<br/>GPT-4o, GPT-4o-mini, o1, o3-mini]
+        Router --> M3[🟣 Anthropic Claude<br/>Claude 3.5 Sonnet / Haiku / Opus]
+        Router --> M4[⚪ xAI Grok<br/>Grok-2 / Grok-Vision]
+        Router --> M5[🌙 Moonshot Kimi<br/>Kimi k1.5 / Moonshot-v1]
+        Router --> M6[💻 DeepSeek & Local Ollama<br/>DeepSeek-R1 / localhost:11434]
+    end
+
+    subgraph Synqto AI Workspaces
+        Router --> F1[💬 In-Chat Socratic Study Buddy<br/>@ai @gemini @claude @gpt]
+        Router --> F2[📔 1-Click Problem Diary Summarizer<br/>Intuition + Complexity + Code]
+        Router --> F3[🎨 Whiteboard Diagram Generator<br/>Mermaid.js / Tree / Graph Nodes]
+        Router --> F4[⚡ Code Review & Complexity Heatmap<br/>Time & Space Trade-offs]
+    end
+```
+
+### 7.1 Supported AI Providers & Models
+| Provider | Supported Models | Ingestion Method | Typical Strengths |
+| :--- | :--- | :--- | :--- |
+| **Google Gemini** | `gemini-2.0-flash`, `gemini-1.5-pro`, `gemini-1.5-flash` | Google AI Studio API Key | Ultra-long context window, instant code analysis, multimodal diagram vision. |
+| **OpenAI ChatGPT** | `gpt-4o`, `gpt-4o-mini`, `o1`, `o3-mini` | OpenAI API Key | Deep algorithmic reasoning, competitive programming logic, fast code review. |
+| **Anthropic Claude** | `claude-3-5-sonnet`, `claude-3-5-haiku`, `claude-3-opus` | Anthropic API Key | Exceptional code elegance, clean refactoring, nuanced Socratic pedagogy. |
+| **xAI Grok** | `grok-2`, `grok-2-vision` | xAI API Key | Real-time world knowledge, direct debugging, unfiltered tech analysis. |
+| **Moonshot Kimi** | `kimi-k1.5`, `moonshot-v1-8k/32k/128k` | Moonshot API Key | Long problem context retention, high-speed Chinese & English problem translation. |
+| **DeepSeek** | `deepseek-chat`, `deepseek-reasoner (R1)` | DeepSeek API Key | State-of-the-art math and algorithmic chain-of-thought at ultra-low cost. |
+| **Local Ollama / vLLM** | `llama3.3`, `deepseek-r1:8b`, `qwen2.5-coder` | `http://localhost:11434/v1` endpoint | **100% Offline & Free** — zero telemetry, runs on local GPU/CPU. |
+
+### 7.2 Core AI Capabilities in Synqto
+
+#### A. In-Chat Socratic AI Tutor (`@ai`, `@gemini`, `@claude`, `@gpt`)
+- In any room chat, squad discussion, or private diary, type `@ai`, `@gemini`, or `@claude` to summon the AI assistant.
+- **Socratic Hint Ladder (Anti-Spoiler Engine)**:
+  - **Level 1 (Clarification)**: Asks questions about edge cases (e.g. empty inputs, duplicates, integer overflows).
+  - **Level 2 (Intuition)**: Explains the high-level concept (e.g. *"Think of this as finding shortest path in an unweighted grid"*).
+  - **Level 3 (Pattern & Invariant)**: Recommends the optimal data structure (e.g. *"Use a Min-Heap of size K"*).
+  - **Level 4 (Full Walkthrough)**: Complete code with line-by-line dry run and Big-O derivation (only upon explicit request).
+
+#### B. 1-Click Problem Diary Summarizer
+- In the **Synqto Diary & Journal**, tap **"✨ Summarize with AI"**:
+  - Extracts the active LeetCode/Codeforces problem title, tags, and description.
+  - Automatically writes a clean markdown entry containing:
+    1. **Key Insight & Intuition**
+    2. **Algorithm Steps & Pitfalls**
+    3. **Optimal Code Solution**
+    4. **Time & Space Complexity Proof**
+
+#### C. Whiteboard Architecture & Data Structure Generator
+- Instruct the AI in natural language:
+  - *"Draw a Red-Black Tree insertion of [10, 20, 30]"*
+  - *"Generate a microservice architecture with Load Balancer, Redis Cache, and DB Cluster"*
+- The AI responds with structured JSON vectors that Synqto instantly paints directly onto the **collaborative canvas**.
+
+#### D. Privacy, Security & Local Encryption
+- **Zero Proxy Architecture**: Synqto never routes your API requests through any middleman server. The extension uses direct browser `fetch()` streaming to the respective provider's API.
+- **AES-GCM-256 Vault**: API keys are encrypted with a device-unique salt and stored exclusively in `chrome.storage.local`.
+- **Usage & Cost Tracking**: Live token counter displaying estimated API cost per session.
 
 ---
 
-## 7. Integration with Synqto Diary & Journal
+## 8. Integration with Synqto Diary & Journal
 
 When recording finishes:
 1. **Instant Preview Modal**: Playback with seekbar, duration, file size, and trim controls.
@@ -261,7 +279,7 @@ When recording finishes:
 
 ---
 
-## 8. Engineering Roadmap & Milestones
+## 9. Engineering Roadmap & Milestones
 
 | Milestone | Deliverables | Target Timeline |
 | :--- | :--- | :--- |
@@ -269,9 +287,10 @@ When recording finishes:
 | **Phase 2: Layout Compositor & Shapes** | WebGL/2D Compositor, 4 layout presets, Circle/Squircle shapes, draggable positioning. | Sprint 2 |
 | **Phase 3: Smart FX & Auto-Fade** | Mouse proximity fade, smart corner dodge, mouse click ripples, keystroke HUD. | Sprint 3 |
 | **Phase 4: Multi-Platform Live Streaming** | YouTube & Twitch OAuth app linking, WHIP / Go RTMP gateway, unified live chat. | Sprint 4 |
-| **Phase 5: Diary Integration & Export** | Fast MP4 remuxing, IndexedDB crash recovery, 1-click export to Synqto Diary note. | Sprint 5 |
+| **Phase 5: Bring-Your-Own-LLM Hub** | Encrypted key vault, Gemini/OpenAI/Claude/Grok/Kimi/Ollama adapters, in-chat Socratic tutor. | Sprint 5 |
+| **Phase 6: Diary Integration & Export** | Fast MP4 remuxing, IndexedDB crash recovery, 1-click export to Synqto Diary note. | Sprint 6 |
 
 ---
 
-## 9. Summary
-This studio engine transforms Synqto into a self-contained, professional broadcast and tutorial creation platform for students, tutors, competitive programmers, and content creators.
+## 10. Summary
+This studio engine transforms Synqto into a self-contained, professional broadcast, AI pairing, and tutorial creation platform for students, tutors, competitive programmers, and content creators.

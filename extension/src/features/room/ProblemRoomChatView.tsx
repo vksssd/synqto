@@ -64,8 +64,10 @@ export const ProblemRoomChatView: React.FC<ProblemRoomChatViewProps> = ({
       {room ? (
         <RoomCard
           room={room}
-          peers={peers}
+          peerCount={peers.length}
           isLeader={isLeader}
+          isConnected={true}
+          onLeaveRoom={() => roomService.leaveRoom()}
           onOpenPeers={onOpenPeers}
         />
       ) : (

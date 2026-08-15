@@ -7,6 +7,7 @@ import { GroupService } from '@/features/group/group.service';
 import { DiscoveryService, OnlinePeer } from '@/features/discovery/discovery.service';
 import { ChatService } from '@/features/chat/chat.service';
 import { TopologyService } from '@/core/network/topology.service';
+import { SignalingService } from '@/core/network/signaling.service';
 import { GamificationService } from '@/features/gamification/gamification.service';
 import { detectResource } from '@/content/resource-detector';
 import { PeerIdentity } from '@/core/network/packet';

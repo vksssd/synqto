@@ -130,6 +130,10 @@ export class RoomService {
     this.emitChange();
   }
 
+  public leaveRoom() {
+    this.leaveCurrentRoom();
+  }
+
   public getCurrentRoom(): RoomContext | null {
     return this.currentRoom;
   }

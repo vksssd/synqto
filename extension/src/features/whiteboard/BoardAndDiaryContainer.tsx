@@ -17,7 +17,7 @@ export const BoardAndDiaryContainer: React.FC = () => {
           alignItems: 'center',
           justifyContent: 'space-between',
           padding: '6px 10px',
-          background: 'rgba(15, 23, 42, 0.98)',
+          background: 'var(--bg-surface-elevated)',
           borderBottom: '1px solid var(--border-subtle)',
           flexShrink: 0,
         }}
@@ -25,10 +25,10 @@ export const BoardAndDiaryContainer: React.FC = () => {
         <div
           style={{
             display: 'flex',
-            background: 'rgba(0, 0, 0, 0.45)',
+            background: 'var(--bg-hover)',
             padding: '3px',
             borderRadius: '6px',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
+            border: '1px solid var(--border-subtle)',
             gap: '3px',
           }}
         >

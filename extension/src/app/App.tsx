@@ -19,9 +19,11 @@ import { BoardAndDiaryContainer } from '@/features/whiteboard/BoardAndDiaryConta
 import { GroupHubView } from '@/features/group/GroupHubView';
 import { ProfileSettingsView } from '@/features/settings/ProfileSettingsView';
 import { PeerListModal } from '@/features/discovery/PeerListModal';
+import { ThemeService } from '@/features/settings/theme.service';
 import { Sparkles, RefreshCw, Radio, Palette } from 'lucide-react';
 
 export const App: React.FC = () => {
+  const themeService = ThemeService.getInstance();
   const identityService = IdentityService.getInstance();
   const roomService = RoomService.getInstance();
   const groupService = GroupService.getInstance();

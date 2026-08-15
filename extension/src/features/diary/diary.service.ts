@@ -199,6 +199,23 @@ export class DiaryService {
     this.notify();
   }
 
+  public exportEntryMarkdown(entry: DiaryEntry): void {
+    const date = new Date(entry.createdAt).toLocaleString();
+    let md = `# 📓 ${entry.title}\n\n`;
+    md += `*Date: ${date}* | *Mood: ${entry.mood}*\n`;
+    if (entry.problemTitle) md += `*Problem: [${entry.problemTitle}](${entry.problemUrl || '#'})*\n`;
+    if (entry.tags.length > 0) md += `*Tags: ${entry.tags.map((t) => `#${t}`).join(' ')}*\n\n`;
+    md += `---\n\n${entry.content}\n`;
+
+    const blob = new Blob([md], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.download = `${(entry.title || 'diary-page').toLowerCase().replace(/\s+/g, '-')}.md`;
+    a.href = url;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   public exportDiaryMarkdown(diaryId: string): string {
     const diary = this.state.diaries.find((d) => d.id === diaryId) || this.getActiveDiary();
     let md = `# ${diary.icon} ${diary.title}\n\n`;

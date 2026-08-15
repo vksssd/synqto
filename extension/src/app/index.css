@@ -3,7 +3,7 @@
    ═════════════════════════════════════════════════════════════════════ */
 
 :root {
-  /* Color Palette */
+  /* Color Palette (Default: Night / Dark) */
   --bg-app: #030712;
   --bg-surface: rgba(15, 23, 42, 0.72);
   --bg-surface-elevated: rgba(30, 41, 59, 0.85);
@@ -48,6 +48,42 @@
   --radius-md: 10px;
   --radius-lg: 14px;
   --radius-full: 9999px;
+}
+
+[data-theme="light"],
+[data-theme="day"] {
+  --bg-app: #f8fafc;
+  --bg-surface: rgba(255, 255, 255, 0.88);
+  --bg-surface-elevated: rgba(241, 245, 249, 0.95);
+  --bg-card: rgba(255, 255, 255, 0.92);
+  --bg-glass-input: rgba(255, 255, 255, 0.95);
+  --bg-hover: rgba(0, 0, 0, 0.05);
+  --bg-active: rgba(0, 0, 0, 0.08);
+
+  --border-subtle: rgba(0, 0, 0, 0.08);
+  --border-medium: rgba(0, 0, 0, 0.15);
+  --border-focus: rgba(99, 102, 241, 0.6);
+
+  --primary: #4f46e5;
+  --primary-hover: #4338ca;
+  --primary-glow: rgba(79, 70, 229, 0.2);
+
+  --accent-purple: #7c3aed;
+  --accent-emerald: #059669;
+  --accent-rose: #e11d48;
+  --accent-amber: #d97706;
+  --accent-cyan: #0891b2;
+
+  --text-primary: #0f172a;
+  --text-secondary: #334155;
+  --text-muted: #64748b;
+  --text-dim: #94a3b8;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 10px 25px rgba(0, 0, 0, 0.12);
+  --shadow-glow: 0 0 20px rgba(99, 102, 241, 0.15);
+  --shadow-emerald-glow: 0 0 15px rgba(16, 185, 129, 0.25);
 }
 
 /* Base Reset */

@@ -27,12 +27,14 @@ interface WhiteboardPoint {
 
 interface InPageStroke {
   id: string;
-  tool: 'pen' | 'highlighter' | 'eraser' | 'line' | 'arrow' | 'rect' | 'circle' | 'tree_node';
+  tool: 'pen' | 'brush' | 'highlighter' | 'temp_pen' | 'laser' | 'torch' | 'eraser' | 'line' | 'arrow' | 'rect' | 'circle' | 'tree_node' | 'db_cylinder' | 'cloud' | 'load_balancer' | 'message_queue' | 'server_box' | 'text';
   color: string;
   width: number;
   opacity: number;
   points: WhiteboardPoint[];
   geometry?: { x1: number; y1: number; x2: number; y2: number; label?: string };
+  text?: string;
+  expiresAt?: number;
 }
 
 export class FloatingWidget {
@@ -54,7 +56,7 @@ export class FloatingWidget {
   private currentPosition: FabPosition = { right: 24, bottom: 24 };
   private isDragging = false;
   private dragMoved = false;
-  private isPopupMaximized = false;
+  private popupSize: 'compact' | 'medium' | 'large' | 'fullscreen' = 'compact';
 
   // Whiteboard State
   private activeTab: 'chat' | 'whiteboard' = 'chat';
@@ -70,6 +72,9 @@ export class FloatingWidget {
   private isWbDrawing: boolean = false;
   private wbCurrentPoints: WhiteboardPoint[] = [];
   private wbStartPoint: WhiteboardPoint | null = null;
+  private tempDisappearingStrokes: { stroke: InPageStroke; createdAt: number; durationMs: number }[] = [];
+  private wbLaserTrails: { x: number; y: number; alpha: number; timestamp: number }[] = [];
+  private wbTorchPos: WhiteboardPoint | null = null;
 
   constructor() {
     this.init();
@@ -328,18 +333,20 @@ export class FloatingWidget {
           position: absolute;
           ${isNearTop ? 'top: 52px; bottom: auto;' : 'bottom: 52px; top: auto;'}
           ${isNearLeft ? 'left: 0; right: auto;' : 'right: 0; left: auto;'}
-          width: ${this.isPopupMaximized ? 'min(680px, 94vw)' : '400px'};
-          height: ${this.isPopupMaximized ? 'min(740px, 90vh)' : '540px'};
-          max-height: 92vh;
-          background: rgba(15, 23, 42, 0.96);
+          width: ${this.popupSize === 'fullscreen' ? 'min(1180px, 95vw)' : this.popupSize === 'large' ? 'min(860px, 92vw)' : this.popupSize === 'medium' ? 'min(620px, 88vw)' : '420px'};
+          height: ${this.popupSize === 'fullscreen' ? 'min(880px, 92vh)' : this.popupSize === 'large' ? 'min(740px, 88vh)' : this.popupSize === 'medium' ? 'min(640px, 84vh)' : '540px'};
+          max-height: 94vh;
+          max-width: 96vw;
+          background: rgba(15, 23, 42, 0.97);
           border: 1px solid ${isLive ? 'rgba(239, 68, 68, 0.45)' : 'rgba(99, 102, 241, 0.35)'};
           border-radius: 16px;
-          box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.85), 0 0 24px ${isLive ? 'rgba(239, 68, 68, 0.25)' : 'rgba(99, 102, 241, 0.2)'};
-          backdrop-filter: blur(20px);
-          -webkit-backdrop-filter: blur(20px);
+          box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.9), 0 0 28px ${isLive ? 'rgba(239, 68, 68, 0.25)' : 'rgba(99, 102, 241, 0.25)'};
+          backdrop-filter: blur(24px);
+          -webkit-backdrop-filter: blur(24px);
           overflow: hidden;
           animation: slideIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
           color: var(--text-primary);
+          transition: width 0.2s cubic-bezier(0.16, 1, 0.3, 1), height 0.2s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
         @keyframes slideIn {
@@ -716,14 +723,14 @@ export class FloatingWidget {
           </div>
 
           <div class="header-actions">
-            <button class="icon-btn" id="nb-toggle-popup-size" title="${this.isPopupMaximized ? 'Restore Compact Size' : 'Maximize Popup Window'}">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                ${this.isPopupMaximized
-                  ? '<polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/>'
-                  : '<polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>'
-                }
-              </svg>
-            </button>
+            <!-- Popup Size Mode Switcher Pills -->
+            <div class="popup-size-group" style="display:flex;gap:2px;align-items:center;background:rgba(0,0,0,0.35);padding:2px;border-radius:6px;border:1px solid rgba(255,255,255,0.08);margin-right:2px;">
+              <button class="size-mode-pill ${this.popupSize === 'compact' ? 'active' : ''}" data-popsize="compact" title="Compact Size (420x540)" style="font-size:9px;font-weight:700;padding:2px 5px;border-radius:4px;border:none;cursor:pointer;background:${this.popupSize === 'compact' ? 'var(--primary)' : 'transparent'};color:${this.popupSize === 'compact' ? '#fff' : 'var(--text-muted)'};">📱 S</button>
+              <button class="size-mode-pill ${this.popupSize === 'medium' ? 'active' : ''}" data-popsize="medium" title="Medium Split Size (620x640)" style="font-size:9px;font-weight:700;padding:2px 5px;border-radius:4px;border:none;cursor:pointer;background:${this.popupSize === 'medium' ? 'var(--primary)' : 'transparent'};color:${this.popupSize === 'medium' ? '#fff' : 'var(--text-muted)'};">🌗 M</button>
+              <button class="size-mode-pill ${this.popupSize === 'large' ? 'active' : ''}" data-popsize="large" title="Large Widescreen (860x740)" style="font-size:9px;font-weight:700;padding:2px 5px;border-radius:4px;border:none;cursor:pointer;background:${this.popupSize === 'large' ? 'var(--primary)' : 'transparent'};color:${this.popupSize === 'large' ? '#fff' : 'var(--text-muted)'};">🖥️ L</button>
+              <button class="size-mode-pill ${this.popupSize === 'fullscreen' ? 'active' : ''}" data-popsize="fullscreen" title="Full Screen View (1180x880)" style="font-size:9px;font-weight:700;padding:2px 5px;border-radius:4px;border:none;cursor:pointer;background:${this.popupSize === 'fullscreen' ? 'var(--primary)' : 'transparent'};color:${this.popupSize === 'fullscreen' ? '#fff' : 'var(--text-muted)'};">📺 XL</button>
+            </div>
+
             <button class="icon-btn" id="nb-open-sidepanel" title="Open complete extension in side panel">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M15 3h6v6M10 14L21 3M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/>
@@ -1033,11 +1040,16 @@ export class FloatingWidget {
       });
     }
 
-    // Toggle Popup Maximize / Compact Size
-    const sizeToggleBtn = this.shadow.getElementById('nb-toggle-popup-size');
-    sizeToggleBtn?.addEventListener('click', () => {
-      this.isPopupMaximized = !this.isPopupMaximized;
-      this.render();
+    // Size Mode Switcher (S, M, L, XL)
+    const sizePillBtns = this.shadow.querySelectorAll('.size-mode-pill[data-popsize]');
+    sizePillBtns.forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const sz = (e.currentTarget as HTMLElement).getAttribute('data-popsize') as any;
+        if (sz) {
+          this.popupSize = sz;
+          this.render();
+        }
+      });
     });
 
     // Close Popup Button
@@ -1274,15 +1286,41 @@ export class FloatingWidget {
 
     canvas.addEventListener('mousedown', (e) => {
       const pt = getCoords(e);
+
+      if (this.wbTool === 'laser') {
+        this.wbLaserTrails.push({ x: pt.x, y: pt.y, alpha: 1.0, timestamp: Date.now() });
+        this.drawWbCanvas();
+        return;
+      }
+
+      if (this.wbTool === 'torch') {
+        this.wbTorchPos = pt;
+        this.drawWbCanvas();
+        return;
+      }
+
       this.isWbDrawing = true;
       this.wbStartPoint = pt;
       this.wbCurrentPoints = [pt];
     });
 
     canvas.addEventListener('mousemove', (e) => {
-      if (!this.isWbDrawing) return;
       const pt = getCoords(e);
-      const isGeom = ['line', 'arrow', 'rect', 'circle', 'tree_node'].includes(this.wbTool);
+
+      if (this.wbTool === 'laser') {
+        this.wbLaserTrails.push({ x: pt.x, y: pt.y, alpha: 1.0, timestamp: Date.now() });
+        this.drawWbCanvas();
+        return;
+      }
+
+      if (this.wbTool === 'torch') {
+        this.wbTorchPos = pt;
+        this.drawWbCanvas();
+        return;
+      }
+
+      if (!this.isWbDrawing) return;
+      const isGeom = ['line', 'arrow', 'rect', 'circle', 'tree_node', 'db_cylinder', 'cloud', 'load_balancer', 'message_queue', 'server_box'].includes(this.wbTool);
 
       if (isGeom && this.wbStartPoint) {
         this.drawWbCanvas(undefined, {
@@ -1290,7 +1328,16 @@ export class FloatingWidget {
           y1: this.wbStartPoint.y,
           x2: pt.x,
           y2: pt.y,
-          label: this.wbTool === 'tree_node' ? 'val' : undefined,
+          label:
+            this.wbTool === 'tree_node'
+              ? 'Node'
+              : this.wbTool === 'db_cylinder'
+              ? '🗄️ DB'
+              : this.wbTool === 'cloud'
+              ? '☁️ Cloud'
+              : this.wbTool === 'server_box'
+              ? '📦 Server'
+              : undefined,
         });
       } else {
         this.wbCurrentPoints.push(pt);
@@ -1299,10 +1346,16 @@ export class FloatingWidget {
     });
 
     const handleMouseUp = (e: MouseEvent | TouchEvent) => {
+      if (this.wbTool === 'torch') {
+        this.wbTorchPos = null;
+        this.drawWbCanvas();
+        return;
+      }
+
       if (!this.isWbDrawing) return;
       this.isWbDrawing = false;
       const endPt = getCoords(e);
-      const isGeom = ['line', 'arrow', 'rect', 'circle', 'tree_node'].includes(this.wbTool);
+      const isGeom = ['line', 'arrow', 'rect', 'circle', 'tree_node', 'db_cylinder', 'cloud', 'load_balancer', 'message_queue', 'server_box'].includes(this.wbTool);
       const width = this.wbTool === 'highlighter' ? 14 : this.wbWidth;
 
       const stroke: InPageStroke = {
@@ -1317,11 +1370,22 @@ export class FloatingWidget {
           y1: this.wbStartPoint.y,
           x2: endPt.x,
           y2: endPt.y,
-          label: this.wbTool === 'tree_node' ? String(Math.floor(Math.random() * 50) + 1) : undefined,
+          label:
+            this.wbTool === 'tree_node'
+              ? String(Math.floor(Math.random() * 50) + 1)
+              : this.wbTool === 'db_cylinder'
+              ? '🗄️ DB'
+              : this.wbTool === 'cloud'
+              ? '☁️ Cloud'
+              : this.wbTool === 'server_box'
+              ? '📦 Server'
+              : undefined,
         } : undefined,
       };
 
-      if (this.wbPrivacyMode === 'personal') {
+      if (this.wbTool === 'temp_pen') {
+        this.tempDisappearingStrokes.push({ stroke, createdAt: Date.now(), durationMs: 3000 });
+      } else if (this.wbPrivacyMode === 'personal') {
         this.wbPersonalStrokes.push(stroke);
       } else {
         this.wbStrokes.push(stroke);
@@ -1595,6 +1659,16 @@ export class FloatingWidget {
     const activeList = this.wbPrivacyMode === 'personal' ? this.wbPersonalStrokes : this.wbStrokes;
     activeList.forEach(render);
 
+    // Render Disappearing Temporary Ink Strokes
+    const now = Date.now();
+    this.tempDisappearingStrokes.forEach((item) => {
+      const alpha = Math.max(0, 1 - (now - item.createdAt) / item.durationMs);
+      render({
+        ...item.stroke,
+        opacity: alpha,
+      });
+    });
+
     if (previewGeometry) {
       render({
         id: 'preview',
@@ -1615,6 +1689,41 @@ export class FloatingWidget {
         points: previewPoints,
       });
     }
+
+    // Render Spotlight Torch
+    if (this.wbTool === 'torch' && this.wbTorchPos) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.beginPath();
+      ctx.arc(this.wbTorchPos.x, this.wbTorchPos.y, 55, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.strokeStyle = 'rgba(253, 224, 71, 0.85)';
+      ctx.lineWidth = 2.5;
+      ctx.shadowColor = '#fde047';
+      ctx.shadowBlur = 10;
+      ctx.beginPath();
+      ctx.arc(this.wbTorchPos.x, this.wbTorchPos.y, 55, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Render Laser Pointer Trails
+    this.wbLaserTrails.forEach((pt) => {
+      ctx.save();
+      ctx.globalAlpha = pt.alpha;
+      ctx.fillStyle = '#ef4444';
+      ctx.shadowColor = '#ef4444';
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.arc(pt.x, pt.y, 4.5 * pt.alpha, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    });
   }
 
   private listenForRuntimeMessages() {

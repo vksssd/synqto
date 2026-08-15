@@ -6,19 +6,30 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nerdbuddy/server/internal/natsbus"
 	"github.com/nerdbuddy/server/internal/protocol"
 )
 
 // Hub is the central coordinator for all rooms and peers.
 type Hub struct {
-	mu    sync.RWMutex
-	rooms map[string]*Room
+	mu       sync.RWMutex
+	rooms    map[string]*Room
+	bus      natsbus.MessageBus
+	peerSubs map[string]natsbus.Unsubscriber
+	roomSubs map[string]natsbus.Unsubscriber
 }
 
 // New creates a new Hub and starts the room garbage collector.
-func New() *Hub {
+func New(bus natsbus.MessageBus) *Hub {
+	if bus == nil {
+		bus = natsbus.New("")
+	}
+
 	h := &Hub{
-		rooms: make(map[string]*Room),
+		rooms:    make(map[string]*Room),
+		bus:      bus,
+		peerSubs: make(map[string]natsbus.Unsubscriber),
+		roomSubs: make(map[string]natsbus.Unsubscriber),
 	}
 	go h.gcLoop()
 	return h
@@ -34,6 +45,22 @@ func (h *Hub) GetOrCreateRoom(roomID string) *Room {
 		room = NewRoom(roomID)
 		h.rooms[roomID] = room
 		slog.Info("created room", "roomId", roomID)
+
+		// Subscribe room on distributed message bus
+		sub, err := h.bus.SubscribeRoom(roomID, func(data []byte) {
+			var env protocol.Envelope
+			if err := json.Unmarshal(data, &env); err == nil {
+				h.mu.RLock()
+				r, exists := h.rooms[roomID]
+				h.mu.RUnlock()
+				if exists {
+					r.BroadcastDirect(&env)
+				}
+			}
+		})
+		if err == nil {
+			h.roomSubs[roomID] = sub
+		}
 	}
 	return room
 }
@@ -45,11 +72,24 @@ func (h *Hub) RoomCount() int {
 	return len(h.rooms)
 }
 
-// Register adds a peer to their room.
+// Register adds a peer to their room and subscribes to their NATS subject.
 func (h *Hub) Register(p *Peer) {
 	room := h.GetOrCreateRoom(p.RoomID)
 	room.AddPeer(p)
 	room.BroadcastRoster()
+
+	// Subscribe peer to distributed message bus for direct cross-server signaling
+	sub, err := h.bus.SubscribePeer(p.ID, func(data []byte) {
+		var env protocol.Envelope
+		if err := json.Unmarshal(data, &env); err == nil {
+			p.SendJSON(&env)
+		}
+	})
+	if err == nil {
+		h.mu.Lock()
+		h.peerSubs[p.ID] = sub
+		h.mu.Unlock()
+	}
 
 	slog.Info("peer registered",
 		"peer", p.ID,
@@ -58,8 +98,15 @@ func (h *Hub) Register(p *Peer) {
 	)
 }
 
-// Unregister removes a peer from their room.
+// Unregister removes a peer from their room and unsubscribes from the bus.
 func (h *Hub) Unregister(p *Peer) {
+	h.mu.Lock()
+	if sub, ok := h.peerSubs[p.ID]; ok {
+		sub()
+		delete(h.peerSubs, p.ID)
+	}
+	h.mu.Unlock()
+
 	h.mu.RLock()
 	room, ok := h.rooms[p.RoomID]
 	h.mu.RUnlock()
@@ -72,6 +119,10 @@ func (h *Hub) Unregister(p *Peer) {
 
 	if room.IsEmpty() {
 		h.mu.Lock()
+		if rSub, ok := h.roomSubs[p.RoomID]; ok {
+			rSub()
+			delete(h.roomSubs, p.RoomID)
+		}
 		delete(h.rooms, p.RoomID)
 		h.mu.Unlock()
 		slog.Info("room destroyed (empty)", "roomId", p.RoomID)
@@ -114,6 +165,8 @@ func (h *Hub) relaySignal(sender *Peer, env *protocol.Envelope) {
 		return
 	}
 
+	env.From = sender.ID
+
 	h.mu.RLock()
 	room, ok := h.rooms[sender.RoomID]
 	h.mu.RUnlock()
@@ -123,24 +176,26 @@ func (h *Hub) relaySignal(sender *Peer, env *protocol.Envelope) {
 		return
 	}
 
+	// 1. If target is connected locally on this server node, deliver directly
 	target := room.GetPeer(env.To)
-	if target == nil {
-		slog.Warn("signal target not found",
-			"target", env.To,
-			"from", sender.ID,
-			"room", sender.RoomID,
-		)
+	if target != nil {
+		target.SendJSON(env)
+		slog.Debug("relayed signal locally", "type", env.Type, "from", sender.ID, "to", env.To)
 		return
 	}
 
-	// Forward with the sender's ID stamped.
-	env.From = sender.ID
-	target.SendJSON(env)
+	// 2. Otherwise forward across NATS distributed message bus to other server instances
+	data, err := json.Marshal(env)
+	if err == nil {
+		if err := h.bus.PublishPeer(env.To, data); err == nil {
+			slog.Debug("relayed signal via NATS bus", "type", env.Type, "from", sender.ID, "to", env.To)
+			return
+		}
+	}
 
-	slog.Debug("relayed signal",
-		"type", env.Type,
+	slog.Warn("signal target not found on any cluster node",
+		"target", env.To,
 		"from", sender.ID,
-		"to", env.To,
 		"room", sender.RoomID,
 	)
 }
@@ -184,8 +239,12 @@ func (h *Hub) gcLoop() {
 		h.mu.Lock()
 		for id, room := range h.rooms {
 			if room.IsEmpty() {
+				if rSub, ok := h.roomSubs[id]; ok {
+					rSub()
+					delete(h.roomSubs, id)
+				}
 				delete(h.rooms, id)
-				slog.Debug("gc: removed empty room", "roomId", id)
+				slog.Info("garbage collected empty room", "roomId", id)
 			}
 		}
 		h.mu.Unlock()

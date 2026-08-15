@@ -195,6 +195,16 @@ func (r *Room) BroadcastRoster() {
 	}
 }
 
+// BroadcastDirect sends an envelope to every connected peer in the room.
+func (r *Room) BroadcastDirect(env *protocol.Envelope) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for _, p := range r.peers {
+		p.SendJSON(env)
+	}
+}
+
 // GetLeadersExcept returns all leader IDs except the given one.
 func (r *Room) GetLeadersExcept(excludeID string) []string {
 	r.mu.RLock()

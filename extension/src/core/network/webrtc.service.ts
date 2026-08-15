@@ -28,13 +28,38 @@ export class WebRTCService {
   > = new Set();
 
   private iceServers: RTCIceServer[] = [
+    // 1. Google Public STUN
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
+    // 2. Cloudflare STUN
     { urls: 'stun:stun.cloudflare.com:3478' },
+    // 3. OpenRelay Free Public TURN Relay (UDP + TCP + TLS Port 443 Strict Firewall Bypass)
+    {
+      urls: [
+        'turn:openrelay.metered.ca:80',
+        'turn:openrelay.metered.ca:443',
+        'turn:openrelay.metered.ca:443?transport=tcp',
+        'turns:openrelay.metered.ca:443?transport=tcp',
+      ],
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
   ];
 
-  private constructor() {}
+  private constructor() {
+    this.loadCustomIceServers();
+  }
+
+  private loadCustomIceServers() {
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      chrome.storage.local.get(['synqto_custom_ice_servers'], (res) => {
+        if (res.synqto_custom_ice_servers && Array.isArray(res.synqto_custom_ice_servers)) {
+          this.iceServers = [...this.iceServers, ...res.synqto_custom_ice_servers];
+        }
+      });
+    }
+  }
 
   public static getInstance(): WebRTCService {
     if (!WebRTCService.instance) {

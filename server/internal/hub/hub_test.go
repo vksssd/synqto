@@ -6,7 +6,7 @@ import (
 )
 
 func TestHubRoomLifecycle(t *testing.T) {
-	h := New()
+	h := New(nil)
 
 	room1 := h.GetOrCreateRoom("room-1")
 	if room1 == nil {

@@ -13,6 +13,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/nerdbuddy/server/internal/hub"
+	"github.com/nerdbuddy/server/internal/natsbus"
 	"github.com/nerdbuddy/server/internal/protocol"
 )
 
@@ -35,7 +36,11 @@ func main() {
 		port = "8080"
 	}
 
-	h := hub.New()
+	natsURL := os.Getenv("NATS_URL")
+	bus := natsbus.New(natsURL)
+	defer bus.Close()
+
+	h := hub.New(bus)
 
 	mux := http.NewServeMux()
 

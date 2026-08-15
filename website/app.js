@@ -1,6 +1,33 @@
-// ─── Nerd Buddy Landing Page Client-Side Interactive Logic ───
+// ─── Nerd Buddy Landing Page Client-Side Interactive Logic (Lucide Enhanced) ───
 
 document.addEventListener('DOMContentLoaded', () => {
+  // 0. Initialize Lucide Icons
+  if (typeof lucide !== 'undefined' && lucide.createIcons) {
+    lucide.createIcons();
+  }
+
+  // Toast notification helper
+  function showToast(message, icon = 'check-circle-2') {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.innerHTML = `<i data-lucide="${icon}" class="icon-sm" style="color:#10b981;"></i><span>${message}</span>`;
+    container.appendChild(toast);
+
+    if (typeof lucide !== 'undefined' && lucide.createIcons) {
+      lucide.createIcons({ root: toast });
+    }
+
+    setTimeout(() => {
+      toast.style.transition = 'all 0.3s ease';
+      toast.style.opacity = '0';
+      toast.style.transform = 'translateY(10px)';
+      setTimeout(() => toast.remove(), 300);
+    }, 3000);
+  }
+
   // 1. Mobile Menu Toggle
   const navToggle = document.getElementById('nav-toggle');
   const navLinks = document.getElementById('nav-links');
@@ -48,7 +75,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let hash = 5381;
     for (let i = 0; i < str.length; i++) {
       hash = ((hash << 5) + hash) + str.charCodeAt(i);
-      hash = hash & hash; // Convert to 32bit integer
+      hash = hash & hash;
     }
     const hex = (hash >>> 0).toString(16).padStart(8, '0');
     return hex;
@@ -94,11 +121,13 @@ document.addEventListener('DOMContentLoaded', () => {
   if (hashBtn && urlInput) {
     hashBtn.addEventListener('click', () => {
       simulateRoomHash(urlInput.value.trim());
+      showToast('Computed deterministic room hash!', 'sparkles');
     });
 
     urlInput.addEventListener('keypress', (e) => {
       if (e.key === 'Enter') {
         simulateRoomHash(urlInput.value.trim());
+        showToast('Computed deterministic room hash!', 'sparkles');
       }
     });
   }
@@ -109,6 +138,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (targetUrl && urlInput) {
         urlInput.value = targetUrl;
         simulateRoomHash(targetUrl);
+        showToast(`Loaded preset: ${btn.innerText.trim()}`, 'code-2');
       }
     });
   });
@@ -133,16 +163,20 @@ document.addEventListener('DOMContentLoaded', () => {
       const textToCopy = (e.currentTarget).getAttribute('data-copy') || '';
       if (textToCopy) {
         navigator.clipboard.writeText(textToCopy);
-        const originalText = (e.currentTarget).innerText;
-        (e.currentTarget).innerText = '✓ Copied';
-        setTimeout(() => {
-          (e.currentTarget).innerText = originalText;
-        }, 1500);
+        showToast('Copied to clipboard!', 'check');
       }
     });
   });
 
-  // 6. FAQ Accordion Toggle
+  // 6. Download Trigger Toast
+  const downloadTriggers = document.querySelectorAll('.btn-download-trigger');
+  downloadTriggers.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      showToast('Downloading nerd-buddy-v0.1.0.zip...', 'download');
+    });
+  });
+
+  // 7. FAQ Accordion Toggle
   const faqItems = document.querySelectorAll('.faq-item');
   faqItems.forEach((item) => {
     const questionBtn = item.querySelector('.faq-question');

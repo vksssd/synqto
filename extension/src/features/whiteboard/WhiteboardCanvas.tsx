@@ -59,6 +59,7 @@ export const WhiteboardCanvas: React.FC = () => {
   const [activeWidth, setActiveWidth] = useState<number>(4);
   const [backgroundType, setBackgroundType] = useState<WhiteboardBackgroundType>(whiteboardService.getBackground());
   const [sizeMode, setSizeMode] = useState<WhiteboardSizeMode>('full');
+  const [privacyMode, setPrivacyMode] = useState<WhiteboardPrivacyMode>(whiteboardService.getPrivacyMode());
   const [customHeight, setCustomHeight] = useState<number>(420);
 
   const [isDrawing, setIsDrawing] = useState(false);
@@ -73,11 +74,14 @@ export const WhiteboardCanvas: React.FC = () => {
   const [textModalPos, setTextModalPos] = useState<{ x: number; y: number } | null>(null);
   const [textInput, setTextInput] = useState('');
 
-  // 1. Listen for background changes from peer or local
+  // 1. Listen for background & privacy changes from service
   useEffect(() => {
-    return whiteboardService.onBackgroundChange((bg) => {
-      setBackgroundType(bg);
-    });
+    const unsubBg = whiteboardService.onBackgroundChange((bg) => setBackgroundType(bg));
+    const unsubPriv = whiteboardService.onPrivacyModeChange((m) => setPrivacyMode(m));
+    return () => {
+      unsubBg();
+      unsubPriv();
+    };
   }, [whiteboardService]);
 
   // 2. Listen for incoming laser pointer from peers
@@ -897,8 +901,53 @@ export const WhiteboardCanvas: React.FC = () => {
           </button>
         </div>
 
-        {/* Action Controls: Size Mode Switcher, Undo, Redo, Clear, Save */}
-        <div style={{ display: 'flex', gap: '3px', alignItems: 'center' }}>
+        {/* Action Controls: Collab/Personal Mode, Size Mode Switcher, Undo, Redo, Clear, Save */}
+        <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexWrap: 'wrap' }}>
+          {/* Privacy Mode: Collaborative vs Personal */}
+          <div style={{ display: 'flex', gap: '2px', alignItems: 'center', background: 'rgba(0,0,0,0.35)', padding: '2px 4px', borderRadius: '4px', border: '1px solid var(--border-subtle)' }}>
+            <button
+              type="button"
+              onClick={() => {
+                setPrivacyMode('collaborative');
+                whiteboardService.setPrivacyMode('collaborative');
+              }}
+              title="👥 Collaborative Room Board (Synced live with peers via WebRTC)"
+              style={{
+                fontSize: '9px',
+                fontWeight: 700,
+                padding: '2px 6px',
+                borderRadius: '3px',
+                background: privacyMode === 'collaborative' ? 'linear-gradient(135deg, #10b981, #06b6d4)' : 'transparent',
+                color: privacyMode === 'collaborative' ? '#ffffff' : 'var(--text-muted)',
+                border: 'none',
+                cursor: 'pointer',
+              }}
+            >
+              👥 Collab
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setPrivacyMode('personal');
+                whiteboardService.setPrivacyMode('personal');
+              }}
+              title="🔒 Personal Private Scratchpad (Offline / Saved locally)"
+              style={{
+                fontSize: '9px',
+                fontWeight: 700,
+                padding: '2px 6px',
+                borderRadius: '3px',
+                background: privacyMode === 'personal' ? 'linear-gradient(135deg, #f59e0b, #f43f5e)' : 'transparent',
+                color: privacyMode === 'personal' ? '#ffffff' : 'var(--text-muted)',
+                border: 'none',
+                cursor: 'pointer',
+              }}
+            >
+              🔒 Personal
+            </button>
+          </div>
+
           {/* Size Choice Pills */}
           <div style={{ display: 'flex', gap: '2px', alignItems: 'center', background: 'rgba(0,0,0,0.3)', padding: '2px 4px', borderRadius: '4px' }}>
             <button

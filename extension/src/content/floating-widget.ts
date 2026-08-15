@@ -62,7 +62,9 @@ export class FloatingWidget {
   private wbColor: string = '#6366f1';
   private wbWidth: number = 4;
   private wbTheme: 'grid' | 'ruled' | 'blank' | 'dotted' | 'plot' | 'matrix' | 'white_blank' = 'grid';
+  private wbPrivacyMode: 'collaborative' | 'personal' = 'collaborative';
   private wbStrokes: InPageStroke[] = [];
+  private wbPersonalStrokes: InPageStroke[] = [];
   private wbRedoStack: InPageStroke[] = [];
   private isWbDrawing: boolean = false;
   private wbCurrentPoints: WhiteboardPoint[] = [];
@@ -799,6 +801,10 @@ export class FloatingWidget {
               </div>
 
               <div class="wb-tool-group">
+                <div style="display:flex;gap:2px;align-items:center;background:rgba(0,0,0,0.3);padding:2px 3px;border-radius:4px;">
+                  <button class="wb-privacy-btn" data-wbprivacy="collaborative" style="font-size:9px;font-weight:700;padding:2px 4px;border-radius:3px;border:none;cursor:pointer;background:${this.wbPrivacyMode === 'collaborative' ? 'var(--primary)' : 'transparent'};color:${this.wbPrivacyMode === 'collaborative' ? '#fff' : 'var(--text-muted)'};" title="👥 Collaborative with Room Peers">👥 Collab</button>
+                  <button class="wb-privacy-btn" data-wbprivacy="personal" style="font-size:9px;font-weight:700;padding:2px 4px;border-radius:3px;border:none;cursor:pointer;background:${this.wbPrivacyMode === 'personal' ? 'var(--primary)' : 'transparent'};color:${this.wbPrivacyMode === 'personal' ? '#fff' : 'var(--text-muted)'};" title="🔒 Personal Private Scratchpad">🔒 Personal</button>
+                </div>
                 <button class="wb-tool-btn" id="nb-wb-undo" title="Undo">↩️</button>
                 <button class="wb-tool-btn" id="nb-wb-redo" title="Redo">↪️</button>
                 <button class="wb-tool-btn" id="nb-wb-clear" title="Clear Canvas" style="color:#f87171;">🗑️</button>
@@ -1114,6 +1120,18 @@ export class FloatingWidget {
       });
     });
 
+    // Attach Privacy Mode Selector (Collab vs Personal)
+    const privacyBtns = this.shadow.querySelectorAll('.wb-privacy-btn[data-wbprivacy]');
+    privacyBtns.forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const mode = (e.currentTarget as HTMLElement).getAttribute('data-wbprivacy') as any;
+        if (mode) {
+          this.wbPrivacyMode = mode;
+          this.render();
+        }
+      });
+    });
+
     // Attach Board Theme Selector
     const themeBtns = this.shadow.querySelectorAll('.size-pill[data-wbtheme]');
     themeBtns.forEach((btn) => {
@@ -1275,15 +1293,19 @@ export class FloatingWidget {
         } : undefined,
       };
 
-      this.wbStrokes.push(stroke);
+      if (this.wbPrivacyMode === 'personal') {
+        this.wbPersonalStrokes.push(stroke);
+      } else {
+        this.wbStrokes.push(stroke);
+        if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+          chrome.runtime.sendMessage({ type: 'WHITEBOARD_STROKE_LOCAL', stroke }).catch(() => {});
+        }
+      }
+
       this.wbRedoStack = [];
       this.wbCurrentPoints = [];
       this.wbStartPoint = null;
       this.drawWbCanvas();
-
-      if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
-        chrome.runtime.sendMessage({ type: 'WHITEBOARD_STROKE_LOCAL', stroke }).catch(() => {});
-      }
     };
 
     canvas.addEventListener('mouseup', handleMouseUp);
@@ -1450,7 +1472,8 @@ export class FloatingWidget {
       ctx.restore();
     };
 
-    this.wbStrokes.forEach(render);
+    const activeList = this.wbPrivacyMode === 'personal' ? this.wbPersonalStrokes : this.wbStrokes;
+    activeList.forEach(render);
 
     if (previewGeometry) {
       render({

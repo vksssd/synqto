@@ -1,4 +1,4 @@
-// ─── Collaborative Whiteboard Types, Tools, Backgrounds & Size Modes ───
+// ─── Collaborative & Personal Whiteboard Types, Tools, Backgrounds & Size Modes ───
 
 export type WhiteboardToolType =
   | 'pen'           // Standard fine pen
@@ -25,6 +25,7 @@ export type WhiteboardBackgroundType =
   | 'white_ruled';  // Light ruled notebook paper
 
 export type WhiteboardSizeMode = 'full' | 'half' | 'popup' | 'custom';
+export type WhiteboardPrivacyMode = 'collaborative' | 'personal';
 
 export interface WhiteboardDimensions {
   width: number;
@@ -72,4 +73,5 @@ export interface WhiteboardState {
   redoStack: WhiteboardStroke[];
   background: WhiteboardBackgroundType;
   sizeMode: WhiteboardSizeMode;
+  privacyMode: WhiteboardPrivacyMode;
 }

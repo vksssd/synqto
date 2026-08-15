@@ -254,17 +254,54 @@ export const GroupHubView: React.FC<GroupHubViewProps> = ({ currentRoom, onOpenC
             </button>
           </div>
         ) : (
-          filteredGroups.map((g) => (
-            <GroupCard
-              key={g.id}
-              group={g}
-              isActive={Boolean(currentRoom && currentRoom.roomId === g.roomId)}
-              onJoin={handleJoinClick}
-              onLeave={handleLeaveClick}
-              onShare={(group) => setShareTargetGroup(group)}
-              onDelete={handleDeleteClick}
-            />
-          ))
+          <>
+            {/* 1. My Joined Squads Section */}
+            {filteredGroups.some((g) => g.isMember || g.isCreator) && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#a5b4fc', letterSpacing: '0.04em', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                  <span>🌟 My Joined Squads</span>
+                  <span style={{ fontSize: '10px', background: 'rgba(99,102,241,0.2)', padding: '1px 6px', borderRadius: '10px', color: '#c7d2fe' }}>
+                    {filteredGroups.filter((g) => g.isMember || g.isCreator).length}
+                  </span>
+                </div>
+                {filteredGroups
+                  .filter((g) => g.isMember || g.isCreator)
+                  .map((g) => (
+                    <GroupCard
+                      key={g.id}
+                      group={g}
+                      isActive={Boolean(currentRoom && currentRoom.roomId === g.roomId)}
+                      onJoin={handleJoinClick}
+                      onLeave={handleLeaveClick}
+                      onShare={(group) => setShareTargetGroup(group)}
+                      onDelete={handleDeleteClick}
+                    />
+                  ))}
+              </div>
+            )}
+
+            {/* 2. Discover More Public Squads & Problems */}
+            {filteredGroups.some((g) => !g.isMember && !g.isCreator) && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '6px' }}>
+                <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-secondary)', letterSpacing: '0.04em' }}>
+                  🌐 Discover &amp; Join More Squads
+                </div>
+                {filteredGroups
+                  .filter((g) => !g.isMember && !g.isCreator)
+                  .map((g) => (
+                    <GroupCard
+                      key={g.id}
+                      group={g}
+                      isActive={Boolean(currentRoom && currentRoom.roomId === g.roomId)}
+                      onJoin={handleJoinClick}
+                      onLeave={handleLeaveClick}
+                      onShare={(group) => setShareTargetGroup(group)}
+                      onDelete={handleDeleteClick}
+                    />
+                  ))}
+              </div>
+            )}
+          </>
         )}
       </div>
 

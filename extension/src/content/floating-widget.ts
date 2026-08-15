@@ -974,7 +974,6 @@ export class FloatingWidget {
         <span class="drag-grip">⠿</span>
         ${isLive ? `<span class="live-dot"></span>` : `<span>${fabIcon}</span>`}
         <span>${fabLabel}</span>
-        ${this.unreadCount > 0 ? `<span class="fab-badge">${this.unreadCount}</span>` : ''}
       </button>
     `;
 

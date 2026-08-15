@@ -4,12 +4,14 @@ import React from 'react';
 import { X, Hand, Sparkles, Crown } from 'lucide-react';
 import { OnlinePeer, DiscoveryService } from './discovery.service';
 import { RichPresenceBadge } from '@/features/status/RichPresenceBadge';
+import { PeerIdentity } from '@/core/network/packet';
 
 interface PeerListModalProps {
   isOpen: boolean;
   onClose: () => void;
   peers: OnlinePeer[];
   myPeerId: string;
+  myIdentity?: PeerIdentity | null;
   leaderId: string | null;
 }
 
@@ -18,11 +20,14 @@ export const PeerListModal: React.FC<PeerListModalProps> = ({
   onClose,
   peers,
   myPeerId,
+  myIdentity,
   leaderId,
 }) => {
   const discovery = DiscoveryService.getInstance();
 
   if (!isOpen) return null;
+
+  const isSelfLeader = myPeerId === leaderId;
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -59,11 +64,70 @@ export const PeerListModal: React.FC<PeerListModalProps> = ({
 
         {/* Peer list */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
-          {peers.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)', fontSize: '12px' }}>
-              No other peers in this room yet. Share the link or wait for others to join!
+          {/* 1. Self Entry (You) */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '8px 10px',
+              background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(139, 92, 246, 0.12))',
+              border: '1px solid rgba(99, 102, 241, 0.45)',
+              borderRadius: 'var(--radius-md)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div
+                style={{
+                  width: '30px',
+                  height: '30px',
+                  borderRadius: '50%',
+                  background: myIdentity?.color || '#6366f1',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '16px',
+                }}
+              >
+                {myIdentity?.avatar || '⚡'}
+              </div>
+
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ fontWeight: 700, fontSize: '12px', color: '#ffffff' }}>
+                    {myIdentity?.nickname || 'You'}
+                  </span>
+                  <span
+                    style={{
+                      background: 'rgba(16, 185, 129, 0.2)',
+                      border: '1px solid rgba(16, 185, 129, 0.4)',
+                      color: '#34d399',
+                      fontSize: '9px',
+                      fontWeight: 700,
+                      padding: '1px 5px',
+                      borderRadius: '4px',
+                    }}
+                  >
+                    You
+                  </span>
+                  {isSelfLeader && (
+                    <span title="Cluster Leader" style={{ color: '#fbbf24' }}>
+                      <Crown size={12} />
+                    </span>
+                  )}
+                </div>
+                <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                  Status: Active • You
+                </div>
+              </div>
             </div>
-          ) : (
+
+            <span style={{ fontSize: '11px', color: '#a5b4fc', fontWeight: 600 }}>
+              (Self)
+            </span>
+          </div>
+
+          {peers.length === 0 ? null : (
             peers.map((peer) => {
               const isPeerLeader = peer.identity.peerId === leaderId;
               return (

@@ -20,7 +20,7 @@ import { GroupHubView } from '@/features/group/GroupHubView';
 import { ProfileSettingsView } from '@/features/settings/ProfileSettingsView';
 import { PeerListModal } from '@/features/discovery/PeerListModal';
 import { ThemeService } from '@/features/settings/theme.service';
-import { Sparkles, RefreshCw, Radio, Palette } from 'lucide-react';
+import { Sparkles, RefreshCw, Radio, Palette, Crown } from 'lucide-react';
 
 export const App: React.FC = () => {
   const themeService = ThemeService.getInstance();
@@ -495,65 +495,120 @@ export const App: React.FC = () => {
 
         {/* 3. Online Buddies Roster */}
         {currentTab === 'peers' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <div className="glass-card-title">
               <span>Online Study Buddies ({peers.length + 1})</span>
             </div>
-            {peers.length === 0 ? (
-              <div className="glass-card" style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)' }}>
-                You are currently the only one in this room.
-              </div>
-            ) : (
-              peers.map((peer) => (
+
+            {/* 1. Self Entry (You) */}
+            <div
+              className="glass-card"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(139, 92, 246, 0.12))',
+                border: '1px solid rgba(99, 102, 241, 0.45)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <div
-                  key={peer.identity.peerId}
-                  className="glass-card"
-                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+                  style={{
+                    width: '32px',
+                    height: '32px',
+                    borderRadius: '50%',
+                    background: identity?.color || '#6366f1',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '18px',
+                  }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <div
+                  {identity?.avatar || '⚡'}
+                </div>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontWeight: 700, color: '#ffffff', fontSize: '13px' }}>
+                      {identity?.nickname || 'You'}
+                    </span>
+                    <span
                       style={{
-                        width: '32px',
-                        height: '32px',
-                        borderRadius: '50%',
-                        background: peer.identity.color || '#6366f1',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontSize: '18px',
+                        background: 'rgba(16, 185, 129, 0.2)',
+                        border: '1px solid rgba(16, 185, 129, 0.4)',
+                        color: '#34d399',
+                        fontSize: '9px',
+                        fontWeight: 700,
+                        padding: '1px 5px',
+                        borderRadius: '4px',
                       }}
                     >
-                      {peer.identity.avatar}
-                    </div>
-                    <div>
-                      <div style={{ fontWeight: 600, color: '#f8fafc', fontSize: '13px' }}>
-                        {peer.identity.nickname}
-                      </div>
-                      <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                        Status: {peer.status}
-                      </div>
-                    </div>
+                      You
+                    </span>
+                    {isLeader && (
+                      <span title="Cluster Mesh Leader" style={{ color: '#fbbf24' }}>
+                        <Crown size={13} />
+                      </span>
+                    )}
                   </div>
-
-                  <div style={{ display: 'flex', gap: '4px' }}>
-                    <button
-                      className="btn btn-ghost btn-icon"
-                      onClick={() => discoveryService.sendWave(peer.identity.peerId)}
-                      title="Wave"
-                    >
-                      👋
-                    </button>
-                    <button
-                      className="btn btn-ghost btn-icon"
-                      onClick={() => discoveryService.sendPoke(peer.identity.peerId)}
-                      title="Poke"
-                    >
-                      👉
-                    </button>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                    Status: Active • You
                   </div>
                 </div>
-              ))
-            )}
+              </div>
+              <span style={{ fontSize: '11px', color: '#a5b4fc', fontWeight: 600 }}>
+                (Self)
+              </span>
+            </div>
+
+            {peers.map((peer) => (
+              <div
+                key={peer.identity.peerId}
+                className="glass-card"
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div
+                    style={{
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '50%',
+                      background: peer.identity.color || '#6366f1',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '18px',
+                    }}
+                  >
+                    {peer.identity.avatar}
+                  </div>
+                  <div>
+                    <div style={{ fontWeight: 600, color: '#f8fafc', fontSize: '13px' }}>
+                      {peer.identity.nickname}
+                    </div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                      Status: {peer.status}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  <button
+                    className="btn btn-ghost btn-icon"
+                    onClick={() => discoveryService.sendWave(peer.identity.peerId)}
+                    title="Wave"
+                  >
+                    👋
+                  </button>
+                  <button
+                    className="btn btn-ghost btn-icon"
+                    onClick={() => discoveryService.sendPoke(peer.identity.peerId)}
+                    title="Poke"
+                  >
+                    👉
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
         )}
 
@@ -569,6 +624,7 @@ export const App: React.FC = () => {
         onClose={() => setIsPeerModalOpen(false)}
         peers={peers}
         myPeerId={identity?.peerId || ''}
+        myIdentity={identity}
         leaderId={leaderId}
       />
 

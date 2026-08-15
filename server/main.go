@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -105,6 +106,16 @@ func main() {
 
 // handleWebSocket upgrades the HTTP connection to WebSocket and registers the peer.
 func handleWebSocket(h *hub.Hub, w http.ResponseWriter, r *http.Request) {
+	// Dynamic memory safety check: only throttle if allocated heap nears physical VM ceiling (to prevent crash)
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	const maxSafeMemoryBytes = 235 * 1024 * 1024 // 235 MB safety threshold on 256MB VM
+	if m.Alloc > maxSafeMemoryBytes {
+		slog.Warn("server near memory threshold, temporarily throttling connection", "allocMB", m.Alloc/1024/1024)
+		http.Error(w, "server at maximum physical capacity, please retry shortly", http.StatusServiceUnavailable)
+		return
+	}
+
 	// Extract room ID from path: /ws/{roomId}
 	path := strings.TrimPrefix(r.URL.Path, "/ws/")
 	roomID := strings.TrimRight(path, "/")

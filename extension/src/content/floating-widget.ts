@@ -61,8 +61,28 @@ export class FloatingWidget {
   // Whiteboard State
   private activeTab: 'chat' | 'whiteboard' = 'chat';
   private wbTool: 'pen' | 'brush' | 'highlighter' | 'temp_pen' | 'laser' | 'torch' | 'eraser' | 'line' | 'arrow' | 'rect' | 'circle' | 'tree_node' | 'db_cylinder' | 'cloud' | 'load_balancer' | 'message_queue' | 'server_box' | 'text' = 'pen';
+  private toolStyles: Record<string, { color: string; width: number }> = {
+    pen: { color: '#6366f1', width: 3 },
+    brush: { color: '#06b6d4', width: 6 },
+    highlighter: { color: '#f59e0b', width: 16 },
+    temp_pen: { color: '#38bdf8', width: 3 },
+    laser: { color: '#ef4444', width: 3 },
+    torch: { color: '#facc15', width: 65 },
+    eraser: { color: '#ffffff', width: 18 },
+    text: { color: '#ffffff', width: 3 },
+    line: { color: '#6366f1', width: 3 },
+    arrow: { color: '#6366f1', width: 3 },
+    rect: { color: '#6366f1', width: 3 },
+    circle: { color: '#6366f1', width: 3 },
+    tree_node: { color: '#10b981', width: 3 },
+    db_cylinder: { color: '#10b981', width: 2.5 },
+    cloud: { color: '#38bdf8', width: 2.5 },
+    load_balancer: { color: '#f59e0b', width: 2.5 },
+    message_queue: { color: '#a855f7', width: 2.5 },
+    server_box: { color: '#818cf8', width: 2.5 },
+  };
   private wbColor: string = '#6366f1';
-  private wbWidth: number = 4;
+  private wbWidth: number = 3;
   private wbTheme: 'grid' | 'ruled' | 'blank' | 'dotted' | 'plot' | 'matrix' | 'white_blank' = 'grid';
   private wbBgColor: string = '#090d16';
   private wbPrivacyMode: 'collaborative' | 'personal' = 'collaborative';
@@ -75,6 +95,7 @@ export class FloatingWidget {
   private tempDisappearingStrokes: { stroke: InPageStroke; createdAt: number; durationMs: number }[] = [];
   private wbLaserTrails: { x: number; y: number; alpha: number; timestamp: number }[] = [];
   private wbTorchPos: WhiteboardPoint | null = null;
+  private wbEraserPos: WhiteboardPoint | null = null;
 
   constructor() {
     this.init();
@@ -1140,6 +1161,9 @@ export class FloatingWidget {
         const tool = (e.currentTarget as HTMLElement).getAttribute('data-wbtool') as any;
         if (tool) {
           this.wbTool = tool;
+          const style = this.toolStyles[tool] || { color: '#6366f1', width: 3 };
+          this.wbColor = style.color;
+          this.wbWidth = style.width;
           this.render();
         }
       });
@@ -1179,33 +1203,36 @@ export class FloatingWidget {
         const bg = (e.currentTarget as HTMLElement).getAttribute('data-wbbg');
         if (bg) {
           this.wbBgColor = bg;
-          if ((bg === '#ffffff' || bg === '#f8fafc' || bg === '#fef3c7') && this.wbColor === '#ffffff') {
-            this.wbColor = '#0f172a';
-          }
           this.render();
         }
       });
     });
 
-    // Attach Color Selector
+    // Attach Color Selector (Updates Active Tool's Independent Color)
     const colorDots = this.shadow.querySelectorAll('.color-dot');
     colorDots.forEach((dot) => {
       dot.addEventListener('click', (e) => {
         const col = (e.currentTarget as HTMLElement).getAttribute('data-color');
         if (col) {
           this.wbColor = col;
+          if (this.toolStyles[this.wbTool]) {
+            this.toolStyles[this.wbTool].color = col;
+          }
           this.render();
         }
       });
     });
 
-    // Attach Size Selector
+    // Attach Size Selector (Updates Active Tool's Independent Width)
     const sizePills = this.shadow.querySelectorAll('.size-pill[data-size]');
     sizePills.forEach((p) => {
       p.addEventListener('click', (e) => {
         const sz = Number((e.currentTarget as HTMLElement).getAttribute('data-size'));
         if (sz) {
           this.wbWidth = sz;
+          if (this.toolStyles[this.wbTool]) {
+            this.toolStyles[this.wbTool].width = sz;
+          }
           this.render();
         }
       });
@@ -1213,12 +1240,28 @@ export class FloatingWidget {
 
     // Undo / Redo / Clear / Export
     this.shadow.getElementById('nb-wb-undo')?.addEventListener('click', () => {
-      if (this.wbStrokes.length > 0) {
-        const removed = this.wbStrokes.pop();
+      const activeList = this.wbPrivacyMode === 'personal' ? this.wbPersonalStrokes : this.wbStrokes;
+      if (activeList.length === 0 && this.wbRedoStack.length > 0) {
+        if (this.wbPrivacyMode === 'personal') {
+          this.wbPersonalStrokes = [...this.wbRedoStack];
+        } else {
+          this.wbStrokes = [...this.wbRedoStack];
+          this.wbStrokes.forEach((s) => {
+            if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+              chrome.runtime.sendMessage({ type: 'WHITEBOARD_STROKE_LOCAL', stroke: s }).catch(() => {});
+            }
+          });
+        }
+        this.wbRedoStack = [];
+        this.drawWbCanvas();
+        return;
+      }
+      if (activeList.length > 0) {
+        const removed = activeList.pop();
         if (removed) {
           this.wbRedoStack.push(removed);
           this.drawWbCanvas();
-          if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+          if (this.wbPrivacyMode === 'collaborative' && typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
             chrome.runtime.sendMessage({ type: 'WHITEBOARD_UNDO_LOCAL', strokeId: removed.id }).catch(() => {});
           }
         }
@@ -1229,9 +1272,10 @@ export class FloatingWidget {
       if (this.wbRedoStack.length > 0) {
         const restored = this.wbRedoStack.pop();
         if (restored) {
-          this.wbStrokes.push(restored);
+          const activeList = this.wbPrivacyMode === 'personal' ? this.wbPersonalStrokes : this.wbStrokes;
+          activeList.push(restored);
           this.drawWbCanvas();
-          if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+          if (this.wbPrivacyMode === 'collaborative' && typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
             chrome.runtime.sendMessage({ type: 'WHITEBOARD_STROKE_LOCAL', stroke: restored }).catch(() => {});
           }
         }
@@ -1239,14 +1283,18 @@ export class FloatingWidget {
     });
 
     this.shadow.getElementById('nb-wb-clear')?.addEventListener('click', () => {
-      if (confirm('Clear collaborative whiteboard canvas?')) {
+      const activeList = this.wbPrivacyMode === 'personal' ? this.wbPersonalStrokes : this.wbStrokes;
+      if (activeList.length === 0) return;
+      this.wbRedoStack = [...activeList];
+      if (this.wbPrivacyMode === 'personal') {
+        this.wbPersonalStrokes = [];
+      } else {
         this.wbStrokes = [];
-        this.wbRedoStack = [];
-        this.drawWbCanvas();
         if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
           chrome.runtime.sendMessage({ type: 'WHITEBOARD_CLEAR_LOCAL' }).catch(() => {});
         }
       }
+      this.drawWbCanvas();
     });
 
     this.shadow.getElementById('nb-wb-save')?.addEventListener('click', () => {
@@ -1284,8 +1332,48 @@ export class FloatingWidget {
       return { x: cx - rect.left, y: cy - rect.top };
     };
 
+    const isStrokeIntersecting = (s: InPageStroke, eraserPt: WhiteboardPoint, radius: number): boolean => {
+      if (s.geometry) {
+        const { x1, y1, x2, y2 } = s.geometry;
+        const minX = Math.min(x1, x2) - radius;
+        const maxX = Math.max(x1, x2) + radius;
+        const minY = Math.min(y1, y2) - radius;
+        const maxY = Math.max(y1, y2) + radius;
+        return eraserPt.x >= minX && eraserPt.x <= maxX && eraserPt.y >= minY && eraserPt.y <= maxY;
+      }
+      if (s.points && s.points.length > 0) {
+        const hitRadius = radius + s.width / 2;
+        return s.points.some((p) => Math.hypot(p.x - eraserPt.x, p.y - eraserPt.y) <= hitRadius);
+      }
+      return false;
+    };
+
     canvas.addEventListener('mousedown', (e) => {
       const pt = getCoords(e);
+
+      if (this.wbTool === 'eraser') {
+        this.isWbDrawing = true;
+        this.wbEraserPos = pt;
+        const radius = (this.wbWidth || 4) * 3;
+        const activeList = this.wbPrivacyMode === 'personal' ? this.wbPersonalStrokes : this.wbStrokes;
+        const remaining = activeList.filter((s) => !isStrokeIntersecting(s, pt, radius));
+        if (remaining.length !== activeList.length) {
+          const deleted = activeList.filter((s) => isStrokeIntersecting(s, pt, radius));
+          this.wbRedoStack.push(...deleted);
+          if (this.wbPrivacyMode === 'personal') {
+            this.wbPersonalStrokes = remaining;
+          } else {
+            this.wbStrokes = remaining;
+            deleted.forEach((d) => {
+              if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+                chrome.runtime.sendMessage({ type: 'WHITEBOARD_UNDO_LOCAL', strokeId: d.id }).catch(() => {});
+              }
+            });
+          }
+        }
+        this.drawWbCanvas();
+        return;
+      }
 
       if (this.wbTool === 'laser') {
         this.wbLaserTrails.push({ x: pt.x, y: pt.y, alpha: 1.0, timestamp: Date.now() });
@@ -1306,6 +1394,31 @@ export class FloatingWidget {
 
     canvas.addEventListener('mousemove', (e) => {
       const pt = getCoords(e);
+
+      if (this.wbTool === 'eraser') {
+        this.wbEraserPos = pt;
+        if (this.isWbDrawing) {
+          const radius = (this.wbWidth || 4) * 3;
+          const activeList = this.wbPrivacyMode === 'personal' ? this.wbPersonalStrokes : this.wbStrokes;
+          const remaining = activeList.filter((s) => !isStrokeIntersecting(s, pt, radius));
+          if (remaining.length !== activeList.length) {
+            const deleted = activeList.filter((s) => isStrokeIntersecting(s, pt, radius));
+            this.wbRedoStack.push(...deleted);
+            if (this.wbPrivacyMode === 'personal') {
+              this.wbPersonalStrokes = remaining;
+            } else {
+              this.wbStrokes = remaining;
+              deleted.forEach((d) => {
+                if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+                  chrome.runtime.sendMessage({ type: 'WHITEBOARD_UNDO_LOCAL', strokeId: d.id }).catch(() => {});
+                }
+              });
+            }
+          }
+        }
+        this.drawWbCanvas();
+        return;
+      }
 
       if (this.wbTool === 'laser') {
         this.wbLaserTrails.push({ x: pt.x, y: pt.y, alpha: 1.0, timestamp: Date.now() });
@@ -1328,16 +1441,6 @@ export class FloatingWidget {
           y1: this.wbStartPoint.y,
           x2: pt.x,
           y2: pt.y,
-          label:
-            this.wbTool === 'tree_node'
-              ? 'Node'
-              : this.wbTool === 'db_cylinder'
-              ? '🗄️ DB'
-              : this.wbTool === 'cloud'
-              ? '☁️ Cloud'
-              : this.wbTool === 'server_box'
-              ? '📦 Server'
-              : undefined,
         });
       } else {
         this.wbCurrentPoints.push(pt);
@@ -1346,6 +1449,13 @@ export class FloatingWidget {
     });
 
     const handleMouseUp = (e: MouseEvent | TouchEvent) => {
+      if (this.wbTool === 'eraser') {
+        this.isWbDrawing = false;
+        this.wbEraserPos = null;
+        this.drawWbCanvas();
+        return;
+      }
+
       if (this.wbTool === 'torch') {
         this.wbTorchPos = null;
         this.drawWbCanvas();
@@ -1356,7 +1466,7 @@ export class FloatingWidget {
       this.isWbDrawing = false;
       const endPt = getCoords(e);
       const isGeom = ['line', 'arrow', 'rect', 'circle', 'tree_node', 'db_cylinder', 'cloud', 'load_balancer', 'message_queue', 'server_box'].includes(this.wbTool);
-      const width = this.wbTool === 'highlighter' ? 14 : this.wbWidth;
+      const width = this.wbTool === 'highlighter' ? 16 : this.wbWidth;
 
       const stroke: InPageStroke = {
         id: 'stroke-' + Math.random().toString(36).slice(2, 10),
@@ -1370,16 +1480,6 @@ export class FloatingWidget {
           y1: this.wbStartPoint.y,
           x2: endPt.x,
           y2: endPt.y,
-          label:
-            this.wbTool === 'tree_node'
-              ? String(Math.floor(Math.random() * 50) + 1)
-              : this.wbTool === 'db_cylinder'
-              ? '🗄️ DB'
-              : this.wbTool === 'cloud'
-              ? '☁️ Cloud'
-              : this.wbTool === 'server_box'
-              ? '📦 Server'
-              : undefined,
         } : undefined,
       };
 
@@ -1420,7 +1520,6 @@ export class FloatingWidget {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     if (this.wbTheme === 'ruled') {
-      // 📏 Ruled Notebook Paper with Margin Line
       ctx.strokeStyle = 'rgba(99, 102, 241, 0.18)';
       ctx.lineWidth = 1;
       for (let y = 28; y < canvas.height; y += 24) {
@@ -1436,7 +1535,6 @@ export class FloatingWidget {
       ctx.lineTo(40, canvas.height);
       ctx.stroke();
     } else if (this.wbTheme === 'plot') {
-      // 📈 Coordinate Plot (X, Y)
       const midX = Math.floor(canvas.width / 2);
       const midY = Math.floor(canvas.height / 2);
       ctx.strokeStyle = '#6366f1';
@@ -1448,7 +1546,6 @@ export class FloatingWidget {
       ctx.lineTo(midX, canvas.height);
       ctx.stroke();
     } else if (this.wbTheme === 'dotted') {
-      // 🟦 Dot Matrix Grid
       ctx.fillStyle = 'rgba(255, 255, 255, 0.16)';
       for (let x = 8; x < canvas.width; x += 18) {
         for (let y = 8; y < canvas.height; y += 18) {
@@ -1458,7 +1555,6 @@ export class FloatingWidget {
         }
       }
     } else if (this.wbTheme === 'matrix') {
-      // 📐 Array Matrix Grid
       ctx.strokeStyle = 'rgba(99, 102, 241, 0.15)';
       ctx.lineWidth = 1;
       const cell = 26;
@@ -1475,7 +1571,6 @@ export class FloatingWidget {
         ctx.stroke();
       }
     } else if (this.wbTheme === 'grid') {
-      // ⬛ Square Graph Grid
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
       ctx.lineWidth = 1;
       const gridSize = 20;
@@ -1494,7 +1589,21 @@ export class FloatingWidget {
     }
     ctx.restore();
 
+    // Eraser Indicator
+    if (this.wbTool === 'eraser' && this.wbEraserPos) {
+      ctx.save();
+      const r = (this.wbWidth || 4) * 3;
+      ctx.strokeStyle = '#ef4444';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath();
+      ctx.arc(this.wbEraserPos.x, this.wbEraserPos.y, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
     const render = (s: InPageStroke) => {
+      if (s.tool === 'eraser') return;
       ctx.save();
       let drawColor = s.color;
       if (this.wbTheme === 'white_blank' && (drawColor === '#ffffff' || drawColor === '#fff')) {
@@ -1506,11 +1615,6 @@ export class FloatingWidget {
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       ctx.globalAlpha = s.opacity;
-
-      if (s.tool === 'eraser') {
-        ctx.globalCompositeOperation = 'destination-out';
-        ctx.lineWidth = s.width * 3;
-      }
 
       if (s.geometry) {
         const { x1, y1, x2, y2 } = s.geometry;
@@ -1657,13 +1761,22 @@ export class FloatingWidget {
             ctx.fillText(s.geometry.label, minX + w / 2, minY + h / 2 + 2);
           }
         }
-      } else if (s.points && s.points.length > 1) {
-        ctx.beginPath();
-        ctx.moveTo(s.points[0].x, s.points[0].y);
-        for (let i = 1; i < s.points.length; i++) {
-          ctx.lineTo(s.points[i].x, s.points[i].y);
+      } else if (s.points && s.points.length > 0) {
+        if (s.points.length === 1) {
+          ctx.beginPath();
+          ctx.arc(s.points[0].x, s.points[0].y, s.width / 2, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          ctx.beginPath();
+          ctx.moveTo(s.points[0].x, s.points[0].y);
+          for (let i = 1; i < s.points.length - 1; i++) {
+            const midX = (s.points[i].x + s.points[i + 1].x) / 2;
+            const midY = (s.points[i].y + s.points[i + 1].y) / 2;
+            ctx.quadraticCurveTo(s.points[i].x, s.points[i].y, midX, midY);
+          }
+          ctx.lineTo(s.points[s.points.length - 1].x, s.points[s.points.length - 1].y);
+          ctx.stroke();
         }
-        ctx.stroke();
       }
       ctx.restore();
     };

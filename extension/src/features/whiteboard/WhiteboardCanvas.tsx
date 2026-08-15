@@ -1,4 +1,4 @@
-// ─── Collaborative Whiteboard Canvas: Multi-Page Notebook, Expanded Architecture Shapes, Custom Text & PDF Export ───
+// ─── Collaborative Whiteboard Canvas: Multi-Page Notebook, Independent Per-Tool Styles, Object Eraser & Undo-Enabled Clear ───
 
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import {
@@ -35,7 +35,6 @@ import {
   Smartphone,
   Globe,
   HelpCircle,
-  FileText,
   StickyNote,
 } from 'lucide-react';
 import { WhiteboardService } from './whiteboard.service';
@@ -74,8 +73,94 @@ const PEN_SIZES = [
   { label: 'S', size: 2 },
   { label: 'M', size: 4 },
   { label: 'L', size: 8 },
-  { label: 'XL', size: 14 },
+  { label: 'XL', size: 16 },
 ];
+
+interface ToolStyle {
+  color: string;
+  width: number;
+}
+
+const DEFAULT_TOOL_STYLES: Record<string, ToolStyle> = {
+  pen: { color: '#6366f1', width: 3 },
+  brush: { color: '#06b6d4', width: 6 },
+  highlighter: { color: '#f59e0b', width: 16 },
+  temp_pen: { color: '#38bdf8', width: 3 },
+  laser: { color: '#ef4444', width: 3 },
+  torch: { color: '#facc15', width: 65 },
+  eraser: { color: '#ffffff', width: 18 },
+  text: { color: '#ffffff', width: 3 },
+  line: { color: '#6366f1', width: 3 },
+  arrow: { color: '#6366f1', width: 3 },
+  arrow_bi: { color: '#6366f1', width: 3 },
+  rect: { color: '#6366f1', width: 3 },
+  circle: { color: '#6366f1', width: 3 },
+  decision_diamond: { color: '#f59e0b', width: 3 },
+  tree_node: { color: '#10b981', width: 3 },
+  sticky_note: { color: '#fef3c7', width: 2 },
+  db_cylinder: { color: '#10b981', width: 2.5 },
+  db_nosql: { color: '#34d399', width: 2.5 },
+  cloud: { color: '#38bdf8', width: 2.5 },
+  load_balancer: { color: '#f59e0b', width: 2.5 },
+  message_queue: { color: '#a855f7', width: 2.5 },
+  server_box: { color: '#818cf8', width: 2.5 },
+  cache_mem: { color: '#f43f5e', width: 2.5 },
+  dns_router: { color: '#38bdf8', width: 2.5 },
+  firewall: { color: '#f43f5e', width: 2.5 },
+  user_client: { color: '#3b82f6', width: 2.5 },
+  mobile_client: { color: '#06b6d4', width: 2.5 },
+};
+
+// ── Geometric Collision Helpers for Precision Object Eraser ──
+function distanceToLineSegment(px: number, py: number, x1: number, y1: number, x2: number, y2: number): number {
+  const l2 = (x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1);
+  if (l2 === 0) return Math.hypot(px - x1, py - y1);
+  let t = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px - (x1 + t * (x2 - x1)), py - (y1 + t * (y2 - y1)));
+}
+
+function isStrokeIntersectingEraser(stroke: WhiteboardStroke, eraserPt: Point, radius: number): boolean {
+  if (stroke.text && stroke.geometry) {
+    return Math.hypot(stroke.geometry.x1 - eraserPt.x, stroke.geometry.y1 - eraserPt.y) <= radius + 30;
+  }
+
+  if (stroke.geometry) {
+    const { x1, y1, x2, y2 } = stroke.geometry;
+    const minX = Math.min(x1, x2) - radius;
+    const maxX = Math.max(x1, x2) + radius;
+    const minY = Math.min(y1, y2) - radius;
+    const maxY = Math.max(y1, y2) + radius;
+
+    if (eraserPt.x < minX || eraserPt.x > maxX || eraserPt.y < minY || eraserPt.y > maxY) {
+      return false;
+    }
+
+    if (stroke.tool === 'line' || stroke.tool === 'arrow' || stroke.tool === 'arrow_bi') {
+      return distanceToLineSegment(eraserPt.x, eraserPt.y, x1, y1, x2, y2) <= radius + stroke.width;
+    }
+
+    return true;
+  }
+
+  if (stroke.points && stroke.points.length > 0) {
+    const hitRadius = radius + stroke.width / 2;
+    for (let i = 0; i < stroke.points.length; i++) {
+      const p = stroke.points[i];
+      if (Math.hypot(p.x - eraserPt.x, p.y - eraserPt.y) <= hitRadius) {
+        return true;
+      }
+      if (i > 0) {
+        const prev = stroke.points[i - 1];
+        if (distanceToLineSegment(eraserPt.x, eraserPt.y, prev.x, prev.y, p.x, p.y) <= hitRadius) {
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
+}
 
 export const WhiteboardCanvas: React.FC = () => {
   const whiteboardService = WhiteboardService.getInstance();
@@ -83,8 +168,18 @@ export const WhiteboardCanvas: React.FC = () => {
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   const [activeTool, setActiveTool] = useState<WhiteboardToolType>('pen');
-  const [activeColor, setActiveColor] = useState<string>('#6366f1');
-  const [activeWidth, setActiveWidth] = useState<number>(3);
+
+  // Independent per-tool style dictionary (each pen remembers its own color and size)
+  const [toolStyles, setToolStyles] = useState<Record<string, ToolStyle>>(() => {
+    try {
+      const saved = localStorage.getItem('synqto_wb_tool_styles');
+      if (saved) return { ...DEFAULT_TOOL_STYLES, ...JSON.parse(saved) };
+    } catch (e) {}
+    return DEFAULT_TOOL_STYLES;
+  });
+
+  const activeColor = toolStyles[activeTool]?.color || DEFAULT_TOOL_STYLES[activeTool]?.color || '#6366f1';
+  const activeWidth = toolStyles[activeTool]?.width || DEFAULT_TOOL_STYLES[activeTool]?.width || 3;
 
   // Background pattern & background color
   const [backgroundType, setBackgroundType] = useState<WhiteboardBackgroundType>(whiteboardService.getBackground());
@@ -104,9 +199,13 @@ export const WhiteboardCanvas: React.FC = () => {
   const [currentPoints, setCurrentPoints] = useState<Point[]>([]);
   const [startPoint, setStartPoint] = useState<Point | null>(null);
 
-  // Laser Pointer & Torch Trail State
+  // Laser Pointer, Torch, and Eraser Position Indicators
   const [laserTrails, setLaserTrails] = useState<{ x: number; y: number; color: string; alpha: number; timestamp: number }[]>([]);
   const [torchPos, setTorchPos] = useState<{ x: number; y: number } | null>(null);
+  const [eraserPos, setEraserPos] = useState<{ x: number; y: number } | null>(null);
+
+  // Toast / Notification for Undo on Clear
+  const [undoToast, setUndoToast] = useState<string | null>(null);
 
   // Disappearing / Temporary Ink Strokes Pool
   const [tempStrokes, setTempStrokes] = useState<{ stroke: WhiteboardStroke; createdAt: number; durationMs: number }[]>([]);
@@ -119,6 +218,40 @@ export const WhiteboardCanvas: React.FC = () => {
   const [showArchDrawer, setShowArchDrawer] = useState(false);
   const [showGeomDrawer, setShowGeomDrawer] = useState(false);
   const [showThemesDrawer, setShowThemesDrawer] = useState(false);
+
+  // Update active tool's independent color
+  const updateActiveToolColor = (newColor: string) => {
+    setToolStyles((prev) => {
+      const updated = {
+        ...prev,
+        [activeTool]: {
+          ...(prev[activeTool] || { width: 3 }),
+          color: newColor,
+        },
+      };
+      try {
+        localStorage.setItem('synqto_wb_tool_styles', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+  };
+
+  // Update active tool's independent stroke width
+  const updateActiveToolWidth = (newWidth: number) => {
+    setToolStyles((prev) => {
+      const updated = {
+        ...prev,
+        [activeTool]: {
+          ...(prev[activeTool] || { color: '#6366f1' }),
+          width: newWidth,
+        },
+      };
+      try {
+        localStorage.setItem('synqto_wb_tool_styles', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+  };
 
   // 1. Subscribe to service listeners
   useEffect(() => {
@@ -208,7 +341,6 @@ export const WhiteboardCanvas: React.FC = () => {
         ctx.lineTo(w, y);
         ctx.stroke();
       }
-      // Red left margin line
       ctx.strokeStyle = 'rgba(244, 63, 94, 0.35)';
       ctx.lineWidth = 1.5;
       ctx.beginPath();
@@ -226,7 +358,6 @@ export const WhiteboardCanvas: React.FC = () => {
         }
       }
     } else if (bg === 'plot') {
-      // 4-Quadrant Cartesian Axes
       const midX = w / 2;
       const midY = h / 2;
 
@@ -246,7 +377,6 @@ export const WhiteboardCanvas: React.FC = () => {
         ctx.stroke();
       }
 
-      // Main Axes
       ctx.strokeStyle = isLight ? '#4f46e5' : '#818cf8';
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -260,9 +390,12 @@ export const WhiteboardCanvas: React.FC = () => {
     ctx.restore();
   }, [isLightColor]);
 
-  // 4. Vector Shape & Stroke Renderer (Clean - No forced text)
+  // 4. Vector Shape & Stroke Renderer (Clean - No forced text, Smooth Curves)
   const renderSingleStroke = useCallback(
     (ctx: CanvasRenderingContext2D, stroke: WhiteboardStroke, isLight: boolean, alphaOverride?: number) => {
+      // Ignore eraser tool in stroke rendering since object-eraser cleanly deletes items
+      if (stroke.tool === 'eraser') return;
+
       ctx.save();
       let drawColor = stroke.color;
       if (isLight && (drawColor === '#ffffff' || drawColor === '#fff')) {
@@ -276,20 +409,15 @@ export const WhiteboardCanvas: React.FC = () => {
       ctx.lineJoin = 'round';
       ctx.globalAlpha = alphaOverride !== undefined ? alphaOverride : stroke.opacity;
 
-      if (stroke.tool === 'eraser') {
-        ctx.strokeStyle = isLight ? '#f8fafc' : '#090d16';
-        ctx.fillStyle = isLight ? '#f8fafc' : '#090d16';
-        ctx.lineWidth = stroke.width * 4;
-      } else if (stroke.tool === 'brush') {
+      if (stroke.tool === 'brush') {
         ctx.lineCap = 'round';
-        ctx.lineWidth = stroke.width * 1.5;
+        ctx.lineWidth = stroke.width * 1.4;
       } else if (stroke.tool === 'temp_pen') {
         ctx.shadowColor = drawColor;
-        ctx.shadowBlur = 10;
+        ctx.shadowBlur = 8;
       }
 
       if (stroke.text && stroke.geometry) {
-        // User Text Stroke
         ctx.font = `bold ${Math.max(12, stroke.width * 3.5)}px -apple-system, sans-serif`;
         ctx.fillText(stroke.text, stroke.geometry.x1, stroke.geometry.y1);
       } else if (stroke.geometry) {
@@ -372,7 +500,6 @@ export const WhiteboardCanvas: React.FC = () => {
           ctx.roundRect(minX, minY, w, h, 4);
           ctx.fill();
           ctx.stroke();
-          // Corner fold
           ctx.fillStyle = 'rgba(0,0,0,0.15)';
           ctx.beginPath();
           ctx.moveTo(minX + w - 14, minY);
@@ -384,7 +511,6 @@ export const WhiteboardCanvas: React.FC = () => {
 
         // ── 🏛️ System Design Architecture Shapes (Clean Vector) ──
         else if (stroke.tool === 'db_cylinder') {
-          // 🗄️ Relational DB Cylinder (SQL)
           const w = Math.max(50, width);
           const h = Math.max(60, height);
           const ry = Math.min(14, h * 0.2);
@@ -398,12 +524,10 @@ export const WhiteboardCanvas: React.FC = () => {
           ctx.fill();
           ctx.stroke();
 
-          // Top Ellipse cap
           ctx.beginPath();
           ctx.ellipse(minX + w / 2, minY + ry, w / 2, ry, 0, 0, Math.PI * 2);
           ctx.stroke();
         } else if (stroke.tool === 'db_nosql') {
-          // 🍃 Document DB Cylinder with partition bands
           const w = Math.max(50, width);
           const h = Math.max(65, height);
           const ry = Math.min(12, h * 0.18);
@@ -417,7 +541,6 @@ export const WhiteboardCanvas: React.FC = () => {
           ctx.fill();
           ctx.stroke();
 
-          // 3 Partition Bands
           for (let i = 1; i <= 3; i++) {
             const bandY = minY + (h / 4) * i;
             ctx.beginPath();
@@ -425,7 +548,6 @@ export const WhiteboardCanvas: React.FC = () => {
             ctx.stroke();
           }
         } else if (stroke.tool === 'cloud') {
-          // ☁️ Cloud Gateway
           const w = Math.max(70, width);
           const h = Math.max(45, height);
 
@@ -441,7 +563,6 @@ export const WhiteboardCanvas: React.FC = () => {
           ctx.fill();
           ctx.stroke();
         } else if (stroke.tool === 'load_balancer') {
-          // ⚖️ Load Balancer Diamond
           const w = Math.max(55, width);
           const h = Math.max(55, height);
           const midX = minX + w / 2;
@@ -457,7 +578,6 @@ export const WhiteboardCanvas: React.FC = () => {
           ctx.fill();
           ctx.stroke();
 
-          // Balanced distribution split arrows
           ctx.strokeStyle = drawColor;
           ctx.lineWidth = 1.5;
           ctx.beginPath();
@@ -467,7 +587,6 @@ export const WhiteboardCanvas: React.FC = () => {
           ctx.lineTo(midX + 10, midY);
           ctx.stroke();
         } else if (stroke.tool === 'message_queue') {
-          // 📨 Message Queue / Kafka Buffer
           const w = Math.max(80, width);
           const h = Math.max(36, height);
 
@@ -477,7 +596,6 @@ export const WhiteboardCanvas: React.FC = () => {
           ctx.fill();
           ctx.stroke();
 
-          // Queue Segment Dividers
           const segs = 4;
           for (let i = 1; i < segs; i++) {
             const sx = minX + (w / segs) * i;
@@ -487,7 +605,6 @@ export const WhiteboardCanvas: React.FC = () => {
             ctx.stroke();
           }
         } else if (stroke.tool === 'server_box') {
-          // 📦 Server Rack Container
           const w = Math.max(70, width);
           const h = Math.max(45, height);
 
@@ -497,7 +614,6 @@ export const WhiteboardCanvas: React.FC = () => {
           ctx.fill();
           ctx.stroke();
 
-          // Server blade horizontal lines & LED
           ctx.beginPath();
           ctx.moveTo(minX + 8, minY + h * 0.5);
           ctx.lineTo(minX + w - 8, minY + h * 0.5);
@@ -508,7 +624,6 @@ export const WhiteboardCanvas: React.FC = () => {
           ctx.arc(minX + 10, minY + 10, 2.5, 0, Math.PI * 2);
           ctx.fill();
         } else if (stroke.tool === 'cache_mem') {
-          // ⚡ Redis Cache Memory Block
           const w = Math.max(65, width);
           const h = Math.max(38, height);
 
@@ -518,7 +633,6 @@ export const WhiteboardCanvas: React.FC = () => {
           ctx.fill();
           ctx.stroke();
 
-          // Lightning Bolt Symbol
           ctx.fillStyle = '#f59e0b';
           const cx = minX + w / 2;
           const cy = minY + h / 2;
@@ -532,7 +646,6 @@ export const WhiteboardCanvas: React.FC = () => {
           ctx.closePath();
           ctx.fill();
         } else if (stroke.tool === 'dns_router') {
-          // 🌐 DNS / Router Node
           const r = Math.max(22, width / 2);
           const cx = minX + r;
           const cy = minY + r;
@@ -543,7 +656,6 @@ export const WhiteboardCanvas: React.FC = () => {
           ctx.fill();
           ctx.stroke();
 
-          // Crossed routing arrows
           ctx.beginPath();
           ctx.moveTo(cx - r * 0.5, cy);
           ctx.lineTo(cx + r * 0.5, cy);
@@ -551,7 +663,6 @@ export const WhiteboardCanvas: React.FC = () => {
           ctx.lineTo(cx, cy + r * 0.5);
           ctx.stroke();
         } else if (stroke.tool === 'firewall') {
-          // 🔒 Security Shield / Firewall
           const w = Math.max(50, width);
           const h = Math.max(60, height);
           const midX = minX + w / 2;
@@ -567,7 +678,6 @@ export const WhiteboardCanvas: React.FC = () => {
           ctx.fill();
           ctx.stroke();
         } else if (stroke.tool === 'user_client') {
-          // 👤 User / Client Desktop Actor
           const w = Math.max(45, width);
           const h = Math.max(45, height);
           const midX = minX + w / 2;
@@ -583,7 +693,6 @@ export const WhiteboardCanvas: React.FC = () => {
           ctx.lineTo(midX + 10, minY + 22);
           ctx.stroke();
         } else if (stroke.tool === 'mobile_client') {
-          // 📱 Mobile Client Frame
           const w = Math.max(34, width);
           const h = Math.max(54, height);
 
@@ -593,15 +702,12 @@ export const WhiteboardCanvas: React.FC = () => {
           ctx.fill();
           ctx.stroke();
 
-          // Screen bezel
           ctx.strokeRect(minX + 4, minY + 6, w - 8, h - 16);
-          // Home button / bar
           ctx.beginPath();
           ctx.arc(minX + w / 2, minY + h - 5, 2, 0, Math.PI * 2);
           ctx.fill();
         }
 
-        // Only draw label if user explicitly entered a label
         if (label && label.trim()) {
           ctx.fillStyle = isLight ? '#0f172a' : '#ffffff';
           ctx.font = 'bold 11px sans-serif';
@@ -609,13 +715,23 @@ export const WhiteboardCanvas: React.FC = () => {
           ctx.textBaseline = 'middle';
           ctx.fillText(label, minX + width / 2, minY + height / 2);
         }
-      } else if (stroke.points && stroke.points.length > 1) {
-        ctx.beginPath();
-        ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
-        for (let i = 1; i < stroke.points.length; i++) {
-          ctx.lineTo(stroke.points[i].x, stroke.points[i].y);
+      } else if (stroke.points && stroke.points.length > 0) {
+        // Smooth freehand stroke with midpoint bezier curves
+        if (stroke.points.length === 1) {
+          ctx.beginPath();
+          ctx.arc(stroke.points[0].x, stroke.points[0].y, stroke.width / 2, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          ctx.beginPath();
+          ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
+          for (let i = 1; i < stroke.points.length - 1; i++) {
+            const midX = (stroke.points[i].x + stroke.points[i + 1].x) / 2;
+            const midY = (stroke.points[i].y + stroke.points[i + 1].y) / 2;
+            ctx.quadraticCurveTo(stroke.points[i].x, stroke.points[i].y, midX, midY);
+          }
+          ctx.lineTo(stroke.points[stroke.points.length - 1].x, stroke.points[stroke.points.length - 1].y);
+          ctx.stroke();
         }
-        ctx.stroke();
       }
 
       ctx.restore();
@@ -654,7 +770,7 @@ export const WhiteboardCanvas: React.FC = () => {
             nickname: 'You',
             tool: activeTool,
             color: activeColor,
-            width: activeTool === 'highlighter' ? 14 : activeWidth,
+            width: activeTool === 'highlighter' ? 16 : activeWidth,
             opacity: activeTool === 'highlighter' ? 0.35 : 1.0,
             points: [],
             geometry: previewGeometry,
@@ -671,7 +787,7 @@ export const WhiteboardCanvas: React.FC = () => {
             nickname: 'You',
             tool: activeTool,
             color: activeColor,
-            width: activeTool === 'highlighter' ? 14 : activeWidth,
+            width: activeTool === 'highlighter' ? 16 : activeWidth,
             opacity: activeTool === 'highlighter' ? 0.35 : 1.0,
             points: previewPoints,
             timestamp: Date.now(),
@@ -700,6 +816,21 @@ export const WhiteboardCanvas: React.FC = () => {
         ctx.restore();
       }
 
+      // Eraser Radius Indicator
+      if (activeTool === 'eraser' && eraserPos) {
+        ctx.save();
+        const r = activeWidth * 2.2 || 18;
+        ctx.strokeStyle = isLight ? '#ef4444' : '#f87171';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        ctx.arc(eraserPos.x, eraserPos.y, r, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = isLight ? 'rgba(239, 68, 68, 0.08)' : 'rgba(239, 68, 68, 0.15)';
+        ctx.fill();
+        ctx.restore();
+      }
+
       // Laser Trails
       laserTrails.forEach((pt) => {
         ctx.save();
@@ -711,7 +842,7 @@ export const WhiteboardCanvas: React.FC = () => {
         ctx.restore();
       });
     },
-    [activeTool, activeColor, activeWidth, backgroundType, bgColor, drawBackground, isLightColor, laserTrails, renderSingleStroke, tempStrokes, torchPos]
+    [activeTool, activeColor, activeWidth, backgroundType, bgColor, drawBackground, isLightColor, laserTrails, renderSingleStroke, tempStrokes, torchPos, eraserPos]
   );
 
   // Resize listener
@@ -787,6 +918,19 @@ export const WhiteboardCanvas: React.FC = () => {
       return;
     }
 
+    if (activeTool === 'eraser') {
+      setIsDrawing(true);
+      setEraserPos(pt);
+      const radius = activeWidth * 2.2 || 18;
+      const strokes = whiteboardService.getStrokes();
+      const toDelete = strokes.filter((s) => isStrokeIntersectingEraser(s, pt, radius)).map((s) => s.id);
+      if (toDelete.length > 0) {
+        whiteboardService.deleteStrokes(toDelete);
+      }
+      redrawCanvas(whiteboardService.getStrokes());
+      return;
+    }
+
     if (activeTool === 'laser') {
       whiteboardService.broadcastLaser(pt.x, pt.y);
       return;
@@ -805,6 +949,20 @@ export const WhiteboardCanvas: React.FC = () => {
 
   const handlePointerMove = (e: React.MouseEvent | React.TouchEvent) => {
     const pt = getCanvasCoords(e);
+
+    if (activeTool === 'eraser') {
+      setEraserPos(pt);
+      if (isDrawing) {
+        const radius = activeWidth * 2.2 || 18;
+        const strokes = whiteboardService.getStrokes();
+        const toDelete = strokes.filter((s) => isStrokeIntersectingEraser(s, pt, radius)).map((s) => s.id);
+        if (toDelete.length > 0) {
+          whiteboardService.deleteStrokes(toDelete);
+        }
+      }
+      redrawCanvas(whiteboardService.getStrokes());
+      return;
+    }
 
     if (activeTool === 'laser') {
       whiteboardService.broadcastLaser(pt.x, pt.y);
@@ -834,6 +992,13 @@ export const WhiteboardCanvas: React.FC = () => {
   };
 
   const handlePointerUp = (e: React.MouseEvent | React.TouchEvent) => {
+    if (activeTool === 'eraser') {
+      setIsDrawing(false);
+      setEraserPos(null);
+      redrawCanvas(whiteboardService.getStrokes());
+      return;
+    }
+
     if (activeTool === 'torch') {
       setTorchPos(null);
       redrawCanvas(whiteboardService.getStrokes());
@@ -844,7 +1009,7 @@ export const WhiteboardCanvas: React.FC = () => {
     setIsDrawing(false);
 
     const endPt = getCanvasCoords(e);
-    const strokeWidth = activeTool === 'highlighter' ? 14 : activeWidth;
+    const strokeWidth = activeTool === 'highlighter' ? 16 : activeWidth;
 
     if (isShapeTool && startPoint) {
       whiteboardService.addStroke(
@@ -897,9 +1062,6 @@ export const WhiteboardCanvas: React.FC = () => {
   const handleSelectBgColor = (col: string) => {
     setBgColor(col);
     whiteboardService.setBgColor(col);
-    if (isLightColor(col) && activeColor === '#ffffff') {
-      setActiveColor('#0f172a');
-    }
   };
 
   // Standalone Popup Window Popout
@@ -914,6 +1076,17 @@ export const WhiteboardCanvas: React.FC = () => {
     } else {
       window.open(window.location.href, '_blank', 'width=960,height=720');
     }
+  };
+
+  // Clear Canvas with instant Undo Banner
+  const handleClearCanvas = () => {
+    const strokeCount = whiteboardService.getStrokes().length;
+    if (strokeCount === 0) return;
+    whiteboardService.clearAll();
+    setUndoToast(`Canvas cleared (${strokeCount} items removed)`);
+    setTimeout(() => {
+      setUndoToast(null);
+    }, 5000);
   };
 
   // Export PNG
@@ -1086,7 +1259,7 @@ export const WhiteboardCanvas: React.FC = () => {
         </div>
       </div>
 
-      {/* ─── 2. Main Drawing Toolbar (Categorized, Uncluttered) ─── */}
+      {/* ─── 2. Main Drawing Toolbar (Per-Tool Color & Size, Object Eraser) ─── */}
       <div
         style={{
           display: 'flex',
@@ -1100,38 +1273,53 @@ export const WhiteboardCanvas: React.FC = () => {
           flexShrink: 0,
         }}
       >
-        {/* Left Tools: Drawing, Shapes, Arch Drawers */}
+        {/* Left Tools: Primary Pens with Independent Color Dots */}
         <div style={{ display: 'flex', gap: '3px', alignItems: 'center', flexWrap: 'wrap' }}>
-          {/* Primary Pens */}
           {[
-            { id: 'pen', icon: Pencil, label: 'Fine Pen' },
-            { id: 'brush', icon: PenTool, label: 'Brush' },
-            { id: 'highlighter', icon: Highlighter, label: 'Highlighter' },
-            { id: 'temp_pen', icon: Clock, label: '⏳ Temp Ink (3s)' },
-            { id: 'laser', icon: Flame, label: '🔴 Laser' },
-            { id: 'torch', icon: Lightbulb, label: '🔦 Torch' },
-            { id: 'eraser', icon: Eraser, label: 'Eraser' },
-            { id: 'text', icon: Type, label: '🔤 Text Label' },
+            { id: 'pen', icon: Pencil, label: 'Fine Pen', defaultColor: '#6366f1' },
+            { id: 'brush', icon: PenTool, label: 'Brush Pen', defaultColor: '#06b6d4' },
+            { id: 'highlighter', icon: Highlighter, label: 'Highlighter', defaultColor: '#f59e0b' },
+            { id: 'temp_pen', icon: Clock, label: '⏳ Temp Ink (3s)', defaultColor: '#38bdf8' },
+            { id: 'laser', icon: Flame, label: '🔴 Laser', defaultColor: '#ef4444' },
+            { id: 'torch', icon: Lightbulb, label: '🔦 Torch', defaultColor: '#facc15' },
+            { id: 'eraser', icon: Eraser, label: '🧹 Precision Object Eraser', defaultColor: '#ffffff' },
+            { id: 'text', icon: Type, label: '🔤 Text Tool', defaultColor: '#ffffff' },
           ].map((t) => {
             const Icon = t.icon;
             const isActive = activeTool === t.id;
+            const toolColor = toolStyles[t.id]?.color || t.defaultColor;
+
             return (
               <button
                 key={t.id}
                 type="button"
                 className={`btn-icon ${isActive ? 'active' : ''}`}
                 onClick={() => setActiveTool(t.id as any)}
-                title={t.label}
+                title={`${t.label} (Remembers its own style)`}
                 style={{
-                  padding: '2px 4px',
+                  padding: '2px 5px',
                   borderRadius: '4px',
                   border: isActive ? '1px solid var(--primary)' : '1px solid transparent',
                   background: isActive ? 'rgba(99, 102, 241, 0.25)' : 'transparent',
-                  color: isActive ? '#c7d2fe' : 'var(--text-muted)',
+                  color: isActive ? '#ffffff' : 'var(--text-muted)',
                   cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '3px',
                 }}
               >
-                <Icon size={11} />
+                <Icon size={11} color={isActive ? toolColor : 'var(--text-muted)'} />
+                {t.id !== 'eraser' && t.id !== 'torch' && (
+                  <span
+                    style={{
+                      width: '6px',
+                      height: '6px',
+                      borderRadius: '50%',
+                      background: toolColor,
+                      display: 'inline-block',
+                    }}
+                  />
+                )}
               </button>
             );
           })}
@@ -1178,7 +1366,7 @@ export const WhiteboardCanvas: React.FC = () => {
               cursor: 'pointer',
             }}
           >
-            🏛️ Architecture {showArchDrawer ? '▲' : '▼'}
+            🏛️ Arch {showArchDrawer ? '▲' : '▼'}
           </button>
 
           <button
@@ -1203,7 +1391,7 @@ export const WhiteboardCanvas: React.FC = () => {
           </button>
         </div>
 
-        {/* Right Actions: Collab / Personal Mode, Undo/Redo, Clear, Save */}
+        {/* Right Actions: Collab / Personal Mode, Undo/Redo, Clear with Undo, Save */}
         <div style={{ display: 'flex', gap: '3px', alignItems: 'center' }}>
           <div style={{ display: 'flex', gap: '1px', background: 'rgba(0,0,0,0.4)', padding: '2px', borderRadius: '4px', border: '1px solid var(--border-subtle)' }}>
             <button
@@ -1253,7 +1441,7 @@ export const WhiteboardCanvas: React.FC = () => {
           <button
             type="button"
             onClick={() => whiteboardService.undo()}
-            title="Undo"
+            title="Undo (Ctrl+Z)"
             style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '2px' }}
           >
             <RotateCcw size={11} />
@@ -1262,7 +1450,7 @@ export const WhiteboardCanvas: React.FC = () => {
           <button
             type="button"
             onClick={() => whiteboardService.redo()}
-            title="Redo"
+            title="Redo (Ctrl+Y)"
             style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '2px' }}
           >
             <RotateCw size={11} />
@@ -1270,12 +1458,8 @@ export const WhiteboardCanvas: React.FC = () => {
 
           <button
             type="button"
-            onClick={() => {
-              if (confirm('Clear collaborative whiteboard canvas?')) {
-                whiteboardService.clearAll();
-              }
-            }}
-            title="Clear Canvas"
+            onClick={handleClearCanvas}
+            title="Clear Page (Can be Undone)"
             style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', padding: '2px' }}
           >
             <Trash2 size={11} />
@@ -1313,12 +1497,13 @@ export const WhiteboardCanvas: React.FC = () => {
             { id: 'arrow_bi', icon: MoveRight, label: 'Bi-Arrow (↔️)' },
             { id: 'rect', icon: Square, label: 'Rectangle' },
             { id: 'circle', icon: Circle, label: 'Circle' },
-            { id: 'decision_diamond', icon: HelpCircle, label: 'Diamond (Decision)' },
-            { id: 'tree_node', icon: GitBranch, label: 'Tree / Graph Node' },
-            { id: 'sticky_note', icon: StickyNote, label: 'Sticky Note Card' },
+            { id: 'decision_diamond', icon: HelpCircle, label: 'Diamond' },
+            { id: 'tree_node', icon: GitBranch, label: 'Tree Node' },
+            { id: 'sticky_note', icon: StickyNote, label: 'Sticky Card' },
           ].map((t) => {
             const Icon = t.icon;
             const isActive = activeTool === t.id;
+            const toolColor = toolStyles[t.id]?.color || '#6366f1';
             return (
               <button
                 key={t.id}
@@ -1339,7 +1524,7 @@ export const WhiteboardCanvas: React.FC = () => {
                   gap: '3px',
                 }}
               >
-                <Icon size={10} />
+                <Icon size={10} color={isActive ? toolColor : 'var(--text-muted)'} />
                 <span>{t.label.split(' ')[0]}</span>
               </button>
             );
@@ -1370,13 +1555,14 @@ export const WhiteboardCanvas: React.FC = () => {
             { id: 'load_balancer', icon: Scale, label: 'Load Balancer', color: '#f59e0b' },
             { id: 'server_box', icon: Server, label: 'App Server', color: '#818cf8' },
             { id: 'cloud', icon: Cloud, label: 'Cloud Gateway', color: '#38bdf8' },
-            { id: 'dns_router', icon: Globe, label: 'DNS / Router', color: '#38bdf8' },
+            { id: 'dns_router', icon: Globe, label: 'DNS Router', color: '#38bdf8' },
             { id: 'firewall', icon: Shield, label: 'Firewall', color: '#f43f5e' },
-            { id: 'user_client', icon: User, label: 'User Client', color: '#3b82f6' },
+            { id: 'user_client', icon: User, label: 'Client', color: '#3b82f6' },
             { id: 'mobile_client', icon: Smartphone, label: 'Mobile Device', color: '#06b6d4' },
           ].map((t) => {
             const Icon = t.icon;
             const isActive = activeTool === t.id;
+            const toolColor = toolStyles[t.id]?.color || t.color;
             return (
               <button
                 key={t.id}
@@ -1387,8 +1573,8 @@ export const WhiteboardCanvas: React.FC = () => {
                 style={{
                   padding: '2px 5px',
                   borderRadius: '4px',
-                  border: isActive ? `1px solid ${t.color}` : '1px solid transparent',
-                  background: isActive ? `${t.color}33` : 'transparent',
+                  border: isActive ? `1px solid ${toolColor}` : '1px solid transparent',
+                  background: isActive ? `${toolColor}33` : 'transparent',
                   color: isActive ? '#ffffff' : 'var(--text-muted)',
                   cursor: 'pointer',
                   fontSize: '9px',
@@ -1397,7 +1583,7 @@ export const WhiteboardCanvas: React.FC = () => {
                   gap: '3px',
                 }}
               >
-                <Icon size={10} color={t.color} />
+                <Icon size={10} color={toolColor} />
                 <span>{t.label}</span>
               </button>
             );
@@ -1405,28 +1591,75 @@ export const WhiteboardCanvas: React.FC = () => {
         </div>
       )}
 
-      {/* ─── 5. Drawer: Themes & Swatches ─── */}
+      {/* ─── 5. Drawer: Independent Tool Color/Size Customizer & Themes ─── */}
       {showThemesDrawer && (
         <div
           style={{
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            padding: '3px 8px',
-            background: 'rgba(0, 0, 0, 0.85)',
+            padding: '4px 8px',
+            background: 'rgba(0, 0, 0, 0.9)',
             borderBottom: '1px solid var(--border-subtle)',
             flexWrap: 'wrap',
             gap: '6px',
             flexShrink: 0,
           }}
         >
+          {/* Active Tool Ink Color Selector */}
+          <div style={{ display: 'flex', gap: '3px', alignItems: 'center' }}>
+            <span style={{ fontSize: '8.5px', color: '#c7d2fe', fontWeight: 600 }}>
+              Color for <span style={{ color: 'var(--primary)', textTransform: 'capitalize' }}>{activeTool.replace('_', ' ')}</span>:
+            </span>
+            {PEN_COLORS.map((c) => (
+              <span
+                key={c}
+                onClick={() => updateActiveToolColor(c)}
+                style={{
+                  width: '12px',
+                  height: '12px',
+                  borderRadius: '50%',
+                  background: c,
+                  cursor: 'pointer',
+                  border: activeColor === c ? '2px solid #ffffff' : '1px solid rgba(255,255,255,0.2)',
+                  transform: activeColor === c ? 'scale(1.2)' : 'none',
+                  display: 'inline-block',
+                }}
+              />
+            ))}
+          </div>
+
+          {/* Active Tool Stroke Width Selector */}
+          <div style={{ display: 'flex', gap: '2px', alignItems: 'center' }}>
+            <span style={{ fontSize: '8.5px', color: 'var(--text-muted)' }}>Width:</span>
+            {PEN_SIZES.map((sz) => (
+              <button
+                key={sz.label}
+                type="button"
+                onClick={() => updateActiveToolWidth(sz.size)}
+                style={{
+                  padding: '1px 5px',
+                  fontSize: '8.5px',
+                  fontWeight: 600,
+                  borderRadius: '3px',
+                  border: activeWidth === sz.size ? '1px solid var(--primary)' : '1px solid transparent',
+                  background: activeWidth === sz.size ? 'rgba(99, 102, 241, 0.3)' : 'rgba(255,255,255,0.04)',
+                  color: activeWidth === sz.size ? '#fff' : 'var(--text-muted)',
+                  cursor: 'pointer',
+                }}
+              >
+                {sz.label}
+              </button>
+            ))}
+          </div>
+
           {/* Background Textures */}
           <div style={{ display: 'flex', gap: '3px', alignItems: 'center' }}>
             <span style={{ fontSize: '8.5px', color: 'var(--text-muted)' }}>Texture:</span>
             {[
               { id: 'grid', label: 'Grid' },
               { id: 'ruled', label: 'Ruled' },
-              { id: 'plot', label: 'Cartesian Plot' },
+              { id: 'plot', label: 'Plot' },
               { id: 'dotted', label: 'Dots' },
               { id: 'blank', label: 'Blank' },
             ].map((bg) => (
@@ -1469,26 +1702,49 @@ export const WhiteboardCanvas: React.FC = () => {
               />
             ))}
           </div>
+        </div>
+      )}
 
-          {/* Pen Color Swatches */}
-          <div style={{ display: 'flex', gap: '3px', alignItems: 'center' }}>
-            <span style={{ fontSize: '8.5px', color: 'var(--text-muted)' }}>Ink:</span>
-            {PEN_COLORS.map((c) => (
-              <span
-                key={c}
-                onClick={() => setActiveColor(c)}
-                style={{
-                  width: '11px',
-                  height: '11px',
-                  borderRadius: '50%',
-                  background: c,
-                  cursor: 'pointer',
-                  border: activeColor === c ? '2px solid #ffffff' : '1px solid rgba(255,255,255,0.2)',
-                  transform: activeColor === c ? 'scale(1.2)' : 'none',
-                }}
-              />
-            ))}
-          </div>
+      {/* ─── Undo Toast Notification ─── */}
+      {undoToast && (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: '16px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 100,
+            background: 'rgba(15, 23, 42, 0.95)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: '8px',
+            padding: '6px 14px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            boxShadow: '0 10px 30px rgba(0,0,0,0.8)',
+            fontSize: '11px',
+            color: '#ffffff',
+          }}
+        >
+          <span>{undoToast}</span>
+          <button
+            type="button"
+            onClick={() => {
+              whiteboardService.undo();
+              setUndoToast(null);
+            }}
+            className="btn btn-primary btn-sm"
+            style={{ fontSize: '10px', padding: '2px 8px' }}
+          >
+            ↩️ Undo
+          </button>
+          <button
+            type="button"
+            onClick={() => setUndoToast(null)}
+            style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '12px' }}
+          >
+            ×
+          </button>
         </div>
       )}
 
@@ -1502,7 +1758,12 @@ export const WhiteboardCanvas: React.FC = () => {
           onTouchStart={handlePointerDown}
           onTouchMove={handlePointerMove}
           onTouchEnd={handlePointerUp}
-          style={{ width: '100%', height: '100%', display: 'block', cursor: activeTool === 'text' ? 'text' : 'crosshair' }}
+          style={{
+            width: '100%',
+            height: '100%',
+            display: 'block',
+            cursor: activeTool === 'text' ? 'text' : activeTool === 'eraser' ? 'cell' : 'crosshair',
+          }}
         />
 
         {/* Inline On-Canvas Text Input Tool Popover */}

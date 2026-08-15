@@ -422,9 +422,65 @@ export class WhiteboardService {
     return stroke;
   }
 
+  public deleteStroke(strokeId: string): void {
+    const page = this.getActivePage();
+    const index = page.strokes.findIndex((s) => s.id === strokeId);
+    if (index !== -1) {
+      const [removed] = page.strokes.splice(index, 1);
+      page.redoStack.push(removed);
+      if (this.privacyMode === 'personal') {
+        this.savePersonalNotebook();
+      } else {
+        this.network.broadcast('whiteboard:undo', { pageId: page.id, strokeId });
+      }
+      this.notifyListeners();
+    }
+  }
+
+  public deleteStrokes(strokeIds: string[]): void {
+    if (strokeIds.length === 0) return;
+    const page = this.getActivePage();
+    const idSet = new Set(strokeIds);
+    const removed: WhiteboardStroke[] = [];
+    page.strokes = page.strokes.filter((s) => {
+      if (idSet.has(s.id)) {
+        removed.push(s);
+        return false;
+      }
+      return true;
+    });
+
+    if (removed.length > 0) {
+      page.redoStack.push(...removed);
+      if (this.privacyMode === 'personal') {
+        this.savePersonalNotebook();
+      } else {
+        removed.forEach((s) => {
+          this.network.broadcast('whiteboard:undo', { pageId: page.id, strokeId: s.id });
+        });
+      }
+      this.notifyListeners();
+    }
+  }
+
   public undo(): void {
     const page = this.getActivePage();
-    if (page.strokes.length === 0) return;
+    if (page.strokes.length === 0) {
+      if (page.redoStack.length > 0) {
+        // If everything was cleared, undo restores the strokes
+        page.strokes = [...page.redoStack];
+        page.redoStack = [];
+        if (this.privacyMode === 'personal') {
+          this.savePersonalNotebook();
+        } else {
+          page.strokes.forEach((s) => {
+            this.network.broadcast('whiteboard:stroke', { pageId: page.id, stroke: s });
+          });
+        }
+        this.notifyListeners();
+      }
+      return;
+    }
     const removed = page.strokes.pop();
     if (removed) {
       page.redoStack.push(removed);
@@ -454,8 +510,10 @@ export class WhiteboardService {
 
   public clearAll(): void {
     const page = this.getActivePage();
+    if (page.strokes.length === 0) return;
+    // Save cleared strokes to redoStack so Undo can restore them!
+    page.redoStack = [...page.strokes];
     page.strokes = [];
-    page.redoStack = [];
     if (this.privacyMode === 'personal') {
       this.savePersonalNotebook();
     } else {

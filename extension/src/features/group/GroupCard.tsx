@@ -86,6 +86,21 @@ export const GroupCard: React.FC<GroupCardProps> = ({
                   Active
                 </span>
               )}
+              {!isActive && (group.isMember || group.isCreator) && (
+                <span
+                  style={{
+                    fontSize: '9px',
+                    fontWeight: 600,
+                    color: '#34d399',
+                    background: 'rgba(16, 185, 129, 0.12)',
+                    border: '1px solid rgba(16, 185, 129, 0.3)',
+                    padding: '1px 5px',
+                    borderRadius: '4px',
+                  }}
+                >
+                  ✓ Joined
+                </span>
+              )}
             </div>
 
             {/* Badges row */}
@@ -160,7 +175,7 @@ export const GroupCard: React.FC<GroupCardProps> = ({
           <button
             className="btn btn-ghost btn-icon btn-sm"
             onClick={() => onDelete(group.id)}
-            title="Remove Group"
+            title="Leave / Delete Group"
             style={{ color: 'var(--text-dim)' }}
           >
             <Trash2 size={13} />
@@ -192,7 +207,7 @@ export const GroupCard: React.FC<GroupCardProps> = ({
             onClick={() => onJoin(group)}
             style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px' }}
           >
-            <span>{group.isProblemGroup ? 'Join Problem Room' : 'Enter Squad'}</span>
+            <span>{group.isProblemGroup ? 'Join Problem Room' : (group.isMember || group.isCreator) ? 'Enter Squad' : 'Join Squad'}</span>
             <ArrowRight size={12} />
           </button>
         )}

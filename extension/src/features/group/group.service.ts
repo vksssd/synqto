@@ -131,6 +131,8 @@ export class GroupService {
       createdAt: Date.now(),
       creatorPeerId: identity.peerId,
       isCreator: true,
+      isMember: true,
+      joinedAt: Date.now(),
     };
 
     // Prepend to list
@@ -153,7 +155,7 @@ export class GroupService {
   }
 
   /**
-   * Joins an existing group room.
+   * Joins an existing group room and marks the user as a persistent member.
    */
   public async joinGroup(
     group: StudyGroup,
@@ -182,12 +184,22 @@ export class GroupService {
       }
     }
 
-    // Save group to list if not already saved
-    if (!this.groups.some((g) => g.id === group.id || g.roomId === group.roomId)) {
-      this.groups = [group, ...this.groups];
-      this.saveToStorage();
-      this.emitChange();
+    const updatedGroup: StudyGroup = {
+      ...group,
+      roomId: targetRoomId,
+      isMember: true,
+      joinedAt: group.joinedAt || Date.now(),
+    };
+
+    // Save group to list and mark as persistent joined member
+    const existingIdx = this.groups.findIndex((g) => g.id === group.id || g.roomId === group.roomId);
+    if (existingIdx >= 0) {
+      this.groups[existingIdx] = updatedGroup;
+    } else {
+      this.groups = [updatedGroup, ...this.groups];
     }
+    this.saveToStorage();
+    this.emitChange();
 
     await this.roomService.joinGroupRoom({
       roomId: targetRoomId,
@@ -200,6 +212,39 @@ export class GroupService {
     });
 
     return { success: true };
+  }
+
+  /**
+   * Leaves a permanent study group.
+   * User is removed from permanent membership unless they explicitly rejoin.
+   */
+  public async leaveGroup(groupId: string): Promise<void> {
+    const target = this.groups.find((g) => g.id === groupId || g.roomId === groupId);
+    if (!target) return;
+
+    // If currently active in this group room, leave it
+    const currentRoom = this.roomService.getCurrentRoom();
+    if (currentRoom && currentRoom.roomId === target.roomId) {
+      await this.roomService.leaveCurrentRoom();
+    }
+
+    // If it's a default group or problem group, mark isMember: false; otherwise remove it
+    if (target.id.startsWith('default-') || target.isProblemGroup) {
+      target.isMember = false;
+      this.saveToStorage();
+    } else {
+      this.groups = this.groups.filter((g) => g.id !== groupId && g.roomId !== groupId);
+      this.saveToStorage();
+    }
+    this.emitChange();
+  }
+
+  /**
+   * Checks if user is currently a persistent joined member.
+   */
+  public isMember(groupId: string): boolean {
+    const g = this.groups.find((grp) => grp.id === groupId || grp.roomId === groupId);
+    return Boolean(g && (g.isMember || g.isCreator));
   }
 
   /**

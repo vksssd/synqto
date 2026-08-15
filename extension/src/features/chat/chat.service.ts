@@ -28,6 +28,16 @@ export interface ChatMessageItem extends StoredChatMessage {
   receivedAcks?: Set<string>;
 }
 
+export interface ChatNotificationData {
+  id: string;
+  sender: PeerIdentity;
+  roomId: string;
+  text: string;
+  messageType?: ChatMessageType;
+  isMention: boolean;
+  timestamp: number;
+}
+
 const STORAGE_PREFIX = 'synqto_chat_';
 const MAX_STORED_MESSAGES = 250;
 const HISTORY_SYNC_LIMIT = 60;
@@ -38,12 +48,14 @@ export class ChatService {
 
   private currentRoomId = '';
   private myPeerId = '';
+  private myNickname = '';
   private messages: ChatMessageItem[] = [];
   private unackedQueue: Map<string, { message: ChatMessageItem; payload: ChatMessagePayload; attempts: number; timer: any }> = new Map();
 
   private listeners: Set<(messages: ChatMessageItem[]) => void> = new Set();
   private unreadCount = 0;
   private unreadListeners: Set<(count: number) => void> = new Set();
+  private toastListeners: Set<(notif: ChatNotificationData) => void> = new Set();
 
   private constructor() {
     this.network = NetworkService.getInstance();
@@ -57,13 +69,14 @@ export class ChatService {
     return ChatService.instance;
   }
 
-  public init(roomId: string, myPeerId: string) {
+  public init(roomId: string, myPeerId: string, myNickname = '') {
     if (this.currentRoomId === roomId && this.myPeerId === myPeerId) {
       return;
     }
 
     this.currentRoomId = roomId;
     this.myPeerId = myPeerId;
+    if (myNickname) this.myNickname = myNickname;
     this.messages = [];
     this.unreadCount = 0;
     this.clearUnackedQueue();
@@ -73,9 +86,23 @@ export class ChatService {
 
     // 2. Request history catch-up from live peers
     this.requestHistorySync();
+
+    // 3. Retry history sync after initial WebRTC channel negotiation
+    setTimeout(() => {
+      if (this.messages.length < 5) {
+        this.requestHistorySync();
+      }
+    }, 1500);
   }
 
   private setupListeners() {
+    // Catch-up on new peer join
+    this.network.on('presence:join', () => {
+      if (this.messages.length < 30) {
+        this.requestHistorySync();
+      }
+    });
+
     // 1. Inbound chat message
     this.network.on<ChatMessagePayload>('chat:message', (payload, packet) => {
       if (packet.roomId !== this.currentRoomId) return;
@@ -114,6 +141,24 @@ export class ChatService {
       if (!msg.isSelf) {
         this.unreadCount++;
         this.emitUnread();
+
+        // Check if mention
+        const isMention = Boolean(
+          msg.mentions?.includes('everyone') ||
+          msg.mentions?.includes('all') ||
+          (this.myNickname && msg.mentions?.includes(this.myNickname)) ||
+          (this.myPeerId && msg.mentions?.includes(this.myPeerId))
+        );
+
+        this.emitToast({
+          id: incomingId,
+          sender: packet.from,
+          roomId: packet.roomId,
+          text: msg.text,
+          messageType: msg.messageType,
+          isMention,
+          timestamp: msg.timestamp,
+        });
 
         // Send ACK back to sender
         this.network.send(packet.from.peerId, 'chat:ack', { messageId: incomingId });
@@ -631,6 +676,21 @@ export class ChatService {
 
   public onUnreadChange(callback: (count: number) => void): () => void {
     return this.onUnread(callback);
+  }
+
+  public onNotificationToast(callback: (notif: ChatNotificationData) => void): () => void {
+    this.toastListeners.add(callback);
+    return () => this.toastListeners.delete(callback);
+  }
+
+  private emitToast(notif: ChatNotificationData) {
+    this.toastListeners.forEach((cb) => {
+      try {
+        cb(notif);
+      } catch (err) {
+        console.error('[ChatService] Error in toast listener:', err);
+      }
+    });
   }
 
   private emitMessages() {

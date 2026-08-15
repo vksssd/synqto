@@ -1,11 +1,16 @@
-# ─── Fly.io Deployment Configuration for Nerd Buddy Signaling Server ───
+# ─── Fly.io Deployment Configuration for Synqto High-Throughput Signaling Server ───
 # Run 'fly launch' or 'fly deploy' inside this directory
 
-app = "nerd-buddy-signal"
+app = "synqto-signaling"
 primary_region = "iad"
 
 [build]
   dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
+  GOMEMLIMIT = "220MiB"
+  GOGC = "60"
 
 [http_service]
   internal_port = 8080
@@ -16,8 +21,8 @@ primary_region = "iad"
 
   [http_service.concurrency]
     type = "connections"
-    hard_limit = 50000
-    soft_limit = 25000
+    hard_limit = 10000
+    soft_limit = 8000
 
 [[vm]]
   memory = "256mb"

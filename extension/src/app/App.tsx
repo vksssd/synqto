@@ -48,6 +48,12 @@ export const App: React.FC = () => {
   const [alertToast, setAlertToast] = useState<string | null>(null);
   const [currentStreak, setCurrentStreak] = useState(gamificationService.getStats().currentStreak);
   const [isDetecting, setIsDetecting] = useState(false);
+  const [chatToast, setChatToast] = useState<{
+    id: string;
+    sender: { nickname: string; avatar: string; color?: string };
+    text: string;
+    isMention: boolean;
+  } | null>(null);
 
   // Listen for Signaling connection changes
   useEffect(() => {
@@ -89,10 +95,29 @@ export const App: React.FC = () => {
     });
   }, []);
 
-  // 4. Listen for unread chat messages
+  // 4. Listen for unread chat messages and rich toast notifications
   useEffect(() => {
-    return chatService.onUnreadChange((count) => setUnreadCount(count));
-  }, []);
+    const unsubUnread = chatService.onUnreadChange((count) => setUnreadCount(count));
+    const unsubToast = chatService.onNotificationToast((notif) => {
+      if (currentTab !== 'chat' || notif.isMention) {
+        setChatToast({
+          id: notif.id,
+          sender: notif.sender,
+          text: notif.text,
+          isMention: notif.isMention,
+        });
+
+        setTimeout(() => {
+          setChatToast((prev) => (prev?.id === notif.id ? null : prev));
+        }, 4500);
+      }
+    });
+
+    return () => {
+      unsubUnread();
+      unsubToast();
+    };
+  }, [currentTab]);
 
   // 5. Listen for Topology state (Role & Leader ID)
   useEffect(() => {
@@ -331,6 +356,109 @@ export const App: React.FC = () => {
         >
           <Sparkles size={14} color="#fef08a" />
           <span>{alertToast}</span>
+        </div>
+      )}
+
+      {/* Rich Chat & Mention Toast Notification */}
+      {chatToast && (
+        <div
+          onClick={() => {
+            setCurrentTab('chat');
+            setChatToast(null);
+            chatService.markAsRead();
+          }}
+          style={{
+            position: 'absolute',
+            top: '46px',
+            left: '10px',
+            right: '10px',
+            zIndex: 65,
+            background: chatToast.isMention
+              ? 'linear-gradient(135deg, rgba(245, 158, 11, 0.95), rgba(217, 119, 6, 0.95))'
+              : 'linear-gradient(135deg, rgba(15, 23, 42, 0.95), rgba(30, 41, 59, 0.95))',
+            border: chatToast.isMention ? '1px solid #fde68a' : '1px solid rgba(99, 102, 241, 0.5)',
+            color: '#ffffff',
+            padding: '8px 12px',
+            borderRadius: '10px',
+            boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 0 15px rgba(99, 102, 241, 0.3)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '10px',
+            cursor: 'pointer',
+            backdropFilter: 'blur(12px)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
+            <div
+              style={{
+                width: '28px',
+                height: '28px',
+                borderRadius: '50%',
+                background: chatToast.sender.color || '#6366f1',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '15px',
+                flexShrink: 0,
+              }}
+            >
+              {chatToast.sender.avatar}
+            </div>
+            <div style={{ overflow: 'hidden' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ fontWeight: 700, fontSize: '11px', color: '#f8fafc' }}>
+                  {chatToast.sender.nickname}
+                </span>
+                {chatToast.isMention && (
+                  <span
+                    style={{
+                      background: 'rgba(0,0,0,0.3)',
+                      color: '#fef08a',
+                      fontSize: '9px',
+                      fontWeight: 800,
+                      padding: '1px 5px',
+                      borderRadius: '4px',
+                      textTransform: 'uppercase',
+                    }}
+                  >
+                    📣 Mention
+                  </span>
+                )}
+              </div>
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: '11px',
+                  color: 'rgba(255,255,255,0.85)',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  maxWidth: '200px',
+                }}
+              >
+                {chatToast.text}
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setChatToast(null);
+            }}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: 'rgba(255,255,255,0.6)',
+              cursor: 'pointer',
+              padding: '2px',
+              fontSize: '13px',
+            }}
+          >
+            ✕
+          </button>
         </div>
       )}
 

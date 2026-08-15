@@ -13,9 +13,13 @@ export interface StudyGroup {
   createdAt: number;       // timestamp
   creatorPeerId?: string;  // peer ID of creator
   isCreator?: boolean;
+  isMember?: boolean;      // true if user has joined and is persistent member
+  joinedAt?: number;       // timestamp when user joined
   memberCount?: number;    // online buddies count
   isProblemGroup?: boolean;// true if auto-created from problem detection
   canonicalUrl?: string;   // problem link
+  lastMessagePreview?: string;
+  lastMessageTimestamp?: number;
 }
 
 export interface CreateGroupParams {

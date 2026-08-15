@@ -1,20 +1,21 @@
-# 🎬 Synqto Video Recording & Coding Tutorial Studio — Architectural Plan
+# 🎬 Synqto Video Recording & Live Streaming Studio — Architectural Plan
 
 > **Document Type**: Architecture & Engineering Specification  
 > **Status**: Planned for Next Release Cycle  
-> **Target Capabilities**: Screen / Tab / Window Capture, PiP Facecam, YouTube Coding Tutorial Templates, Mouse Proximity Auto-Fade, Chroma & Geometry FX, Audio Ducking, and Local Diary Integration.
+> **Target Capabilities**: Screen / Tab / Window Capture, PiP Facecam, YouTube Coding Tutorial Templates, Mouse Proximity Auto-Fade, Chroma & Geometry FX, Audio Ducking, Multi-Platform Live Streaming (YouTube Live, Twitch, LinkedIn, Kick), App Linking, and Local Diary Integration.
 
 ---
 
 ## 1. Executive Summary & Vision
 
-Modern coding tutorials, code reviews, and competitive programming walkthroughs (popularized by creators on YouTube like *NeetCode*, *Fireship*, *Theo - t3.gg*, *ThePrimeagen*, and *Web Dev Simplified*) rely on a distinct, distraction-free visual layout:
+Modern coding tutorials, code reviews, live coding streams, and competitive programming walkthroughs (popularized by creators on YouTube and Twitch like *NeetCode*, *Fireship*, *Theo - t3.gg*, *ThePrimeagen*, and *Web Dev Simplified*) rely on a distinct, distraction-free visual layout:
 1. High-fidelity editor / problem view with crystal-clear code readability.
 2. An expressive, non-intrusive presenter facecam positioned in a corner or side column.
 3. **Zero code obstruction** — when the cursor moves towards the facecam to edit code underneath, the facecam must either **fade to transparent** or **intelligently dodge** to the opposite side.
 4. Professional presentation effects: mouse click ripples, keystroke shortcuts overlay, audio noise suppression, and automatic background audio ducking.
+5. **1-Click Multi-Platform Live Streaming**: Broadcast live problem-solving sessions directly to **YouTube Live**, **Twitch**, **LinkedIn Live**, **Twitter/X**, and **Kick** with synchronized multi-chat overlays, without needing heavy external tools like OBS.
 
-This plan details how Synqto will integrate an **in-browser video recording studio** directly into the Chrome extension with zero external dependencies (no OBS or third-party software required).
+This plan details how Synqto will integrate an **in-browser video recording and live streaming studio** directly into the Chrome extension with zero external dependencies.
 
 ---
 
@@ -31,10 +32,17 @@ flowchart TD
     end
 
     Comp --> REC[📹 MediaRecorder Engine<br/>VP9 / H.264 @ 60 FPS 1080p]
+    Comp --> STR[📡 Live Streaming Bridge<br/>WHIP / WebRTC / RTMP Gateway]
     AM --> REC
+    AM --> STR
+
     REC --> OUT1[💾 Download .webm / .mp4]
     REC --> OUT2[📔 Attach to Synqto Diary Page]
-    REC --> OUT3[📡 Stream to Room Peers via WebRTC]
+    REC --> OUT3[👥 Synqto P2P Peer Stage]
+
+    STR --> LS1[🔴 YouTube Live]
+    STR --> LS2[🟣 Twitch]
+    STR --> LS3[💼 LinkedIn Live / Kick / RTMP]
 ```
 
 ### 2.1 Video Ingestion Options
@@ -183,7 +191,65 @@ export class VideoCompositor {
 
 ---
 
-## 6. Integration with Synqto Diary & Journal
+## 6. Multi-Platform Live Streaming & App Linking Architecture
+
+Live streaming from a browser extension directly to platforms like **YouTube Live**, **Twitch**, **LinkedIn Live**, and **Kick** requires handling platform authentication (OAuth2), stream key management, and protocol bridges (WebRTC WHIP / RTMP).
+
+```mermaid
+flowchart LR
+    subgraph Synqto Extension Studio
+        Comp[Canvas/WebGL Compositor] --> Enc[WebCodecs / MediaStream]
+        Auth[OAuth2 Account Manager<br/>YouTube / Twitch] --> API[Platform REST APIs]
+    end
+
+    subgraph Synqto Ingestion Layer
+        Enc -->|WHIP / WebRTC| WHIP[WHIP Ingest Server]
+        Enc -->|WebTransport / Pion| GW[Go RTMP Streaming Gateway]
+    end
+
+    subgraph Streaming Destinations
+        WHIP -->|Direct WebRTC| TW_W[Twitch WHIP Ingest]
+        WHIP -->|Direct WebRTC| CF[Cloudflare Stream / Livepeer]
+        GW -->|RTMP: rtmp://a.rtmp.youtube.com/live2| YT[🔴 YouTube Live Broadcast]
+        GW -->|RTMP: rtmp://live.twitch.tv/app| TW[🟣 Twitch Channel]
+        GW -->|RTMP: rtmps://...| IN[💼 LinkedIn Live / Kick / X]
+    end
+```
+
+### 6.1 App Linking & Account Connection (OAuth2)
+To make streaming as frictionless as possible, Synqto provides a **1-Click Connect** interface:
+
+| Platform | Authentication / App Link Scope | Capabilities Enabled |
+| :--- | :--- | :--- |
+| **YouTube Live** | Google OAuth2 (`youtube.force-ssl`) | Auto-creates scheduled or instant live broadcasts, fetches RTMP stream keys, streams live chat into Synqto, and displays live viewer counts. |
+| **Twitch** | Twitch OAuth2 (`channel:manage:broadcast`, `chat:read`) | Automatically sets stream category (*Software & Game Development*), updates stream title, fetches ingest endpoints, and embeds Twitch IRC chat. |
+| **LinkedIn Live** | LinkedIn Live API / RTMP Stream Key | Broadcasts tech tutorials and resume review workshops to professional networks. |
+| **Custom RTMP / WHIP** | Direct `rtmp://` / `https://` Ingest URL + Key | Stream to Kick, Twitter/X, Facebook Live, Restream.io, or private RTMP servers. |
+
+### 6.2 Browser-to-RTMP Transmission Protocols
+Because browsers cannot open raw TCP sockets to RTMP port 1935 directly, Synqto implements two high-performance protocols:
+
+1. **Protocol A — Native WHIP (WebRTC HTTP Ingestion Protocol)**:
+   - Modern streaming standard supported natively by Twitch, Cloudflare Stream, and Livepeer.
+   - Pushes WebRTC stream directly over HTTP `POST` requests.
+   - **Zero server bridge needed** — ultra-low latency ($< 500\text{ms}$).
+2. **Protocol B — Synqto Go RTMP Gateway (Pion WebRTC + FFmpeg)**:
+   - For platforms requiring RTMP/RTMPS (like YouTube and LinkedIn), the Synqto Go Server acts as a lightweight streamer.
+   - Receives the browser's WebRTC stream and repackages it into RTMP packets sent to the destination platform.
+   - Supports **Simulcasting**: Broadcasts to YouTube, Twitch, and Synqto P2P Study Rooms simultaneously with 1 single upload stream from the user!
+
+### 6.3 Unified Multi-Platform Chat & Stream HUD
+When streaming live, creators can toggle a non-intrusive stream overlay:
+- **Unified Chat Box**: Aggregates YouTube live messages, Twitch chat, and Synqto room peer messages into a single dark-mode floating chat widget.
+- **Stream Alerts**: Animated toast overlay for new YouTube subscribers, Twitch followers, or Synqto peer room joins.
+- **Stream Health Indicator**:
+  - Live FPS counter ($60\text{ FPS}$).
+  - Output bitrate monitor ($6000\text{ kbps}$).
+  - Dropped frame alarm & audio volume VU meter.
+
+---
+
+## 7. Integration with Synqto Diary & Journal
 
 When recording finishes:
 1. **Instant Preview Modal**: Playback with seekbar, duration, file size, and trim controls.
@@ -195,16 +261,17 @@ When recording finishes:
 
 ---
 
-## 7. Engineering Roadmap & Milestones
+## 8. Engineering Roadmap & Milestones
 
 | Milestone | Deliverables | Target Timeline |
 | :--- | :--- | :--- |
 | **Phase 1: Ingestion & Core Mixer** | Screen capture, tab capture, webcam stream, Web Audio mixer with audio ducking. | Sprint 1 |
 | **Phase 2: Layout Compositor & Shapes** | WebGL/2D Compositor, 4 layout presets, Circle/Squircle shapes, draggable positioning. | Sprint 2 |
 | **Phase 3: Smart FX & Auto-Fade** | Mouse proximity fade, smart corner dodge, mouse click ripples, keystroke HUD. | Sprint 3 |
-| **Phase 4: Diary Integration & Export** | Fast MP4 remuxing, IndexedDB crash recovery, 1-click export to Synqto Diary note. | Sprint 4 |
+| **Phase 4: Multi-Platform Live Streaming** | YouTube & Twitch OAuth app linking, WHIP / Go RTMP gateway, unified live chat. | Sprint 4 |
+| **Phase 5: Diary Integration & Export** | Fast MP4 remuxing, IndexedDB crash recovery, 1-click export to Synqto Diary note. | Sprint 5 |
 
 ---
 
-## 8. Summary
-This recording engine transforms Synqto into a self-contained, studio-grade video walkthrough creator for students, tutors, content creators, and engineering interviewers.
+## 9. Summary
+This studio engine transforms Synqto into a self-contained, professional broadcast and tutorial creation platform for students, tutors, competitive programmers, and content creators.

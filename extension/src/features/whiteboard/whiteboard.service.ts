@@ -1,8 +1,14 @@
-// ─── Collaborative Whiteboard Service (P2P Real-Time Synchronization) ───
+// ─── Collaborative Whiteboard Service (P2P Real-Time Synchronization & Laser Sync) ───
 
 import { NetworkService } from '@/core/network/network.service';
 import { IdentityService } from '@/features/identity/identity.service';
-import { WhiteboardStroke, WhiteboardToolType, Point } from './whiteboard.types';
+import {
+  WhiteboardStroke,
+  WhiteboardToolType,
+  WhiteboardBackgroundType,
+  Point,
+  LaserPointerPosition,
+} from './whiteboard.types';
 import { uuid } from '@/shared/utils';
 
 export class WhiteboardService {
@@ -12,7 +18,13 @@ export class WhiteboardService {
 
   private strokes: WhiteboardStroke[] = [];
   private redoStack: WhiteboardStroke[] = [];
+  private background: WhiteboardBackgroundType = 'grid';
+
   private listeners: Set<(strokes: WhiteboardStroke[]) => void> = new Set();
+  private backgroundListeners: Set<(bg: WhiteboardBackgroundType) => void> = new Set();
+  private laserListeners: Set<(laser: LaserPointerPosition) => void> = new Set();
+
+  private lastLaserTime = 0;
 
   private constructor() {
     this.network = NetworkService.getInstance();
@@ -51,6 +63,50 @@ export class WhiteboardService {
         this.notifyListeners();
       }
     });
+
+    // 4. Receive remote background change
+    this.network.on<{ background: WhiteboardBackgroundType }>('whiteboard:background', (payload) => {
+      if (payload?.background) {
+        this.background = payload.background;
+        this.backgroundListeners.forEach((fn) => fn(this.background));
+      }
+    });
+
+    // 5. Receive remote laser pointer
+    this.network.on<LaserPointerPosition>('whiteboard:laser', (laser) => {
+      if (laser && laser.peerId) {
+        this.laserListeners.forEach((fn) => fn(laser));
+      }
+    });
+  }
+
+  public setBackground(bg: WhiteboardBackgroundType): void {
+    this.background = bg;
+    this.backgroundListeners.forEach((fn) => fn(bg));
+    this.network.broadcast('whiteboard:background', { background: bg });
+  }
+
+  public getBackground(): WhiteboardBackgroundType {
+    return this.background;
+  }
+
+  public broadcastLaser(x: number, y: number): void {
+    const now = Date.now();
+    if (now - this.lastLaserTime < 30) return; // 33fps throttle
+    this.lastLaserTime = now;
+
+    const identity = this.identityService.getCachedIdentity();
+    const payload: LaserPointerPosition = {
+      peerId: identity?.peerId || 'local',
+      nickname: identity?.nickname || 'Laser',
+      color: identity?.color || '#ef4444',
+      x,
+      y,
+      timestamp: now,
+    };
+
+    this.laserListeners.forEach((fn) => fn(payload));
+    this.network.broadcast('whiteboard:laser', payload);
   }
 
   public addStroke(
@@ -58,7 +114,8 @@ export class WhiteboardService {
     color: string,
     width: number,
     points: Point[],
-    geometry?: { x1: number; y1: number; x2: number; y2: number; label?: string }
+    geometry?: { x1: number; y1: number; x2: number; y2: number; label?: string },
+    text?: string
   ): WhiteboardStroke {
     const identity = this.identityService.getCachedIdentity();
     const opacity = tool === 'highlighter' ? 0.35 : 1.0;
@@ -73,11 +130,12 @@ export class WhiteboardService {
       opacity,
       points,
       geometry,
+      text,
       timestamp: Date.now(),
     };
 
     this.strokes.push(stroke);
-    this.redoStack = []; // Reset redo on new action
+    this.redoStack = [];
     this.notifyListeners();
 
     // Broadcast over WebRTC DataChannel to room peers
@@ -125,8 +183,23 @@ export class WhiteboardService {
     };
   }
 
+  public onBackgroundChange(listener: (bg: WhiteboardBackgroundType) => void): () => void {
+    this.backgroundListeners.add(listener);
+    listener(this.background);
+    return () => {
+      this.backgroundListeners.delete(listener);
+    };
+  }
+
+  public onLaser(listener: (laser: LaserPointerPosition) => void): () => void {
+    this.laserListeners.add(listener);
+    return () => {
+      this.laserListeners.delete(listener);
+    };
+  }
+
   private notifyListeners(): void {
-    const copy = [...this.strokes];
-    this.listeners.forEach((fn) => fn(copy));
+    const list = [...this.strokes];
+    this.listeners.forEach((fn) => fn(list));
   }
 }

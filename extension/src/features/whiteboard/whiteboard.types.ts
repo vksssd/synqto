@@ -1,18 +1,33 @@
-// ─── Collaborative Whiteboard Types & Stroke Definitions ───
+// ─── Collaborative Whiteboard Types, Tools & Background Definitions ───
 
 export type WhiteboardToolType =
-  | 'pen'
-  | 'highlighter'
-  | 'eraser'
-  | 'line'
-  | 'arrow'
-  | 'rect'
-  | 'circle'
-  | 'tree_node';
+  | 'pen'           // Standard fine pen
+  | 'brush'         // Smooth pressure/brush stroke pen
+  | 'highlighter'   // Semi-transparent colored marker
+  | 'laser'         // Real-time laser pointer trail (fading)
+  | 'torch'         // Spotlight / torch beam that highlights a region
+  | 'eraser'        // Pixel & stroke eraser
+  | 'line'          // Straight line
+  | 'arrow'         // Directional arrow
+  | 'rect'          // Box / rectangle
+  | 'circle'        // Circle / node
+  | 'tree_node'     // Binary tree node with label
+  | 'text';         // Text note / label
+
+export type WhiteboardBackgroundType =
+  | 'grid'          // Standard graph / square coordinate grid
+  | 'ruled'         // Notebook lined / ruled paper with margin
+  | 'blank'         // Minimalist dark slate
+  | 'dotted'        // Dot matrix grid
+  | 'plot'          // Cartesian (X, Y) 4-quadrant coordinate axes with tick marks
+  | 'matrix'        // 2D DP array / matrix cell table
+  | 'white_blank'   // Crisp classic white board
+  | 'white_ruled';  // Light ruled notebook paper
 
 export interface Point {
   x: number;
   y: number;
+  pressure?: number;
 }
 
 export interface WhiteboardStroke {
@@ -31,6 +46,16 @@ export interface WhiteboardStroke {
     y2: number;
     label?: string;
   };
+  text?: string;
+  timestamp: number;
+}
+
+export interface LaserPointerPosition {
+  peerId: string;
+  nickname: string;
+  color: string;
+  x: number;
+  y: number;
   timestamp: number;
 }
 
@@ -38,4 +63,5 @@ export interface WhiteboardState {
   strokes: WhiteboardStroke[];
   undoStack: WhiteboardStroke[];
   redoStack: WhiteboardStroke[];
+  background: WhiteboardBackgroundType;
 }

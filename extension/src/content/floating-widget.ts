@@ -57,10 +57,10 @@ export class FloatingWidget {
 
   // Whiteboard State
   private activeTab: 'chat' | 'whiteboard' = 'chat';
-  private wbTool: 'pen' | 'highlighter' | 'eraser' | 'line' | 'arrow' | 'rect' | 'circle' | 'tree_node' = 'pen';
+  private wbTool: 'pen' | 'brush' | 'highlighter' | 'laser' | 'torch' | 'eraser' | 'line' | 'arrow' | 'rect' | 'circle' | 'tree_node' | 'text' = 'pen';
   private wbColor: string = '#6366f1';
   private wbWidth: number = 4;
-  private wbTheme: 'dark_grid' | 'clean_white' | 'dot_matrix' | 'isometric' = 'dark_grid';
+  private wbTheme: 'grid' | 'ruled' | 'blank' | 'dotted' | 'plot' | 'matrix' | 'white_blank' = 'grid';
   private wbStrokes: InPageStroke[] = [];
   private wbRedoStack: InPageStroke[] = [];
   private isWbDrawing: boolean = false;
@@ -776,8 +776,11 @@ export class FloatingWidget {
           <div class="whiteboard-container">
             <div class="wb-toolbar">
               <div class="wb-tool-group">
-                <button class="wb-tool-btn ${this.wbTool === 'pen' ? 'active' : ''}" data-wbtool="pen" title="Pen">✏️</button>
+                <button class="wb-tool-btn ${this.wbTool === 'pen' ? 'active' : ''}" data-wbtool="pen" title="Fine Pen">✏️</button>
+                <button class="wb-tool-btn ${this.wbTool === 'brush' ? 'active' : ''}" data-wbtool="brush" title="Brush Pen">✒️</button>
                 <button class="wb-tool-btn ${this.wbTool === 'highlighter' ? 'active' : ''}" data-wbtool="highlighter" title="Highlighter">🖍️</button>
+                <button class="wb-tool-btn ${this.wbTool === 'laser' ? 'active' : ''}" data-wbtool="laser" title="Laser Pointer">🔴</button>
+                <button class="wb-tool-btn ${this.wbTool === 'torch' ? 'active' : ''}" data-wbtool="torch" title="Spotlight Torch">🔦</button>
                 <button class="wb-tool-btn ${this.wbTool === 'eraser' ? 'active' : ''}" data-wbtool="eraser" title="Eraser">🧹</button>
                 <button class="wb-tool-btn ${this.wbTool === 'line' ? 'active' : ''}" data-wbtool="line" title="Line">📏</button>
                 <button class="wb-tool-btn ${this.wbTool === 'arrow' ? 'active' : ''}" data-wbtool="arrow" title="Arrow">➡️</button>
@@ -794,13 +797,15 @@ export class FloatingWidget {
               </div>
             </div>
 
-            <!-- Color Palette, Widths & Board Theme Choice -->
+            <!-- Color Palette, Widths & Background Choices -->
             <div class="wb-palette-bar">
-              <div style="display:flex;gap:3px;align-items:center;">
-                <button class="size-pill ${this.wbTheme === 'dark_grid' ? 'active' : ''}" data-wbtheme="dark_grid" title="Dark Grid">⬛</button>
-                <button class="size-pill ${this.wbTheme === 'clean_white' ? 'active' : ''}" data-wbtheme="clean_white" title="White Board">⬜</button>
-                <button class="size-pill ${this.wbTheme === 'dot_matrix' ? 'active' : ''}" data-wbtheme="dot_matrix" title="Dot Grid">🟦</button>
-                <button class="size-pill ${this.wbTheme === 'isometric' ? 'active' : ''}" data-wbtheme="isometric" title="Matrix Grid">📐</button>
+              <div style="display:flex;gap:2px;align-items:center;overflow-x:auto;">
+                <button class="size-pill ${this.wbTheme === 'grid' ? 'active' : ''}" data-wbtheme="grid" title="Square Graph Grid">⬛ Grid</button>
+                <button class="size-pill ${this.wbTheme === 'ruled' ? 'active' : ''}" data-wbtheme="ruled" title="Ruled Lined Paper">📏 Ruled</button>
+                <button class="size-pill ${this.wbTheme === 'plot' ? 'active' : ''}" data-wbtheme="plot" title="Coordinate Plot (X,Y)">📈 Plot</button>
+                <button class="size-pill ${this.wbTheme === 'dotted' ? 'active' : ''}" data-wbtheme="dotted" title="Dot Grid">🟦 Dots</button>
+                <button class="size-pill ${this.wbTheme === 'matrix' ? 'active' : ''}" data-wbtheme="matrix" title="Matrix Table">📐 Matrix</button>
+                <button class="size-pill ${this.wbTheme === 'white_blank' ? 'active' : ''}" data-wbtheme="white_blank" title="White Board">⬜ White</button>
               </div>
 
               <div style="display:flex;gap:4px;align-items:center;">
@@ -1280,41 +1285,53 @@ export class FloatingWidget {
 
     // Draw Background Theme
     ctx.save();
-    if (this.wbTheme === 'clean_white') {
-      ctx.fillStyle = '#f8fafc';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.strokeStyle = 'rgba(0, 0, 0, 0.06)';
+    const isLightBg = this.wbTheme === 'white_blank';
+    ctx.fillStyle = isLightBg ? '#f8fafc' : '#090d16';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    if (this.wbTheme === 'ruled') {
+      // 📏 Ruled Notebook Paper with Margin Line
+      ctx.strokeStyle = 'rgba(99, 102, 241, 0.18)';
       ctx.lineWidth = 1;
-      const gridSize = 20;
-      for (let x = 0; x < canvas.width; x += gridSize) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, canvas.height);
-        ctx.stroke();
-      }
-      for (let y = 0; y < canvas.height; y += gridSize) {
+      for (let y = 28; y < canvas.height; y += 24) {
         ctx.beginPath();
         ctx.moveTo(0, y);
         ctx.lineTo(canvas.width, y);
         ctx.stroke();
       }
-    } else if (this.wbTheme === 'dot_matrix') {
-      ctx.fillStyle = '#090d16';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
-      for (let x = 10; x < canvas.width; x += 18) {
-        for (let y = 10; y < canvas.height; y += 18) {
+      ctx.strokeStyle = 'rgba(244, 63, 94, 0.4)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(40, 0);
+      ctx.lineTo(40, canvas.height);
+      ctx.stroke();
+    } else if (this.wbTheme === 'plot') {
+      // 📈 Coordinate Plot (X, Y)
+      const midX = Math.floor(canvas.width / 2);
+      const midY = Math.floor(canvas.height / 2);
+      ctx.strokeStyle = '#6366f1';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(0, midY);
+      ctx.lineTo(canvas.width, midY);
+      ctx.moveTo(midX, 0);
+      ctx.lineTo(midX, canvas.height);
+      ctx.stroke();
+    } else if (this.wbTheme === 'dotted') {
+      // 🟦 Dot Matrix Grid
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.16)';
+      for (let x = 8; x < canvas.width; x += 18) {
+        for (let y = 8; y < canvas.height; y += 18) {
           ctx.beginPath();
-          ctx.arc(x, y, 1, 0, Math.PI * 2);
+          ctx.arc(x, y, 1.2, 0, Math.PI * 2);
           ctx.fill();
         }
       }
-    } else if (this.wbTheme === 'isometric') {
-      ctx.fillStyle = '#090d16';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.strokeStyle = 'rgba(99, 102, 241, 0.08)';
+    } else if (this.wbTheme === 'matrix') {
+      // 📐 Array Matrix Grid
+      ctx.strokeStyle = 'rgba(99, 102, 241, 0.15)';
       ctx.lineWidth = 1;
-      const cell = 22;
+      const cell = 26;
       for (let x = 0; x < canvas.width; x += cell) {
         ctx.beginPath();
         ctx.moveTo(x, 0);
@@ -1327,10 +1344,8 @@ export class FloatingWidget {
         ctx.lineTo(canvas.width, y);
         ctx.stroke();
       }
-    } else {
-      // Default: Dark Grid
-      ctx.fillStyle = '#090d16';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    } else if (this.wbTheme === 'grid') {
+      // ⬛ Square Graph Grid
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
       ctx.lineWidth = 1;
       const gridSize = 20;
@@ -1352,7 +1367,7 @@ export class FloatingWidget {
     const render = (s: InPageStroke) => {
       ctx.save();
       let drawColor = s.color;
-      if (this.wbTheme === 'clean_white' && (drawColor === '#ffffff' || drawColor === '#fff')) {
+      if (this.wbTheme === 'white_blank' && (drawColor === '#ffffff' || drawColor === '#fff')) {
         drawColor = '#0f172a';
       }
       ctx.strokeStyle = drawColor;

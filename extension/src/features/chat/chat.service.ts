@@ -424,22 +424,58 @@ export class ChatService {
    */
   public async captureAndSendScreenshot(fromIdentity: PeerIdentity, caption = '📸 Tab Screenshot'): Promise<ChatMessageItem | null> {
     try {
-      if (typeof chrome !== 'undefined' && chrome.tabs?.captureVisibleTab) {
-        return new Promise((resolve) => {
-          chrome.tabs.captureVisibleTab({ format: 'png' }, (dataUrl) => {
-            if (chrome.runtime.lastError || !dataUrl) {
-              console.warn('[ChatService] captureVisibleTab failed:', chrome.runtime.lastError);
-              resolve(null);
-              return;
-            }
-            const msg = this.sendMessage(caption, fromIdentity, {
-              messageType: 'screenshot',
-              imageUrl: dataUrl,
-              imageCaption: caption,
+      let dataUrl: string | null = null;
+
+      // 1. Primary: Capture via background service worker (most reliable in MV3 side panel context)
+      if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+        try {
+          const res = await new Promise<{ success: boolean; dataUrl?: string; error?: string }>((resolve) => {
+            chrome.runtime.sendMessage({ type: 'CAPTURE_ACTIVE_TAB' }, (response) => {
+              if (chrome.runtime.lastError || !response) {
+                resolve({ success: false, error: chrome.runtime.lastError?.message });
+              } else {
+                resolve(response);
+              }
             });
-            resolve(msg);
+          });
+
+          if (res?.success && res.dataUrl) {
+            dataUrl = res.dataUrl;
+          }
+        } catch (err) {
+          console.warn('[ChatService] Service worker capture attempt failed, trying direct:', err);
+        }
+      }
+
+      // 2. Fallback: Direct captureVisibleTab call
+      if (!dataUrl && typeof chrome !== 'undefined' && chrome.tabs?.captureVisibleTab) {
+        dataUrl = await new Promise<string | null>((resolve) => {
+          chrome.windows.getLastFocused({ populate: false }, (win) => {
+            const winId = win?.id;
+            const cb = (capturedUrl?: string) => {
+              if (chrome.runtime.lastError || !capturedUrl) {
+                console.warn('[ChatService] Direct captureVisibleTab failed:', chrome.runtime.lastError);
+                resolve(null);
+              } else {
+                resolve(capturedUrl);
+              }
+            };
+            if (winId !== undefined) {
+              chrome.tabs.captureVisibleTab(winId, { format: 'png' }, cb);
+            } else {
+              chrome.tabs.captureVisibleTab({ format: 'png' }, cb);
+            }
           });
         });
+      }
+
+      if (dataUrl) {
+        const msg = this.sendMessage(caption, fromIdentity, {
+          messageType: 'screenshot',
+          imageUrl: dataUrl,
+          imageCaption: caption,
+        });
+        return msg;
       }
     } catch (err) {
       console.warn('[ChatService] Failed to capture screenshot:', err);

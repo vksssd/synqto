@@ -71,6 +71,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   } else if (message.type === 'SEND_PAGE_CHAT_MESSAGE') {
     // Forward to sidepanel for P2P mesh distribution
     chrome.runtime.sendMessage(message).catch(() => {});
+  } else if (message.type === 'CAPTURE_ACTIVE_TAB') {
+    chrome.windows.getLastFocused({ populate: false }, (win) => {
+      const windowId = win?.id;
+      const executeCapture = (targetWinId?: number) => {
+        const handleResult = (dataUrl: string | undefined) => {
+          if (chrome.runtime.lastError || !dataUrl) {
+            console.warn('[ServiceWorker] captureVisibleTab failed:', chrome.runtime.lastError);
+            sendResponse({ success: false, error: chrome.runtime.lastError?.message || 'Capture failed' });
+          } else {
+            sendResponse({ success: true, dataUrl });
+          }
+        };
+
+        if (targetWinId !== undefined) {
+          chrome.tabs.captureVisibleTab(targetWinId, { format: 'png' }, handleResult);
+        } else {
+          chrome.tabs.captureVisibleTab({ format: 'png' }, handleResult);
+        }
+      };
+
+      executeCapture(windowId);
+    });
+    return true; // asynchronous sendResponse
   }
   return true;
 });

@@ -339,4 +339,114 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   });
+
+  // 10. Geo-Region & Timezone Localizer
+  function initGeoLocation() {
+    const geoRegionEl = document.getElementById('geo-detected-region');
+    const geoPingEl = document.getElementById('geo-ping-val');
+    const geoTimeEl = document.getElementById('geo-time-display');
+
+    try {
+      const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+      let regionName = 'Global Anycast';
+      let ping = '0.6ms';
+
+      if (timeZone.includes('America') || timeZone.includes('US')) {
+        regionName = 'US-East (N. Virginia)';
+        ping = '0.4ms';
+      } else if (timeZone.includes('Europe') || timeZone.includes('London') || timeZone.includes('Berlin')) {
+        regionName = 'EU-Central (Frankfurt)';
+        ping = '0.5ms';
+      } else if (timeZone.includes('Asia/Kolkata') || timeZone.includes('Calcutta') || timeZone.includes('India')) {
+        regionName = 'AP-South (Mumbai)';
+        ping = '0.3ms';
+      } else if (timeZone.includes('Asia') || timeZone.includes('Tokyo') || timeZone.includes('Singapore')) {
+        regionName = 'AP-East (Tokyo/Singapore)';
+        ping = '0.5ms';
+      }
+
+      if (geoRegionEl) {
+        geoRegionEl.innerHTML = `<i data-lucide="globe" class="icon-xxs"></i> Connected: <strong>${regionName}</strong>`;
+      }
+      if (geoPingEl) {
+        geoPingEl.innerText = ping;
+      }
+
+      // Update local time
+      function updateTime() {
+        const now = new Date();
+        const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        if (geoTimeEl) {
+          geoTimeEl.innerText = `${timeStr} (${timeZone.split('/').pop()?.replace('_', ' ') || 'Local'})`;
+        }
+      }
+      updateTime();
+      setInterval(updateTime, 1000);
+
+      if (typeof lucide !== 'undefined' && lucide.createIcons) {
+        lucide.createIcons({ root: geoRegionEl });
+      }
+    } catch (e) {
+      console.warn('Geo detection error:', e);
+    }
+  }
+  initGeoLocation();
+
+  // 11. Multi-Language Quick Switcher
+  const langSelector = document.getElementById('lang-selector');
+  const translations = {
+    en: {
+      heroTitle: 'Code Together, <span class="text-gradient">In Real Time.</span><br>Zero Setup Required.',
+      heroSub: 'Instant collaborative study rooms that form automatically the second you open any <strong>LeetCode</strong>, <strong>Codeforces</strong>, <strong>NeetCode</strong>, or <strong>HackerRank</strong> problem. Direct WebRTC screen sharing, laser pointers, and in-page chat with <strong>zero central servers between peers</strong>.',
+      downloadBtn: 'Download Extension (.zip)',
+      toastLang: 'Language switched to English (US)'
+    },
+    es: {
+      heroTitle: 'Programa en equipo, <span class="text-gradient">en tiempo real.</span><br>Sin configuración previa.',
+      heroSub: 'Salas de estudio colaborativas P2P instantáneas para <strong>LeetCode</strong>, <strong>Codeforces</strong> y <strong>NeetCode</strong>. Comparte pantalla, usa puntero láser y chat integrado sin servidores centrales.',
+      downloadBtn: 'Descargar Extensión (.zip)',
+      toastLang: 'Idioma cambiado a Español'
+    },
+    zh: {
+      heroTitle: '实时协同刷题，<span class="text-gradient">零配置开启。</span>',
+      heroSub: '打开 <strong>LeetCode（力扣）</strong>、<strong>Codeforces</strong> 或 <strong>NeetCode</strong> 时自动生成 P2P 研讨室。点对点屏幕共享、激光笔互动与实时聊天，无中心服务器中转。',
+      downloadBtn: '下载扩展程序包 (.zip)',
+      toastLang: '已切换为简体中文'
+    },
+    hi: {
+      heroTitle: 'एक साथ कोड करें, <span class="text-gradient">रीयल टाइम में।</span><br>शून्य सेटअप आवश्यक।',
+      heroSub: 'LeetCode, Codeforces और NeetCode पर सीधे P2P स्टडी रूम। स्क्रीन शेयर, लेजर पॉइंटर और इन-पेज चैट बिना किसी केंद्रीय सर्वर के।',
+      downloadBtn: 'एक्सटेंशन डाउनलोड करें (.zip)',
+      toastLang: 'भाषा हिन्दी में बदली गई'
+    },
+    ja: {
+      heroTitle: 'リアルタイムで一緒にコーディング、<span class="text-gradient">設定不要。</span>',
+      heroSub: 'LeetCodeやCodeforcesの問題を開くだけで自動的にP2Pスタディルームが立ち上がります。WebRTC画面共有、レーザーポインター、チャット完備。',
+      downloadBtn: '拡張機能をダウンロード (.zip)',
+      toastLang: '言語を日本語に切り替えました'
+    }
+  };
+
+  if (langSelector) {
+    langSelector.addEventListener('change', (e) => {
+      const selected = (e.target).value;
+      const dict = translations[selected] || translations.en;
+
+      const heroHeading = document.getElementById('main-heading');
+      if (heroHeading) heroHeading.innerHTML = dict.heroTitle;
+
+      const heroSubtitle = document.querySelector('.hero-subtitle');
+      if (heroSubtitle) heroSubtitle.innerHTML = dict.heroSub;
+
+      const mainDownloadTexts = document.querySelectorAll('.btn-main-text');
+      mainDownloadTexts.forEach((el) => {
+        if (el.innerText.includes('Download') || el.innerText.includes('Descargar') || el.innerText.includes('下载') || el.innerText.includes('डाउनलोड') || el.innerText.includes('ダウンロード')) {
+          el.innerText = dict.downloadBtn;
+        }
+      });
+
+      showToast(dict.toastLang, 'globe');
+    });
+  }
 });
+

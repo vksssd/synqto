@@ -126,6 +126,71 @@ body {
   to { transform: translateY(0); opacity: 1; }
 }
 
+/* Regional Status Bar */
+.regional-status-bar {
+  background: rgba(14, 19, 31, 0.95);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 6px 0;
+}
+
+.regional-status-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.geo-region-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: #c7d2fe;
+}
+
+.geo-live-dot {
+  width: 6px;
+  height: 6px;
+  background: #10b981;
+  border-radius: 50%;
+  box-shadow: 0 0 6px #10b981;
+  display: inline-block;
+}
+
+.geo-latency-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.geo-divider {
+  color: var(--text-dim);
+}
+
+.lang-selector-wrapper {
+  margin-left: auto;
+}
+
+.lang-select {
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-main);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.lang-select:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
 /* Typography Utilities */
 .text-gradient {
   background: linear-gradient(135deg, #a5b4fc 0%, #6366f1 50%, #06b6d4 100%);

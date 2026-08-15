@@ -209,6 +209,91 @@ export const SettingsCard: React.FC = () => {
           </div>
         </div>
 
+        {/* Draggable Position Persistence Mode */}
+        <div style={{ marginTop: '10px', borderTop: '1px solid var(--border-subtle)', paddingTop: '10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+            <div style={{ fontSize: '11px', fontWeight: 600, color: '#f8fafc' }}>
+              📍 Draggable Position Persistence:
+            </div>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => {
+                const updated: FabSettings = {
+                  ...fabSettings,
+                  savedPosition: { right: 24, bottom: 24 },
+                };
+                setFabSettings(updated);
+                saveFabSettings(updated);
+              }}
+              style={{ fontSize: '9px', padding: '2px 6px', color: 'var(--primary)' }}
+              title="Reset position back to bottom-right"
+            >
+              Reset to Default
+            </button>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: '6px',
+                padding: '6px 8px',
+                borderRadius: 'var(--radius-sm)',
+                background: (fabSettings.positionMode === 'permanent' || !fabSettings.positionMode) ? 'rgba(99, 102, 241, 0.15)' : 'rgba(255, 255, 255, 0.02)',
+                border: (fabSettings.positionMode === 'permanent' || !fabSettings.positionMode) ? '1px solid rgba(99, 102, 241, 0.4)' : '1px solid var(--border-subtle)',
+                cursor: 'pointer',
+              }}
+            >
+              <input
+                type="radio"
+                name="fab_position_mode"
+                checked={fabSettings.positionMode === 'permanent' || !fabSettings.positionMode}
+                onChange={() => {
+                  const updated: FabSettings = { ...fabSettings, positionMode: 'permanent' };
+                  setFabSettings(updated);
+                  saveFabSettings(updated);
+                }}
+                style={{ marginTop: '2px', accentColor: 'var(--primary)' }}
+              />
+              <div>
+                <div style={{ fontSize: '11px', fontWeight: 600, color: '#f8fafc' }}>📌 Permanent</div>
+                <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>Remember dragged spot everywhere</div>
+              </div>
+            </label>
+
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: '6px',
+                padding: '6px 8px',
+                borderRadius: 'var(--radius-sm)',
+                background: fabSettings.positionMode === 'temporary' ? 'rgba(99, 102, 241, 0.15)' : 'rgba(255, 255, 255, 0.02)',
+                border: fabSettings.positionMode === 'temporary' ? '1px solid rgba(99, 102, 241, 0.4)' : '1px solid var(--border-subtle)',
+                cursor: 'pointer',
+              }}
+            >
+              <input
+                type="radio"
+                name="fab_position_mode"
+                checked={fabSettings.positionMode === 'temporary'}
+                onChange={() => {
+                  const updated: FabSettings = { ...fabSettings, positionMode: 'temporary' };
+                  setFabSettings(updated);
+                  saveFabSettings(updated);
+                }}
+                style={{ marginTop: '2px', accentColor: 'var(--primary)' }}
+              />
+              <div>
+                <div style={{ fontSize: '11px', fontWeight: 600, color: '#f8fafc' }}>⏱️ Temporary</div>
+                <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>Reset on reload/new tab</div>
+              </div>
+            </label>
+          </div>
+        </div>
+
         {/* Custom Whitelist Domains Section */}
         {fabSettings.mode === 'custom_sites' && (
           <div style={{ marginTop: '10px', borderTop: '1px solid var(--border-subtle)', paddingTop: '10px' }}>

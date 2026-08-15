@@ -1,6 +1,6 @@
-// ─── In-Browser Floating Action Button, Problem Chat & Collaborative Whiteboard Popup ───
+// ─── In-Browser Floating Action Button, Problem Chat, Draggable Positioning & Collaborative Whiteboard Popup ───
 
-import { FabSettings, DEFAULT_FAB_SETTINGS, FAB_STORAGE_KEY } from '@/features/settings/fab-settings.types';
+import { FabSettings, DEFAULT_FAB_SETTINGS, FAB_STORAGE_KEY, FabPosition } from '@/features/settings/fab-settings.types';
 import { detectResource } from './resource-detector';
 import { getPlatformBadgeColor, computeRoomId } from '@/features/room/room-utils';
 
@@ -49,6 +49,11 @@ export class FloatingWidget {
   private peerCount = 1;
   private replyingTo: ChatMessageData | null = null;
   private revealedSpoilers: Record<string, boolean> = {};
+
+  // Draggable Position State
+  private currentPosition: FabPosition = { right: 24, bottom: 24 };
+  private isDragging = false;
+  private dragMoved = false;
 
   // Whiteboard State
   private activeTab: 'chat' | 'whiteboard' = 'chat';
@@ -107,6 +112,14 @@ export class FloatingWidget {
       if (res[FAB_STORAGE_KEY]) {
         this.settings = res[FAB_STORAGE_KEY];
       }
+
+      // Initialize position based on persistence mode
+      if (this.settings.positionMode === 'permanent' && this.settings.savedPosition) {
+        this.currentPosition = { ...this.settings.savedPosition };
+      } else {
+        this.currentPosition = { right: 24, bottom: 24 };
+      }
+
       const problem = res.synqto_active_problem || res.nerd_buddy_active_problem;
       if (problem) {
         this.currentProblem = problem;
@@ -186,10 +199,11 @@ export class FloatingWidget {
     host.id = 'synqto-floating-host';
     host.style.cssText = `
       position: fixed;
-      bottom: 24px;
-      right: 24px;
+      bottom: ${this.currentPosition.bottom}px;
+      right: ${this.currentPosition.right}px;
       z-index: 2147483640;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      touch-action: none;
     `;
     document.body.appendChild(host);
     this.hostElement = host;
@@ -198,16 +212,28 @@ export class FloatingWidget {
     this.render();
   }
 
+  private applyHostPosition() {
+    if (!this.hostElement) return;
+    const right = Math.max(10, Math.min(window.innerWidth - 130, this.currentPosition.right));
+    const bottom = Math.max(10, Math.min(window.innerHeight - 55, this.currentPosition.bottom));
+    this.hostElement.style.right = `${right}px`;
+    this.hostElement.style.bottom = `${bottom}px`;
+  }
+
   private render() {
     if (!this.shadow) return;
+    this.applyHostPosition();
 
     const isLive = Boolean(this.liveStage && this.liveStage.isActive);
     const tutorName = this.liveStage?.tutorIdentity?.nickname || 'Tutor';
-    const broadcastType = this.liveStage?.broadcastType === 'screen' ? '🖥️ Screen' : this.liveStage?.broadcastType === 'camera' ? '📹 Camera' : '🎙️ Audio';
     const problemTitle = this.currentProblem?.title || 'Global Problem Lobby';
     const platform = this.currentProblem?.platform || 'LeetCode';
     const platformColor = getPlatformBadgeColor(platform);
     const isWhiteboardTab = this.settings.enableWhiteboard && this.activeTab === 'whiteboard';
+
+    // Dynamic positioning for popup card based on where the FAB is dragged
+    const isNearTop = this.currentPosition.bottom > (window.innerHeight - 540);
+    const isNearLeft = this.currentPosition.right > (window.innerWidth - 420);
 
     this.shadow.innerHTML = `
       <style>
@@ -235,23 +261,33 @@ export class FloatingWidget {
           position: relative;
           display: flex;
           align-items: center;
-          gap: 8px;
-          padding: 10px 16px;
+          gap: 7px;
+          padding: 10px 14px;
           border-radius: 9999px;
           background: linear-gradient(135deg, #4f46e5, #7c3aed);
           border: 1px solid rgba(255, 255, 255, 0.2);
           box-shadow: 0 10px 25px -5px rgba(99, 102, 241, 0.5), 0 0 15px rgba(124, 58, 237, 0.3);
           color: #ffffff;
-          font-size: 13px;
+          font-size: 12px;
           font-weight: 700;
-          cursor: pointer;
-          transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+          cursor: grab;
+          transition: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.15s;
           user-select: none;
         }
 
+        .fab-button:active {
+          cursor: grabbing;
+        }
+
         .fab-button:hover {
-          transform: translateY(-2px) scale(1.03);
+          transform: translateY(-2px) scale(1.02);
           box-shadow: 0 14px 28px -5px rgba(99, 102, 241, 0.65), 0 0 20px rgba(124, 58, 237, 0.4);
+        }
+
+        .drag-grip {
+          opacity: 0.5;
+          font-size: 11px;
+          cursor: grab;
         }
 
         .live-dot {
@@ -285,8 +321,8 @@ export class FloatingWidget {
           display: ${this.isOpen ? 'flex' : 'none'};
           flex-direction: column;
           position: absolute;
-          bottom: 56px;
-          right: 0;
+          ${isNearTop ? 'top: 52px; bottom: auto;' : 'bottom: 52px; top: auto;'}
+          ${isNearLeft ? 'left: 0; right: auto;' : 'right: 0; left: auto;'}
           width: 400px;
           height: 540px;
           max-height: 84vh;
@@ -499,7 +535,7 @@ export class FloatingWidget {
           font-weight: 700;
         }
 
-        /* Whiteboard Toolbar & Canvas in Popup */
+        /* Whiteboard Toolbar & Canvas */
         .whiteboard-container {
           flex: 1;
           display: flex;
@@ -737,7 +773,6 @@ export class FloatingWidget {
         ${isWhiteboardTab ? `
           <!-- Whiteboard View -->
           <div class="whiteboard-container">
-            <!-- Whiteboard Toolbar -->
             <div class="wb-toolbar">
               <div class="wb-tool-group">
                 <button class="wb-tool-btn ${this.wbTool === 'pen' ? 'active' : ''}" data-wbtool="pen" title="Pen">✏️</button>
@@ -843,8 +878,9 @@ export class FloatingWidget {
         `}
       </div>
 
-      <!-- Floating Action Button (FAB) -->
-      <button class="fab-button" id="nb-fab-trigger">
+      <!-- Draggable Floating Action Button (FAB) -->
+      <button class="fab-button" id="nb-fab-trigger" title="Drag anywhere or click to open">
+        <span class="drag-grip">⠿</span>
         ${isLive ? `<span class="live-dot"></span>` : `<span>⚡</span>`}
         <span>${isLive ? `LIVE (${tutorName})` : 'Synqto'}</span>
         ${this.unreadCount > 0 ? `<span class="fab-badge">${this.unreadCount}</span>` : ''}
@@ -860,23 +896,100 @@ export class FloatingWidget {
   private attachEventListeners() {
     if (!this.shadow) return;
 
-    // Toggle FAB Click
+    // Draggable FAB Implementation
     const fabBtn = this.shadow.getElementById('nb-fab-trigger');
-    fabBtn?.addEventListener('click', () => {
-      if (this.settings.clickAction === 'open_extension') {
-        if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
-          chrome.runtime.sendMessage({ type: 'OPEN_SIDEPANEL' }).catch(() => {});
-        }
-        return;
-      }
+    if (fabBtn) {
+      let startX = 0;
+      let startY = 0;
+      let initialRight = 24;
+      let initialBottom = 24;
 
-      this.isOpen = !this.isOpen;
-      this.unreadCount = 0;
-      this.render();
-      if (this.isOpen && this.activeTab === 'chat') {
-        this.scrollToBottom();
-      }
-    });
+      const onPointerMove = (e: MouseEvent | TouchEvent) => {
+        if (!this.isDragging) return;
+        const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+        const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+
+        const dx = clientX - startX;
+        const dy = clientY - startY;
+
+        if (Math.hypot(dx, dy) > 4) {
+          this.dragMoved = true;
+          const newRight = initialRight - dx;
+          const newBottom = initialBottom - dy;
+
+          this.currentPosition = {
+            right: Math.max(10, Math.min(window.innerWidth - 130, newRight)),
+            bottom: Math.max(10, Math.min(window.innerHeight - 55, newBottom)),
+          };
+          this.applyHostPosition();
+        }
+      };
+
+      const onPointerUp = () => {
+        if (this.isDragging) {
+          this.isDragging = false;
+          window.removeEventListener('mousemove', onPointerMove);
+          window.removeEventListener('mouseup', onPointerUp);
+          window.removeEventListener('touchmove', onPointerMove);
+          window.removeEventListener('touchend', onPointerUp);
+
+          if (this.dragMoved) {
+            // If permanent mode, persist to storage
+            if (this.settings.positionMode === 'permanent') {
+              const updatedSettings: FabSettings = {
+                ...this.settings,
+                savedPosition: { ...this.currentPosition },
+              };
+              this.settings = updatedSettings;
+              if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+                chrome.storage.local.set({ [FAB_STORAGE_KEY]: updatedSettings });
+              }
+            }
+
+            // Prevent immediate toggle click after dragging
+            setTimeout(() => {
+              this.dragMoved = false;
+            }, 60);
+          }
+        }
+      };
+
+      const onPointerDown = (e: MouseEvent | TouchEvent) => {
+        this.isDragging = true;
+        this.dragMoved = false;
+        startX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+        startY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+        initialRight = this.currentPosition.right;
+        initialBottom = this.currentPosition.bottom;
+
+        window.addEventListener('mousemove', onPointerMove, { passive: true });
+        window.addEventListener('mouseup', onPointerUp);
+        window.addEventListener('touchmove', onPointerMove, { passive: true });
+        window.addEventListener('touchend', onPointerUp);
+      };
+
+      fabBtn.addEventListener('mousedown', onPointerDown);
+      fabBtn.addEventListener('touchstart', onPointerDown, { passive: true });
+
+      // Click to toggle (only if not dragged)
+      fabBtn.addEventListener('click', () => {
+        if (this.dragMoved) return;
+
+        if (this.settings.clickAction === 'open_extension') {
+          if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+            chrome.runtime.sendMessage({ type: 'OPEN_SIDEPANEL' }).catch(() => {});
+          }
+          return;
+        }
+
+        this.isOpen = !this.isOpen;
+        this.unreadCount = 0;
+        this.render();
+        if (this.isOpen && this.activeTab === 'chat') {
+          this.scrollToBottom();
+        }
+      });
+    }
 
     // Close Popup Button
     const closeBtn = this.shadow.getElementById('nb-close-popup');
@@ -1424,6 +1537,9 @@ export class FloatingWidget {
           }
           if (changes[FAB_STORAGE_KEY]) {
             this.settings = changes[FAB_STORAGE_KEY].newValue;
+            if (this.settings.positionMode === 'permanent' && this.settings.savedPosition) {
+              this.currentPosition = { ...this.settings.savedPosition };
+            }
             this.checkVisibilityAndRender();
           }
           if (changes.synqto_active_problem || changes.nerd_buddy_active_problem) {

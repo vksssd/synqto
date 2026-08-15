@@ -1,4 +1,4 @@
-name: CI/CD Pipeline & Extension Release
+name: Extension & Website CI/CD
 
 on:
   push:
@@ -10,35 +10,9 @@ on:
   workflow_dispatch:
 
 jobs:
-  # ─── 1. Build & Test Go Signaling Server ───
-  server-ci:
-    name: Go Server CI
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: server
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.22'
-          cache-dependency-path: server/go.sum
-
-      - name: Run Unit & Integration Tests
-        run: go test -v ./...
-
-      - name: Build Production Static Binary
-        run: CGO_ENABLED=0 go build -ldflags="-w -s" -o bin/server .
-
-      - name: Verify Docker Container Build
-        run: docker build -t nerd-buddy-server .
-
-  # ─── 2. Build & Package Chrome Extension ───
+  # ─── 1. Build & Package Chrome Extension ───
   extension-ci:
-    name: Chrome Extension CI & Packaging
+    name: Chrome Extension Build & Package
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -57,40 +31,20 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
-      - name: Build Extension Bundle (Vite)
+      - name: Typecheck TypeScript
+        run: npx tsc --noEmit
+
+      - name: Build React Sidepanel & Background (Vite)
         run: npm run build
 
-      - name: Package Chrome Web Store ZIP
+      - name: Bundle Content Script & Package Release
         run: |
-          mkdir -p dist-zip
-          zip -r dist-zip/nerd-buddy-extension.zip dist/
+          node scripts/build-content.mjs
+          node scripts/package.mjs
 
-      - name: Upload Extension Artifact
+      - name: Upload Extension Release ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: nerd-buddy-chrome-extension
-          path: extension/dist-zip/nerd-buddy-extension.zip
+          name: synqto-chrome-extension
+          path: extension/dist-zip/synqto-v0.1.0.zip
           retention-days: 30
-
-  # ─── 3. Deploy Go Server to Fly.io (If Secret Configured) ───
-  deploy-server:
-    name: Deploy to Cloud (Fly.io)
-    needs: [server-ci, extension-ci]
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Setup flyctl
-        if: env.FLY_API_TOKEN != ''
-        uses: superfly/flyctl-actions/setup-flyctl@master
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-
-      - name: Deploy Server to Fly.io
-        if: env.FLY_API_TOKEN != ''
-        working-directory: server
-        run: flyctl deploy --remote-only
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

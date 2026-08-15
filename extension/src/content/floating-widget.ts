@@ -58,10 +58,11 @@ export class FloatingWidget {
 
   // Whiteboard State
   private activeTab: 'chat' | 'whiteboard' = 'chat';
-  private wbTool: 'pen' | 'brush' | 'highlighter' | 'laser' | 'torch' | 'eraser' | 'line' | 'arrow' | 'rect' | 'circle' | 'tree_node' | 'text' = 'pen';
+  private wbTool: 'pen' | 'brush' | 'highlighter' | 'temp_pen' | 'laser' | 'torch' | 'eraser' | 'line' | 'arrow' | 'rect' | 'circle' | 'tree_node' | 'db_cylinder' | 'cloud' | 'load_balancer' | 'message_queue' | 'server_box' | 'text' = 'pen';
   private wbColor: string = '#6366f1';
   private wbWidth: number = 4;
   private wbTheme: 'grid' | 'ruled' | 'blank' | 'dotted' | 'plot' | 'matrix' | 'white_blank' = 'grid';
+  private wbBgColor: string = '#090d16';
   private wbPrivacyMode: 'collaborative' | 'personal' = 'collaborative';
   private wbStrokes: InPageStroke[] = [];
   private wbPersonalStrokes: InPageStroke[] = [];
@@ -790,6 +791,7 @@ export class FloatingWidget {
                 <button class="wb-tool-btn ${this.wbTool === 'pen' ? 'active' : ''}" data-wbtool="pen" title="Fine Pen">✏️</button>
                 <button class="wb-tool-btn ${this.wbTool === 'brush' ? 'active' : ''}" data-wbtool="brush" title="Brush Pen">✒️</button>
                 <button class="wb-tool-btn ${this.wbTool === 'highlighter' ? 'active' : ''}" data-wbtool="highlighter" title="Highlighter">🖍️</button>
+                <button class="wb-tool-btn ${this.wbTool === 'temp_pen' ? 'active' : ''}" data-wbtool="temp_pen" title="⏳ Disappearing Ink (Fades in 3s)">⏳</button>
                 <button class="wb-tool-btn ${this.wbTool === 'laser' ? 'active' : ''}" data-wbtool="laser" title="Laser Pointer">🔴</button>
                 <button class="wb-tool-btn ${this.wbTool === 'torch' ? 'active' : ''}" data-wbtool="torch" title="Spotlight Torch">🔦</button>
                 <button class="wb-tool-btn ${this.wbTool === 'eraser' ? 'active' : ''}" data-wbtool="eraser" title="Eraser">🧹</button>
@@ -798,6 +800,11 @@ export class FloatingWidget {
                 <button class="wb-tool-btn ${this.wbTool === 'rect' ? 'active' : ''}" data-wbtool="rect" title="Box">🔲</button>
                 <button class="wb-tool-btn ${this.wbTool === 'circle' ? 'active' : ''}" data-wbtool="circle" title="Node">⭕</button>
                 <button class="wb-tool-btn ${this.wbTool === 'tree_node' ? 'active' : ''}" data-wbtool="tree_node" title="Tree Node">🌳</button>
+                <button class="wb-tool-btn ${this.wbTool === 'db_cylinder' ? 'active' : ''}" data-wbtool="db_cylinder" title="Database Cylinder">🗄️</button>
+                <button class="wb-tool-btn ${this.wbTool === 'cloud' ? 'active' : ''}" data-wbtool="cloud" title="Cloud Gateway">☁️</button>
+                <button class="wb-tool-btn ${this.wbTool === 'load_balancer' ? 'active' : ''}" data-wbtool="load_balancer" title="Load Balancer">⚖️</button>
+                <button class="wb-tool-btn ${this.wbTool === 'message_queue' ? 'active' : ''}" data-wbtool="message_queue" title="Message Queue">📨</button>
+                <button class="wb-tool-btn ${this.wbTool === 'server_box' ? 'active' : ''}" data-wbtool="server_box" title="Server Box">📦</button>
               </div>
 
               <div class="wb-tool-group">
@@ -812,7 +819,7 @@ export class FloatingWidget {
               </div>
             </div>
 
-            <!-- Color Palette, Widths & Background Choices -->
+            <!-- Color Palette, Widths, BG Colors & Background Patterns -->
             <div class="wb-palette-bar">
               <div style="display:flex;gap:2px;align-items:center;overflow-x:auto;">
                 <button class="size-pill ${this.wbTheme === 'grid' ? 'active' : ''}" data-wbtheme="grid" title="Square Graph Grid">⬛ Grid</button>
@@ -820,7 +827,13 @@ export class FloatingWidget {
                 <button class="size-pill ${this.wbTheme === 'plot' ? 'active' : ''}" data-wbtheme="plot" title="Coordinate Plot (X,Y)">📈 Plot</button>
                 <button class="size-pill ${this.wbTheme === 'dotted' ? 'active' : ''}" data-wbtheme="dotted" title="Dot Grid">🟦 Dots</button>
                 <button class="size-pill ${this.wbTheme === 'matrix' ? 'active' : ''}" data-wbtheme="matrix" title="Matrix Table">📐 Matrix</button>
-                <button class="size-pill ${this.wbTheme === 'white_blank' ? 'active' : ''}" data-wbtheme="white_blank" title="White Board">⬜ White</button>
+              </div>
+
+              <!-- BG Colors -->
+              <div style="display:flex;gap:3px;align-items:center;">
+                ${['#090d16', '#0f172a', '#062c24', '#fef3c7', '#ffffff', '#f8fafc', '#1e1035'].map((bg) => `
+                  <div class="bg-dot" data-wbbg="${bg}" style="width:10px;height:10px;border-radius:2px;background:${bg};border:${this.wbBgColor === bg ? '2px solid #6366f1' : '1px solid rgba(255,255,255,0.2)'};cursor:pointer;" title="Background Color"></div>
+                `).join('')}
               </div>
 
               <div style="display:flex;gap:4px;align-items:center;">
@@ -1147,6 +1160,21 @@ export class FloatingWidget {
       });
     });
 
+    // Attach Background Color Selector
+    const bgDots = this.shadow.querySelectorAll('.bg-dot[data-wbbg]');
+    bgDots.forEach((dot) => {
+      dot.addEventListener('click', (e) => {
+        const bg = (e.currentTarget as HTMLElement).getAttribute('data-wbbg');
+        if (bg) {
+          this.wbBgColor = bg;
+          if ((bg === '#ffffff' || bg === '#f8fafc' || bg === '#fef3c7') && this.wbColor === '#ffffff') {
+            this.wbColor = '#0f172a';
+          }
+          this.render();
+        }
+      });
+    });
+
     // Attach Color Selector
     const colorDots = this.shadow.querySelectorAll('.color-dot');
     colorDots.forEach((dot) => {
@@ -1323,8 +1351,8 @@ export class FloatingWidget {
 
     // Draw Background Theme
     ctx.save();
-    const isLightBg = this.wbTheme === 'white_blank';
-    ctx.fillStyle = isLightBg ? '#f8fafc' : '#090d16';
+    const isLightBg = this.wbBgColor === '#ffffff' || this.wbBgColor === '#f8fafc' || this.wbBgColor === '#fef3c7';
+    ctx.fillStyle = this.wbBgColor || (isLightBg ? '#f8fafc' : '#090d16');
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     if (this.wbTheme === 'ruled') {
@@ -1460,6 +1488,98 @@ export class FloatingWidget {
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           ctx.fillText(s.geometry.label || 'N', x1, y1);
+        } else if (s.tool === 'db_cylinder') {
+          const w = Math.max(50, Math.abs(x2 - x1));
+          const h = Math.max(55, Math.abs(y2 - y1));
+          const minX = Math.min(x1, x2);
+          const minY = Math.min(y1, y2);
+          const ry = Math.min(14, h * 0.2);
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.95)';
+          ctx.beginPath();
+          ctx.ellipse(minX + w / 2, minY + ry, w / 2, ry, 0, Math.PI, 0);
+          ctx.lineTo(minX + w, minY + h - ry);
+          ctx.ellipse(minX + w / 2, minY + h - ry, w / 2, ry, 0, 0, Math.PI);
+          ctx.lineTo(minX, minY + ry);
+          ctx.fill();
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.ellipse(minX + w / 2, minY + ry, w / 2, ry, 0, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.fillStyle = '#ffffff';
+          ctx.font = 'bold 10px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('🗄️ DB', minX + w / 2, minY + h / 2 + 4);
+        } else if (s.tool === 'cloud') {
+          const w = Math.max(65, Math.abs(x2 - x1));
+          const h = Math.max(40, Math.abs(y2 - y1));
+          const minX = Math.min(x1, x2);
+          const minY = Math.min(y1, y2);
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.95)';
+          ctx.beginPath();
+          ctx.roundRect(minX, minY, w, h, 14);
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = '#ffffff';
+          ctx.font = 'bold 10px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('☁️ Cloud', minX + w / 2, minY + h / 2);
+        } else if (s.tool === 'load_balancer') {
+          const w = Math.max(55, Math.abs(x2 - x1));
+          const h = Math.max(55, Math.abs(y2 - y1));
+          const minX = Math.min(x1, x2);
+          const minY = Math.min(y1, y2);
+          const midX = minX + w / 2;
+          const midY = minY + h / 2;
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.95)';
+          ctx.beginPath();
+          ctx.moveTo(midX, minY);
+          ctx.lineTo(minX + w, midY);
+          ctx.lineTo(midX, minY + h);
+          ctx.lineTo(minX, midY);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = '#ffffff';
+          ctx.font = 'bold 10px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('⚖️ LB', midX, midY);
+        } else if (s.tool === 'message_queue') {
+          const w = Math.max(70, Math.abs(x2 - x1));
+          const h = Math.max(34, Math.abs(y2 - y1));
+          const minX = Math.min(x1, x2);
+          const minY = Math.min(y1, y2);
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.95)';
+          ctx.beginPath();
+          ctx.roundRect(minX, minY, w, h, 6);
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = '#ffffff';
+          ctx.font = 'bold 9px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('📨 Queue', minX + w / 2, minY + h / 2);
+        } else if (s.tool === 'server_box') {
+          const w = Math.max(65, Math.abs(x2 - x1));
+          const h = Math.max(40, Math.abs(y2 - y1));
+          const minX = Math.min(x1, x2);
+          const minY = Math.min(y1, y2);
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.95)';
+          ctx.beginPath();
+          ctx.roundRect(minX, minY, w, h, 6);
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = '#10b981';
+          ctx.beginPath();
+          ctx.arc(minX + 10, minY + 10, 3, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#ffffff';
+          ctx.font = 'bold 9px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('📦 Server', minX + w / 2, minY + h / 2 + 2);
         }
       } else if (s.points && s.points.length > 1) {
         ctx.beginPath();

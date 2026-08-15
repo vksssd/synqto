@@ -406,8 +406,182 @@ export const SettingsCard: React.FC = () => {
           </div>
 
           <div style={{ fontSize: '10px', color: 'var(--text-muted)', lineHeight: '1.4' }}>
-            Enables an interactive drawing canvas with pens, highlighters, geometric shapes (trees, lines, boxes), and P2P synchronization in the popup &amp; sidepanel.
+            Enables an interactive drawing canvas with pens, highlighters, geometric shapes (trees, lines, boxes), system design architecture components, and multi-page notebooks.
           </div>
+
+          {/* Whiteboard Preferences Sub-Panel */}
+          {fabSettings.enableWhiteboard && (
+            <div style={{ marginTop: '10px', background: 'rgba(0, 0, 0, 0.3)', padding: '10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)' }}>
+              <div style={{ fontSize: '11px', fontWeight: 700, color: '#c7d2fe', marginBottom: '8px' }}>
+                ⚙️ Default Whiteboard &amp; Notebook Settings
+              </div>
+
+              {/* 1. Default Privacy Mode */}
+              <div style={{ marginBottom: '10px' }}>
+                <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginBottom: '4px', fontWeight: 600 }}>
+                  Default Board Mode:
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+                  {[
+                    { id: 'collaborative', label: '👥 Collaborative', desc: 'Sync live with room peers' },
+                    { id: 'personal', label: '🔒 Personal Scratchpad', desc: 'Private offline notes' },
+                  ].map((m) => {
+                    const currentMode = fabSettings.whiteboardPrefs?.defaultPrivacyMode || 'collaborative';
+                    return (
+                      <label
+                        key={m.id}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          gap: '6px',
+                          padding: '5px 8px',
+                          borderRadius: '4px',
+                          background: currentMode === m.id ? 'rgba(99, 102, 241, 0.2)' : 'rgba(255,255,255,0.02)',
+                          border: currentMode === m.id ? '1px solid var(--primary)' : '1px solid var(--border-subtle)',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <input
+                          type="radio"
+                          name="wb_pref_mode"
+                          checked={currentMode === m.id}
+                          onChange={() => {
+                            const updated: FabSettings = {
+                              ...fabSettings,
+                              whiteboardPrefs: {
+                                ...(fabSettings.whiteboardPrefs || {
+                                  defaultPrivacyMode: 'collaborative',
+                                  defaultBackgroundType: 'grid',
+                                  defaultBgColor: '#090d16',
+                                  defaultPenColor: '#6366f1',
+                                  defaultPenWidth: 4,
+                                  disappearingInkDurationSec: 3,
+                                  autoSavePersonalNotebook: true,
+                                }),
+                                defaultPrivacyMode: m.id as any,
+                              },
+                            };
+                            setFabSettings(updated);
+                            saveFabSettings(updated);
+                          }}
+                          style={{ marginTop: '2px', accentColor: 'var(--primary)' }}
+                        />
+                        <div>
+                          <div style={{ fontSize: '10px', fontWeight: 600, color: '#fff' }}>{m.label}</div>
+                          <div style={{ fontSize: '8px', color: 'var(--text-muted)' }}>{m.desc}</div>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 2. Default Canvas Background Color */}
+              <div style={{ marginBottom: '10px' }}>
+                <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginBottom: '4px', fontWeight: 600 }}>
+                  Default Canvas Background Color:
+                </div>
+                <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  {[
+                    { color: '#090d16', label: 'Dark Obsidian' },
+                    { color: '#0f172a', label: 'Midnight Slate' },
+                    { color: '#062c24', label: 'Deep Forest' },
+                    { color: '#fef3c7', label: 'Vintage Sepia' },
+                    { color: '#ffffff', label: 'Pure White' },
+                    { color: '#f8fafc', label: 'Soft Cream' },
+                    { color: '#1e1035', label: 'Deep Violet' },
+                  ].map((c) => {
+                    const currentBg = fabSettings.whiteboardPrefs?.defaultBgColor || '#090d16';
+                    return (
+                      <button
+                        key={c.color}
+                        type="button"
+                        onClick={() => {
+                          const updated: FabSettings = {
+                            ...fabSettings,
+                            whiteboardPrefs: {
+                              ...(fabSettings.whiteboardPrefs || {
+                                defaultPrivacyMode: 'collaborative',
+                                defaultBackgroundType: 'grid',
+                                defaultBgColor: '#090d16',
+                                defaultPenColor: '#6366f1',
+                                defaultPenWidth: 4,
+                                disappearingInkDurationSec: 3,
+                                autoSavePersonalNotebook: true,
+                              }),
+                              defaultBgColor: c.color,
+                            },
+                          };
+                          setFabSettings(updated);
+                          saveFabSettings(updated);
+                        }}
+                        title={c.label}
+                        style={{
+                          width: '22px',
+                          height: '22px',
+                          borderRadius: '4px',
+                          background: c.color,
+                          border: currentBg === c.color ? '2px solid #6366f1' : '1px solid rgba(255,255,255,0.2)',
+                          boxShadow: currentBg === c.color ? '0 0 6px rgba(99, 102, 241, 0.8)' : 'none',
+                          cursor: 'pointer',
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 3. Disappearing Ink Fade Duration */}
+              <div>
+                <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginBottom: '4px', fontWeight: 600 }}>
+                  ⏳ Disappearing Ink Fade Duration:
+                </div>
+                <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                  {[2, 3, 5].map((sec) => {
+                    const currentSec = fabSettings.whiteboardPrefs?.disappearingInkDurationSec || 3;
+                    return (
+                      <button
+                        key={sec}
+                        type="button"
+                        onClick={() => {
+                          const updated: FabSettings = {
+                            ...fabSettings,
+                            whiteboardPrefs: {
+                              ...(fabSettings.whiteboardPrefs || {
+                                defaultPrivacyMode: 'collaborative',
+                                defaultBackgroundType: 'grid',
+                                defaultBgColor: '#090d16',
+                                defaultPenColor: '#6366f1',
+                                defaultPenWidth: 4,
+                                disappearingInkDurationSec: 3,
+                                autoSavePersonalNotebook: true,
+                              }),
+                              disappearingInkDurationSec: sec,
+                            },
+                          };
+                          setFabSettings(updated);
+                          saveFabSettings(updated);
+                        }}
+                        style={{
+                          flex: 1,
+                          fontSize: '10px',
+                          fontWeight: 600,
+                          padding: '4px',
+                          borderRadius: '4px',
+                          background: currentSec === sec ? 'var(--primary)' : 'rgba(255,255,255,0.04)',
+                          border: currentSec === sec ? '1px solid transparent' : '1px solid var(--border-subtle)',
+                          color: currentSec === sec ? '#fff' : 'var(--text-muted)',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {sec} Seconds
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

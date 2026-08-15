@@ -67,7 +67,7 @@ export class NetworkService {
     }
   }
 
-  public broadcast(type: PacketType, payload: unknown): NetworkPacket | null {
+  public broadcast<T = unknown>(type: PacketType, payload: T): NetworkPacket | null {
     if (!this.myIdentity || !this.currentRoomId) return null;
 
     const packet = createPacket(type, this.myIdentity, this.currentRoomId, payload);
@@ -85,7 +85,7 @@ export class NetworkService {
     return packet;
   }
 
-  public send(targetPeerId: string, type: PacketType, payload: unknown): NetworkPacket | null {
+  public send<T = unknown>(targetPeerId: string, type: PacketType, payload: T): NetworkPacket | null {
     if (!this.myIdentity || !this.currentRoomId) return null;
 
     const packet = createPacket(type, this.myIdentity, this.currentRoomId, payload, targetPeerId);

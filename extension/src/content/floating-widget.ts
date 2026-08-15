@@ -929,7 +929,7 @@ export class FloatingWidget {
                   </div>
                 </div>
 
-                <div class="chat-body">${this.renderFormattedText(m.text, idx)}</div>
+                <div class="chat-body">${this.renderFormattedText(m.text, idx, m)}</div>
 
                 ${m.isSelf ? `
                   <div class="chat-footer">
@@ -1917,10 +1917,21 @@ export class FloatingWidget {
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   }
 
-  private renderFormattedText(text: string, msgIdx: number): string {
+  private renderFormattedText(text: string, msgIdx: number, msgObj?: any): string {
+    let output = '';
+
+    // If image attached
+    if (msgObj?.imageUrl) {
+      output += `
+        <div style="margin:4px 0;border-radius:6px;overflow:hidden;border:1px solid rgba(255,255,255,0.1);">
+          <img src="${msgObj.imageUrl}" alt="Shared image" style="width:100%;max-height:180px;object-fit:cover;display:block;" />
+        </div>
+      `;
+    }
+
     const lines = text.split('\n');
 
-    return lines.map((line, lIdx) => {
+    const renderedLines = lines.map((line, lIdx) => {
       if (line.startsWith('```') && line.endsWith('```') && line.length > 6) {
         const codeText = line.slice(3, -3);
         return `
@@ -1944,14 +1955,22 @@ export class FloatingWidget {
               </span>
             `;
           }
-          return this.escapeHtml(part);
+          return this.renderMentionsHtml(this.escapeHtml(part));
         }).join('');
 
         return `<p style="margin:2px 0;">${renderedParts}</p>`;
       }
 
-      return `<p style="margin:2px 0;">${this.escapeHtml(line)}</p>`;
+      return `<p style="margin:2px 0;">${this.renderMentionsHtml(this.escapeHtml(line))}</p>`;
     }).join('');
+
+    return output + renderedLines;
+  }
+
+  private renderMentionsHtml(escapedStr: string): string {
+    if (!escapedStr.includes('@')) return escapedStr;
+    return escapedStr.replace(/(@everyone|@all)/g, '<span style="background:rgba(245,158,11,0.25);border:1px solid rgba(245,158,11,0.5);color:#fbbf24;padding:1px 4px;border-radius:3px;font-weight:700;font-size:10px;">📣 $1</span>')
+      .replace(/(@[a-zA-Z0-9_-]+)/g, '<span style="background:rgba(99,102,241,0.25);border:1px solid rgba(99,102,241,0.4);color:#c7d2fe;padding:1px 4px;border-radius:3px;font-weight:600;font-size:10px;">$1</span>');
   }
 
   private deduplicateMessages(raw: any[]): ChatMessageData[] {

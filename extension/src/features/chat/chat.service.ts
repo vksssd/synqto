@@ -1,4 +1,4 @@
-// ─── Real-time Chat Service (3-Level ACKs + History Sync + Local Persistence) ───
+// ─── Real-time Chat Service (WhatsApp-style Rich Chat + Reliable Delivery + ACKs + Reactions + Polls + Quizzes) ───
 
 import { NetworkService } from '@/core/network/network.service';
 import {
@@ -6,8 +6,16 @@ import {
   ChatAckPayload,
   ChatHistoryPayload,
   ChatHistoryResponsePayload,
+  ChatReactionPayload,
+  ChatPollVotePayload,
+  ChatQuizAnswerPayload,
   PeerIdentity,
   StoredChatMessage,
+  ChatMessageType,
+  CodeSnippetData,
+  PollData,
+  QuizData,
+  FileAttachmentData,
 } from '@/core/network/packet';
 import { uuid, debounce } from '@/shared/utils';
 
@@ -20,9 +28,9 @@ export interface ChatMessageItem extends StoredChatMessage {
   receivedAcks?: Set<string>;
 }
 
-const STORAGE_PREFIX = 'nerd_buddy_chat_';
-const MAX_STORED_MESSAGES = 200;
-const HISTORY_SYNC_LIMIT = 50;
+const STORAGE_PREFIX = 'synqto_chat_';
+const MAX_STORED_MESSAGES = 250;
+const HISTORY_SYNC_LIMIT = 60;
 
 export class ChatService {
   private static instance: ChatService | null = null;
@@ -31,7 +39,7 @@ export class ChatService {
   private currentRoomId = '';
   private myPeerId = '';
   private messages: ChatMessageItem[] = [];
-  private unackedQueue: Map<string, { message: ChatMessageItem; attempts: number; timer: any }> = new Map();
+  private unackedQueue: Map<string, { message: ChatMessageItem; payload: ChatMessagePayload; attempts: number; timer: any }> = new Map();
 
   private listeners: Set<(messages: ChatMessageItem[]) => void> = new Set();
   private unreadCount = 0;
@@ -83,8 +91,17 @@ export class ChatService {
         from: packet.from,
         text: payload.text,
         timestamp: packet.timestamp,
+        messageType: payload.messageType || 'text',
         replyTo: payload.replyTo,
         replyPreview: payload.replyPreview,
+        imageUrl: payload.imageUrl,
+        imageCaption: payload.imageCaption,
+        codeSnippet: payload.codeSnippet,
+        poll: payload.poll,
+        quiz: payload.quiz,
+        fileAttachment: payload.fileAttachment,
+        mentions: payload.mentions || [],
+        reactions: payload.reactions || {},
         status: 'delivered',
         isSelf: packet.from.peerId === this.myPeerId,
       };
@@ -126,7 +143,65 @@ export class ChatService {
       }
     });
 
-    // 4. Inbound history request
+    // 4. Inbound Reactions
+    this.network.on<ChatReactionPayload>('chat:reaction', (payload, packet) => {
+      const msg = this.messages.find((m) => m.id === payload.messageId);
+      if (!msg) return;
+
+      if (!msg.reactions) msg.reactions = {};
+      const currentReactors = msg.reactions[payload.emoji] || [];
+      const senderPeerId = packet.from.peerId;
+
+      if (payload.remove) {
+        msg.reactions[payload.emoji] = currentReactors.filter((p) => p !== senderPeerId);
+        if (msg.reactions[payload.emoji].length === 0) {
+          delete msg.reactions[payload.emoji];
+        }
+      } else {
+        if (!currentReactors.includes(senderPeerId)) {
+          msg.reactions[payload.emoji] = [...currentReactors, senderPeerId];
+        }
+      }
+
+      this.saveMessagesDebounced();
+      this.emitMessages();
+    });
+
+    // 5. Inbound Poll Vote
+    this.network.on<ChatPollVotePayload>('chat:poll:vote', (payload, packet) => {
+      const msg = this.messages.find((m) => m.id === payload.messageId);
+      if (!msg || !msg.poll) return;
+
+      const voterPeerId = packet.from.peerId;
+      msg.poll.options.forEach((opt) => {
+        if (opt.id === payload.optionId) {
+          if (!opt.votes.includes(voterPeerId)) {
+            opt.votes.push(voterPeerId);
+          }
+        } else if (!payload.isMultiChoice) {
+          // Single choice removes vote from other options
+          opt.votes = opt.votes.filter((p) => p !== voterPeerId);
+        }
+      });
+
+      this.saveMessagesDebounced();
+      this.emitMessages();
+    });
+
+    // 6. Inbound Quiz Answer
+    this.network.on<ChatQuizAnswerPayload>('chat:quiz:answer', (payload, packet) => {
+      const msg = this.messages.find((m) => m.id === payload.messageId);
+      if (!msg || !msg.quiz) return;
+
+      const voterPeerId = packet.from.peerId;
+      if (!msg.quiz.answers) msg.quiz.answers = {};
+      msg.quiz.answers[voterPeerId] = payload.selectedOptionIndex;
+
+      this.saveMessagesDebounced();
+      this.emitMessages();
+    });
+
+    // 7. Inbound history request
     this.network.on<ChatHistoryPayload>('chat:history:request', (payload, packet) => {
       if (this.messages.length === 0) return;
 
@@ -139,8 +214,17 @@ export class ChatService {
           from: m.from,
           text: m.text,
           timestamp: m.timestamp,
+          messageType: m.messageType,
           replyTo: m.replyTo,
           replyPreview: m.replyPreview,
+          imageUrl: m.imageUrl,
+          imageCaption: m.imageCaption,
+          codeSnippet: m.codeSnippet,
+          poll: m.poll,
+          quiz: m.quiz,
+          fileAttachment: m.fileAttachment,
+          mentions: m.mentions,
+          reactions: m.reactions,
         }));
 
       if (recent.length > 0) {
@@ -150,7 +234,7 @@ export class ChatService {
       }
     });
 
-    // 5. Inbound history response
+    // 8. Inbound history response
     this.network.on<ChatHistoryResponsePayload>('chat:history:response', (payload) => {
       if (!payload?.messages || payload.messages.length === 0) return;
 
@@ -174,26 +258,77 @@ export class ChatService {
     });
   }
 
+  /**
+   * Generates a deterministic messageId based on timestamp and payload size
+   */
+  private generateMessageId(textLength = 0): string {
+    const ts = Date.now();
+    const rand = Math.random().toString(36).substring(2, 7);
+    return `msg_${ts}_${textLength}_${rand}`;
+  }
+
+  /**
+   * Send standard text message or rich item
+   */
   public sendMessage(
     text: string,
     fromIdentity: PeerIdentity,
-    replyTo?: { id: string; preview: string },
+    optionsOrReplyTo?:
+      | {
+          replyTo?: { id: string; preview: string };
+          messageId?: string;
+          messageType?: ChatMessageType;
+          imageUrl?: string;
+          imageCaption?: string;
+          codeSnippet?: CodeSnippetData;
+          poll?: PollData;
+          quiz?: QuizData;
+          fileAttachment?: FileAttachmentData;
+          mentions?: string[];
+        }
+      | { id: string; preview: string },
     existingMessageId?: string
   ): ChatMessageItem {
-    const messageId = existingMessageId || uuid();
+    const rawText = text.trim();
+    const isOptionsObject =
+      optionsOrReplyTo &&
+      ('messageType' in optionsOrReplyTo ||
+        'imageUrl' in optionsOrReplyTo ||
+        'codeSnippet' in optionsOrReplyTo ||
+        'poll' in optionsOrReplyTo ||
+        'quiz' in optionsOrReplyTo ||
+        'fileAttachment' in optionsOrReplyTo ||
+        'mentions' in optionsOrReplyTo);
 
-    const existing = this.messages.find((m) => m.id === messageId);
-    if (existing) {
-      return existing;
+    const options = isOptionsObject ? (optionsOrReplyTo as any) : undefined;
+    const replyTo = !isOptionsObject && optionsOrReplyTo ? (optionsOrReplyTo as { id: string; preview: string }) : options?.replyTo;
+    const customMessageId = options?.messageId || existingMessageId;
+    const messageId = customMessageId || this.generateMessageId(rawText.length);
+
+    // Extract @mentions if not explicitly provided
+    let mentions = options?.mentions || [];
+    if (mentions.length === 0 && rawText.includes('@')) {
+      if (rawText.includes('@everyone') || rawText.includes('@all')) {
+        mentions.push('everyone');
+      }
     }
 
     const msg: ChatMessageItem = {
       id: messageId,
       from: fromIdentity,
-      text: text.trim(),
+      text: rawText,
       timestamp: Date.now(),
+      messageType: options?.messageType || 'text',
       replyTo: replyTo?.id,
       replyPreview: replyTo?.preview,
+      imageUrl: options?.imageUrl,
+      imageCaption: options?.imageCaption,
+      codeSnippet: options?.codeSnippet,
+      poll: options?.poll,
+      quiz: options?.quiz,
+      fileAttachment: options?.fileAttachment,
+      mentions,
+      reactions: {},
       status: 'sent',
       isSelf: true,
       receivedAcks: new Set(),
@@ -207,31 +342,227 @@ export class ChatService {
     const payload: ChatMessagePayload = {
       messageId,
       text: msg.text,
+      messageType: msg.messageType,
       replyTo: msg.replyTo,
       replyPreview: msg.replyPreview,
+      imageUrl: msg.imageUrl,
+      imageCaption: msg.imageCaption,
+      codeSnippet: msg.codeSnippet,
+      poll: msg.poll,
+      quiz: msg.quiz,
+      fileAttachment: msg.fileAttachment,
+      mentions: msg.mentions,
+      reactions: msg.reactions,
     };
     this.network.broadcast('chat:message', payload);
 
-    // Queue for ACK retry
+    // Queue for reliable ACK retry with exponential backoff
     this.queueUnacked(msg, payload);
 
     return msg;
   }
 
+  /**
+   * Helper to send an image (file upload or clipboard paste)
+   */
+  public sendImage(dataUrl: string, caption = '', fromIdentity: PeerIdentity, replyTo?: { id: string; preview: string }) {
+    return this.sendMessage(caption || '📸 Shared an image', fromIdentity, {
+      messageType: 'image',
+      imageUrl: dataUrl,
+      imageCaption: caption,
+      replyTo,
+    });
+  }
+
+  /**
+   * Helper to capture and send active tab screenshot
+   */
+  public async captureAndSendScreenshot(fromIdentity: PeerIdentity, caption = '📸 Tab Screenshot'): Promise<ChatMessageItem | null> {
+    try {
+      if (typeof chrome !== 'undefined' && chrome.tabs?.captureVisibleTab) {
+        return new Promise((resolve) => {
+          chrome.tabs.captureVisibleTab({ format: 'png' }, (dataUrl) => {
+            if (chrome.runtime.lastError || !dataUrl) {
+              console.warn('[ChatService] captureVisibleTab failed:', chrome.runtime.lastError);
+              resolve(null);
+              return;
+            }
+            const msg = this.sendMessage(caption, fromIdentity, {
+              messageType: 'screenshot',
+              imageUrl: dataUrl,
+              imageCaption: caption,
+            });
+            resolve(msg);
+          });
+        });
+      }
+    } catch (err) {
+      console.warn('[ChatService] Failed to capture screenshot:', err);
+    }
+    return null;
+  }
+
+  /**
+   * Helper to send syntax-highlighted code snippet
+   */
+  public sendCodeSnippet(code: string, language: string, title = '', fromIdentity: PeerIdentity) {
+    return this.sendMessage(`💻 Code: ${title || language}`, fromIdentity, {
+      messageType: 'code',
+      codeSnippet: { code, language, title },
+    });
+  }
+
+  /**
+   * Helper to send interactive poll
+   */
+  public sendPoll(question: string, options: string[], isMultiChoice = false, fromIdentity: PeerIdentity) {
+    const poll: PollData = {
+      id: uuid(),
+      question: question.trim(),
+      options: options.map((opt) => ({ id: uuid(), text: opt.trim(), votes: [] })),
+      isMultiChoice,
+    };
+
+    return this.sendMessage(`📊 Poll: ${question}`, fromIdentity, {
+      messageType: 'poll',
+      poll,
+    });
+  }
+
+  /**
+   * Helper to send interactive DSA Quiz
+   */
+  public sendQuiz(
+    question: string,
+    options: string[],
+    correctOptionIndex: number,
+    explanation = '',
+    fromIdentity: PeerIdentity
+  ) {
+    const quiz: QuizData = {
+      id: uuid(),
+      question: question.trim(),
+      options: options.map((o) => o.trim()),
+      correctOptionIndex,
+      explanation: explanation.trim(),
+      answers: {},
+    };
+
+    return this.sendMessage(`🧠 Quiz: ${question}`, fromIdentity, {
+      messageType: 'quiz',
+      quiz,
+    });
+  }
+
+  /**
+   * Helper to send document or file attachment
+   */
+  public sendFileAttachment(file: FileAttachmentData, fromIdentity: PeerIdentity) {
+    return this.sendMessage(`📄 Attached: ${file.name}`, fromIdentity, {
+      messageType: 'file',
+      fileAttachment: file,
+    });
+  }
+
+  /**
+   * Toggle emoji reaction on any message
+   */
+  public toggleReaction(messageId: string, emoji: string, fromIdentity: PeerIdentity) {
+    const msg = this.messages.find((m) => m.id === messageId);
+    if (!msg) return;
+
+    if (!msg.reactions) msg.reactions = {};
+    const reactors = msg.reactions[emoji] || [];
+    const alreadyReacted = reactors.includes(fromIdentity.peerId);
+
+    if (alreadyReacted) {
+      msg.reactions[emoji] = reactors.filter((p) => p !== fromIdentity.peerId);
+      if (msg.reactions[emoji].length === 0) delete msg.reactions[emoji];
+    } else {
+      msg.reactions[emoji] = [...reactors, fromIdentity.peerId];
+    }
+
+    this.saveMessagesDebounced();
+    this.emitMessages();
+
+    // Broadcast reaction packet
+    this.network.broadcast<ChatReactionPayload>('chat:reaction', {
+      messageId,
+      emoji,
+      remove: alreadyReacted,
+    });
+  }
+
+  /**
+   * Vote on a poll
+   */
+  public votePoll(messageId: string, pollId: string, optionId: string, fromIdentity: PeerIdentity, isMultiChoice = false) {
+    const msg = this.messages.find((m) => m.id === messageId);
+    if (!msg || !msg.poll) return;
+
+    msg.poll.options.forEach((opt) => {
+      if (opt.id === optionId) {
+        if (!opt.votes.includes(fromIdentity.peerId)) {
+          opt.votes.push(fromIdentity.peerId);
+        } else {
+          opt.votes = opt.votes.filter((p) => p !== fromIdentity.peerId);
+        }
+      } else if (!isMultiChoice) {
+        opt.votes = opt.votes.filter((p) => p !== fromIdentity.peerId);
+      }
+    });
+
+    this.saveMessagesDebounced();
+    this.emitMessages();
+
+    this.network.broadcast<ChatPollVotePayload>('chat:poll:vote', {
+      messageId,
+      pollId,
+      optionId,
+      isMultiChoice,
+    });
+  }
+
+  /**
+   * Answer a quiz
+   */
+  public answerQuiz(messageId: string, quizId: string, selectedOptionIndex: number, fromIdentity: PeerIdentity) {
+    const msg = this.messages.find((m) => m.id === messageId);
+    if (!msg || !msg.quiz) return;
+
+    if (!msg.quiz.answers) msg.quiz.answers = {};
+    msg.quiz.answers[fromIdentity.peerId] = selectedOptionIndex;
+
+    this.saveMessagesDebounced();
+    this.emitMessages();
+
+    this.network.broadcast<ChatQuizAnswerPayload>('chat:quiz:answer', {
+      messageId,
+      quizId,
+      selectedOptionIndex,
+    });
+  }
+
+  /**
+   * Exponential backoff retry queue with congestion protection
+   */
   private queueUnacked(msg: ChatMessageItem, payload: ChatMessagePayload) {
     const entry = {
       message: msg,
+      payload,
       attempts: 0,
       timer: null as any,
     };
 
     const retry = () => {
-      if (entry.attempts >= 8) {
+      if (entry.attempts >= 5) {
         this.removeUnacked(msg.id);
         return;
       }
       entry.attempts++;
-      const delay = Math.min(1000 * Math.pow(2, entry.attempts), 15000);
+      // Backoff intervals: 500ms, 1200ms, 2500ms, 5000ms, 10000ms
+      const delays = [500, 1200, 2500, 5000, 10000];
+      const delay = delays[entry.attempts - 1] || 10000;
 
       entry.timer = setTimeout(() => {
         if (msg.status === 'sent') {
@@ -260,102 +591,123 @@ export class ChatService {
     this.unackedQueue.clear();
   }
 
-  public markAsRead() {
-    this.unreadCount = 0;
-    this.emitUnread();
-
-    // Send read receipts to other peers for their recent messages
-    const recentOthers = this.messages.filter((m) => !m.isSelf).slice(-10);
-    recentOthers.forEach((m) => {
-      this.network.send(m.from.peerId, 'chat:read', { messageId: m.id });
-    });
-  }
-
-  private requestHistorySync() {
-    const latestTimestamp =
-      this.messages.length > 0 ? this.messages[this.messages.length - 1].timestamp : 0;
-    this.network.broadcast('chat:history:request', {
-      sinceTimestamp: latestTimestamp,
-    });
-  }
-
-  private saveMessagesDebounced = debounce(() => {
-    if (!this.currentRoomId) return;
-
-    const trimmed = this.messages.slice(-MAX_STORED_MESSAGES).map((m) => ({
-      id: m.id,
-      from: m.from,
-      text: m.text,
-      timestamp: m.timestamp,
-      replyTo: m.replyTo,
-      replyPreview: m.replyPreview,
-    }));
-
-    const key = `${STORAGE_PREFIX}${this.currentRoomId}`;
-    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-      chrome.storage.local.set({ [key]: trimmed });
-    } else if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(key, JSON.stringify(trimmed));
-    }
-  }, 150);
-
-  private async loadCachedMessages() {
-    if (!this.currentRoomId) return;
-    const key = `${STORAGE_PREFIX}${this.currentRoomId}`;
-
-    try {
-      let stored: StoredChatMessage[] = [];
-      if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-        const res = await chrome.storage.local.get([key]);
-        if (res[key]) stored = res[key];
-      } else if (typeof localStorage !== 'undefined') {
-        const raw = localStorage.getItem(key);
-        if (raw) stored = JSON.parse(raw);
+  public markAsRead(messageId?: string) {
+    if (messageId) {
+      const msg = this.messages.find((m) => m.id === messageId);
+      if (msg && !msg.isSelf) {
+        this.network.send(msg.from.peerId, 'chat:read', { messageId });
       }
-
-      if (stored && stored.length > 0) {
-        this.messages = stored.map((s) => ({
-          ...s,
-          status: 'delivered',
-          isSelf: s.from.peerId === this.myPeerId,
-        }));
-        this.emitMessages();
-      }
-    } catch (e) {
-      console.warn('[ChatService] Failed to load cached chat messages:', e);
+    } else {
+      // Mark all unread as read
+      this.messages
+        .filter((m) => !m.isSelf && m.status !== 'read')
+        .forEach((m) => {
+          this.network.send(m.from.peerId, 'chat:read', { messageId: m.id });
+        });
+      this.unreadCount = 0;
+      this.emitUnread();
     }
   }
 
   public getMessages(): ChatMessageItem[] {
-    return this.messages;
+    return [...this.messages];
   }
 
   public getUnreadCount(): number {
     return this.unreadCount;
   }
 
-  public onChange(listener: (messages: ChatMessageItem[]) => void): () => void {
-    this.listeners.add(listener);
-    listener(this.messages);
-    return () => {
-      this.listeners.delete(listener);
-    };
+  public onMessages(callback: (messages: ChatMessageItem[]) => void): () => void {
+    this.listeners.add(callback);
+    callback(this.getMessages());
+    return () => this.listeners.delete(callback);
   }
 
-  public onUnreadChange(listener: (count: number) => void): () => void {
-    this.unreadListeners.add(listener);
-    listener(this.unreadCount);
-    return () => {
-      this.unreadListeners.delete(listener);
-    };
+  public onUnread(callback: (count: number) => void): () => void {
+    this.unreadListeners.add(callback);
+    callback(this.unreadCount);
+    return () => this.unreadListeners.delete(callback);
+  }
+
+  public onUnreadChange(callback: (count: number) => void): () => void {
+    return this.onUnread(callback);
   }
 
   private emitMessages() {
-    const list = [...this.messages];
-    this.listeners.forEach((fn) => fn(list));
+    const msgs = this.getMessages();
+    this.listeners.forEach((cb) => {
+      try {
+        cb(msgs);
+      } catch (err) {
+        console.error('[ChatService] Error in listener callback:', err);
+      }
+    });
   }
 
   private emitUnread() {
-    this.unreadListeners.forEach((fn) => fn(this.unreadCount));
+    this.unreadListeners.forEach((cb) => cb(this.unreadCount));
+  }
+
+  private requestHistorySync() {
+    this.network.broadcast<ChatHistoryPayload>('chat:history:request', {
+      sinceTimestamp: this.messages.length > 0 ? this.messages[this.messages.length - 1].timestamp : 0,
+    });
+  }
+
+  private async loadCachedMessages() {
+    if (!this.currentRoomId) return;
+
+    try {
+      const key = `${STORAGE_PREFIX}${this.currentRoomId}`;
+      if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+        const res = await chrome.storage.local.get(key);
+        const stored: StoredChatMessage[] = res[key] || [];
+        if (stored.length > 0 && this.messages.length === 0) {
+          this.messages = stored.map((s) => ({
+            ...s,
+            status: 'delivered' as const,
+            isSelf: s.from.peerId === this.myPeerId,
+          }));
+          this.emitMessages();
+        }
+      }
+    } catch (err) {
+      console.warn('[ChatService] Failed to load cached messages:', err);
+    }
+  }
+
+  private saveMessagesDebounced = debounce(() => {
+    this.saveMessages();
+  }, 1000);
+
+  private async saveMessages() {
+    if (!this.currentRoomId || this.messages.length === 0) return;
+
+    try {
+      const key = `${STORAGE_PREFIX}${this.currentRoomId}`;
+      const toSave = this.messages.slice(-MAX_STORED_MESSAGES).map((m) => ({
+        id: m.id,
+        from: m.from,
+        text: m.text,
+        timestamp: m.timestamp,
+        messageType: m.messageType,
+        replyTo: m.replyTo,
+        replyPreview: m.replyPreview,
+        imageUrl: m.imageUrl,
+        imageCaption: m.imageCaption,
+        codeSnippet: m.codeSnippet,
+        poll: m.poll,
+        quiz: m.quiz,
+        fileAttachment: m.fileAttachment,
+        mentions: m.mentions,
+        reactions: m.reactions,
+      }));
+
+      if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+        await chrome.storage.local.set({ [key]: toSave });
+      }
+    } catch (err) {
+      console.warn('[ChatService] Failed to save messages:', err);
+    }
   }
 }

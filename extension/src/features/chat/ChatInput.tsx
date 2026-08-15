@@ -1,13 +1,34 @@
-// ─── Chat Input & Composer Component ───
+// ─── WhatsApp-style Chat Composer (Mentions Autocomplete, Image Paste, Screenshot, Code, Poll, Quiz, Files) ───
 
-import React, { useState } from 'react';
-import { Send, X, EyeOff, Tag } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import {
+  Send,
+  X,
+  EyeOff,
+  Plus,
+  Camera,
+  Image as ImageIcon,
+  Code,
+  BarChart2,
+  HelpCircle,
+  Paperclip,
+  Sparkles,
+  Users,
+} from 'lucide-react';
 import { ChatMessageItem } from './chat.service';
+import { PeerIdentity } from '@/core/network/packet';
 
 interface ChatInputProps {
   onSendMessage: (text: string, replyTo?: { id: string; preview: string }) => void;
+  onSendImage: (dataUrl: string, caption?: string) => void;
+  onCaptureScreenshot: () => void;
+  onOpenCodeModal: () => void;
+  onOpenPollModal: () => void;
+  onOpenQuizModal: () => void;
+  onAttachFile: (file: File) => void;
   replyingTo: ChatMessageItem | null;
   onCancelReply: () => void;
+  peers: PeerIdentity[];
 }
 
 const QUICK_STRATEGY_CHIPS = [
@@ -22,12 +43,113 @@ const QUICK_STRATEGY_CHIPS = [
 
 export const ChatInput: React.FC<ChatInputProps> = ({
   onSendMessage,
+  onSendImage,
+  onCaptureScreenshot,
+  onOpenCodeModal,
+  onOpenPollModal,
+  onOpenQuizModal,
+  onAttachFile,
   replyingTo,
   onCancelReply,
+  peers,
 }) => {
   const [text, setText] = useState('');
+  const [showAttachMenu, setShowAttachMenu] = useState(false);
+  const [showMentionPopup, setShowMentionPopup] = useState(false);
+  const [mentionFilter, setMentionFilter] = useState('');
+  const [stagedImage, setStagedImage] = useState<string | null>(null);
+  const [stagedCaption, setStagedCaption] = useState('');
+
+  const inputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const docInputRef = useRef<HTMLInputElement>(null);
+
+  // Handle @ mention detection
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setText(val);
+
+    const cursorPos = e.target.selectionStart || 0;
+    const textBeforeCursor = val.slice(0, cursorPos);
+    const lastAtIndex = textBeforeCursor.lastIndexOf('@');
+
+    if (lastAtIndex !== -1 && !textBeforeCursor.slice(lastAtIndex).includes(' ')) {
+      setMentionFilter(textBeforeCursor.slice(lastAtIndex + 1).toLowerCase());
+      setShowMentionPopup(true);
+    } else {
+      setShowMentionPopup(false);
+    }
+  };
+
+  const handleSelectMention = (mentionTag: string) => {
+    if (!inputRef.current) return;
+    const cursorPos = inputRef.current.selectionStart || text.length;
+    const textBeforeCursor = text.slice(0, cursorPos);
+    const lastAtIndex = textBeforeCursor.lastIndexOf('@');
+
+    if (lastAtIndex !== -1) {
+      const newText = text.slice(0, lastAtIndex) + `@${mentionTag} ` + text.slice(cursorPos);
+      setText(newText);
+      setShowMentionPopup(false);
+      setTimeout(() => {
+        inputRef.current?.focus();
+      }, 50);
+    }
+  };
+
+  // Clipboard image paste support (Ctrl+V)
+  const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const items = e.clipboardData.items;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf('image') !== -1) {
+        const blob = items[i].getAsFile();
+        if (blob) {
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            if (event.target?.result) {
+              setStagedImage(event.target.result as string);
+            }
+          };
+          reader.readAsDataURL(blob);
+          e.preventDefault();
+          return;
+        }
+      }
+    }
+  };
+
+  // Image file select
+  const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        if (event.target?.result) {
+          setStagedImage(event.target.result as string);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+    e.target.value = '';
+  };
+
+  // Generic document file select
+  const handleDocFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      onAttachFile(file);
+    }
+    e.target.value = '';
+  };
 
   const handleSend = () => {
+    if (stagedImage) {
+      onSendImage(stagedImage, stagedCaption);
+      setStagedImage(null);
+      setStagedCaption('');
+      return;
+    }
+
     if (!text.trim()) return;
 
     const replyData = replyingTo
@@ -40,12 +162,16 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     onSendMessage(text, replyData);
     setText('');
     onCancelReply();
+    setShowMentionPopup(false);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
+    } else if (e.key === 'Escape') {
+      setShowMentionPopup(false);
+      setShowAttachMenu(false);
     }
   };
 
@@ -53,16 +179,35 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     setText((prev) => `${prev}||hint solution||`);
   };
 
+  // Filter peers for mention dropdown
+  const filteredPeers = peers.filter(
+    (p) =>
+      p.nickname.toLowerCase().includes(mentionFilter) ||
+      p.peerId.toLowerCase().includes(mentionFilter)
+  );
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', position: 'relative' }}>
+      {/* Hidden File Inputs */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleImageFileChange}
+        accept="image/*"
+        style={{ display: 'none' }}
+      />
+      <input
+        type="file"
+        ref={docInputRef}
+        onChange={handleDocFileChange}
+        accept=".pdf,.txt,.md,.cpp,.py,.java,.js,.json"
+        style={{ display: 'none' }}
+      />
+
       {/* Quick Strategy Pills Row */}
       <div className="prompt-pills-row">
         {QUICK_STRATEGY_CHIPS.map((prompt, i) => (
-          <button
-            key={i}
-            className="prompt-pill"
-            onClick={() => onSendMessage(prompt)}
-          >
+          <button key={i} className="prompt-pill" onClick={() => onSendMessage(prompt)}>
             {prompt}
           </button>
         ))}
@@ -83,37 +228,267 @@ export const ChatInput: React.FC<ChatInputProps> = ({
             color: 'var(--text-secondary)',
           }}
         >
-          <span>Replying to <strong>{replyingTo.from.nickname}</strong>: {replyingTo.text.slice(0, 30)}...</span>
+          <span>
+            Replying to <strong>{replyingTo.from.nickname}</strong>: {replyingTo.text.slice(0, 30)}...
+          </span>
           <button className="btn btn-ghost btn-icon" style={{ width: '18px', height: '18px' }} onClick={onCancelReply}>
             <X size={12} />
           </button>
         </div>
       )}
 
-      {/* Input box & send */}
-      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+      {/* Staged Image Preview (Pasted or Selected) */}
+      {stagedImage && (
+        <div
+          style={{
+            display: 'flex',
+            gap: '8px',
+            padding: '6px 8px',
+            background: 'var(--bg-surface-elevated)',
+            border: '1px solid var(--border-medium)',
+            borderRadius: 'var(--radius-md)',
+            alignItems: 'center',
+          }}
+        >
+          <img
+            src={stagedImage}
+            alt="Staged"
+            style={{ width: '48px', height: '48px', objectFit: 'cover', borderRadius: '4px' }}
+          />
+          <input
+            type="text"
+            className="input-glass"
+            placeholder="Add image caption..."
+            value={stagedCaption}
+            onChange={(e) => setStagedCaption(e.target.value)}
+            style={{ flex: 1, fontSize: '11px' }}
+            autoFocus
+          />
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            onClick={handleSend}
+            style={{ fontSize: '11px', padding: '4px 8px' }}
+          >
+            Send
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost btn-icon"
+            onClick={() => setStagedImage(null)}
+            style={{ width: '24px', height: '24px' }}
+          >
+            <X size={13} />
+          </button>
+        </div>
+      )}
+
+      {/* ─── @ Mention Autocomplete Popup ─── */}
+      {showMentionPopup && (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: '44px',
+            left: '38px',
+            width: '200px',
+            maxHeight: '160px',
+            overflowY: 'auto',
+            background: 'var(--bg-surface-elevated)',
+            border: '1px solid var(--border-medium)',
+            borderRadius: '8px',
+            padding: '4px',
+            boxShadow: 'var(--shadow-lg)',
+            zIndex: 30,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '2px',
+          }}
+        >
+          {/* @everyone option */}
+          <div
+            onClick={() => handleSelectMention('everyone')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '5px 8px',
+              borderRadius: '4px',
+              background: 'rgba(245, 158, 11, 0.15)',
+              cursor: 'pointer',
+              fontSize: '11px',
+              fontWeight: 700,
+              color: '#fbbf24',
+            }}
+          >
+            <Users size={12} />
+            <span>@everyone (All Peers)</span>
+          </div>
+
+          {filteredPeers.map((p) => (
+            <div
+              key={p.peerId}
+              onClick={() => handleSelectMention(p.nickname)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '4px 8px',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '11px',
+                color: 'var(--text-primary)',
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-hover)')}
+              onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+            >
+              <span>{p.avatar}</span>
+              <span style={{ fontWeight: 600 }}>{p.nickname}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ─── WhatsApp-style Attach Menu Popup ─── */}
+      {showAttachMenu && (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: '44px',
+            left: '6px',
+            width: '180px',
+            background: 'var(--bg-surface-elevated)',
+            border: '1px solid var(--border-medium)',
+            borderRadius: '8px',
+            padding: '4px',
+            boxShadow: 'var(--shadow-lg)',
+            zIndex: 30,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '2px',
+          }}
+        >
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={() => {
+              setShowAttachMenu(false);
+              onCaptureScreenshot();
+            }}
+            style={{ justifyContent: 'flex-start', fontSize: '11px', gap: '6px' }}
+          >
+            <Camera size={13} color="var(--primary)" />
+            <span>Capture Tab Screenshot</span>
+          </button>
+
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={() => {
+              setShowAttachMenu(false);
+              fileInputRef.current?.click();
+            }}
+            style={{ justifyContent: 'flex-start', fontSize: '11px', gap: '6px' }}
+          >
+            <ImageIcon size={13} color="#06b6d4" />
+            <span>Upload Image</span>
+          </button>
+
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={() => {
+              setShowAttachMenu(false);
+              onOpenCodeModal();
+            }}
+            style={{ justifyContent: 'flex-start', fontSize: '11px', gap: '6px' }}
+          >
+            <Code size={13} color="#10b981" />
+            <span>Code Snippet</span>
+          </button>
+
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={() => {
+              setShowAttachMenu(false);
+              onOpenPollModal();
+            }}
+            style={{ justifyContent: 'flex-start', fontSize: '11px', gap: '6px' }}
+          >
+            <BarChart2 size={13} color="#8b5cf6" />
+            <span>Create Poll</span>
+          </button>
+
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={() => {
+              setShowAttachMenu(false);
+              onOpenQuizModal();
+            }}
+            style={{ justifyContent: 'flex-start', fontSize: '11px', gap: '6px' }}
+          >
+            <HelpCircle size={13} color="#f59e0b" />
+            <span>DSA Quiz Question</span>
+          </button>
+
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={() => {
+              setShowAttachMenu(false);
+              docInputRef.current?.click();
+            }}
+            style={{ justifyContent: 'flex-start', fontSize: '11px', gap: '6px' }}
+          >
+            <Paperclip size={13} color="#ec4899" />
+            <span>Attach Document</span>
+          </button>
+        </div>
+      )}
+
+      {/* Main Composer Input Row */}
+      <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
+        {/* Attachment '+' Button */}
+        <button
+          type="button"
+          className="btn btn-secondary btn-icon"
+          onClick={() => setShowAttachMenu(!showAttachMenu)}
+          title="Attach Image, Screenshot, Code, Poll, Quiz, or File"
+          style={{ width: '32px', height: '32px', flexShrink: 0 }}
+        >
+          <Plus size={15} color="var(--primary)" />
+        </button>
+
+        {/* Spoiler Toggle */}
         <button
           type="button"
           className="btn btn-ghost btn-icon"
           onClick={insertSpoiler}
           title="Insert Spoiler Blur ||text||"
-          style={{ width: '32px', height: '32px', flexShrink: 0 }}
+          style={{ width: '30px', height: '30px', flexShrink: 0 }}
         >
           <EyeOff size={14} color="var(--text-muted)" />
         </button>
 
+        {/* Input */}
         <input
+          ref={inputRef}
           type="text"
           className="input-glass"
-          placeholder="Type a hint, code snippet, or ||spoiler||..."
+          placeholder="Message or type @ to mention, paste image..."
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={handleInputChange}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
+          style={{ flex: 1, fontSize: '11.5px' }}
         />
+
+        {/* Send Button */}
         <button
           className="btn btn-primary btn-icon"
           onClick={handleSend}
-          disabled={!text.trim()}
+          disabled={!text.trim() && !stagedImage}
           style={{ flexShrink: 0, width: '32px', height: '32px' }}
         >
           <Send size={14} />

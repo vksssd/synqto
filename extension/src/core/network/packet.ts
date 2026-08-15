@@ -5,6 +5,9 @@ export type PacketType =
   | 'chat:message'
   | 'chat:ack'
   | 'chat:read'
+  | 'chat:reaction'
+  | 'chat:poll:vote'
+  | 'chat:quiz:answer'
   | 'chat:history:request'
   | 'chat:history:response'
   | 'presence:join'
@@ -94,11 +97,77 @@ export function createPacket(
 
 // ─── Chat-specific payload types ───
 
+export type ChatMessageType = 'text' | 'image' | 'screenshot' | 'code' | 'poll' | 'quiz' | 'file';
+
+export interface CodeSnippetData {
+  code: string;
+  language: string;
+  title?: string;
+}
+
+export interface PollOption {
+  id: string;
+  text: string;
+  votes: string[]; // array of peerIds
+}
+
+export interface PollData {
+  id: string;
+  question: string;
+  options: PollOption[];
+  isMultiChoice?: boolean;
+  expiresAt?: number;
+}
+
+export interface QuizData {
+  id: string;
+  question: string;
+  options: string[];
+  correctOptionIndex: number;
+  explanation?: string;
+  answers: Record<string, number>; // peerId -> selectedOptionIndex
+}
+
+export interface FileAttachmentData {
+  name: string;
+  size: number;
+  type: string;
+  dataUrl: string;
+}
+
 export interface ChatMessagePayload {
   messageId: string;
   text: string;
+  messageType?: ChatMessageType;
   replyTo?: string;
   replyPreview?: string;
+  imageUrl?: string;
+  imageCaption?: string;
+  codeSnippet?: CodeSnippetData;
+  poll?: PollData;
+  quiz?: QuizData;
+  fileAttachment?: FileAttachmentData;
+  mentions?: string[]; // array of peerIds or 'everyone'
+  reactions?: Record<string, string[]>; // emoji -> array of peerIds
+}
+
+export interface ChatReactionPayload {
+  messageId: string;
+  emoji: string;
+  remove?: boolean;
+}
+
+export interface ChatPollVotePayload {
+  messageId: string;
+  pollId: string;
+  optionId: string;
+  isMultiChoice?: boolean;
+}
+
+export interface ChatQuizAnswerPayload {
+  messageId: string;
+  quizId: string;
+  selectedOptionIndex: number;
 }
 
 export interface ChatAckPayload {
@@ -118,8 +187,17 @@ export interface StoredChatMessage {
   from: PeerIdentity;
   text: string;
   timestamp: number;
+  messageType?: ChatMessageType;
   replyTo?: string;
   replyPreview?: string;
+  imageUrl?: string;
+  imageCaption?: string;
+  codeSnippet?: CodeSnippetData;
+  poll?: PollData;
+  quiz?: QuizData;
+  fileAttachment?: FileAttachmentData;
+  mentions?: string[];
+  reactions?: Record<string, string[]>;
 }
 
 // ─── Presence payload types ───

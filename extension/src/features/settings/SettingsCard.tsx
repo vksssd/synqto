@@ -81,6 +81,19 @@ export const SettingsCard: React.FC = () => {
         setTimeout(() => setSavedFab(false), 1500);
       });
     }
+
+    if (typeof chrome !== 'undefined' && chrome.tabs?.query) {
+      chrome.tabs.query({}, (tabs) => {
+        tabs.forEach((tab) => {
+          if (tab.id) {
+            chrome.tabs.sendMessage(tab.id, {
+              type: 'FAB_SETTINGS_UPDATED',
+              payload: settings,
+            }).catch(() => {});
+          }
+        });
+      });
+    }
   };
 
   const handleClearData = async () => {

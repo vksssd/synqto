@@ -32,16 +32,7 @@ export const NavBar: React.FC<NavBarProps> = ({
         {unreadCount > 0 && <span className="nav-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>}
       </button>
 
-      {/* 2. Full Collaborative Whiteboard */}
-      <button
-        className={`nav-tab ${currentTab === 'whiteboard' ? 'active' : ''}`}
-        onClick={() => onSelectTab('whiteboard')}
-      >
-        <Palette size={17} />
-        <span>Board</span>
-      </button>
-
-      {/* 3. Squads / Communities Hub */}
+      {/* 2. Squads / Communities Hub */}
       <button
         className={`nav-tab ${currentTab === 'groups' ? 'active' : ''}`}
         onClick={() => onSelectTab('groups')}

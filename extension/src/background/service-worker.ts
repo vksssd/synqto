@@ -54,14 +54,46 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // Forward to sidepanel / offscreen for DataChannel broadcast
     chrome.runtime.sendMessage(message).catch(() => {});
   } else if (message.type === 'OPEN_SIDEPANEL') {
-    if (sender.tab?.windowId) {
-      (chrome.sidePanel as any).open({ windowId: sender.tab.windowId }).catch(() => {});
+    const tabId = sender.tab?.id;
+    const windowId = sender.tab?.windowId;
+    if (tabId && (chrome.sidePanel as any)?.open) {
+      (chrome.sidePanel as any).open({ tabId }).catch(() => {
+        if (windowId) {
+          (chrome.sidePanel as any).open({ windowId }).catch(() => {});
+        }
+      });
+    } else if (windowId && (chrome.sidePanel as any)?.open) {
+      (chrome.sidePanel as any).open({ windowId }).catch(() => {});
     }
+    chrome.storage.local.set({ nerd_buddy_sidepanel_open: true });
+    sendResponse({ success: true });
+    return true;
   } else if (message.type === 'SEND_PAGE_CHAT_MESSAGE') {
     // Forward to sidepanel for P2P mesh distribution
     chrome.runtime.sendMessage(message).catch(() => {});
   }
   return true;
+});
+
+// 5. Broadcast settings changes immediately to all active tabs
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local') {
+    if (changes.synqto_fab_settings || changes.nerd_buddy_fab_settings) {
+      const newSettings = (changes.synqto_fab_settings || changes.nerd_buddy_fab_settings)?.newValue;
+      if (newSettings) {
+        chrome.tabs.query({}, (tabs) => {
+          tabs.forEach((t) => {
+            if (t.id) {
+              chrome.tabs.sendMessage(t.id, {
+                type: 'FAB_SETTINGS_UPDATED',
+                payload: newSettings,
+              }).catch(() => {});
+            }
+          });
+        });
+      }
+    }
+  }
 });
 
 // 5. Ensure offscreen document is alive for background WebRTC

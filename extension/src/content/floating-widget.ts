@@ -1882,7 +1882,16 @@ export class FloatingWidget {
   private listenForRuntimeMessages() {
     if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
       chrome.runtime.onMessage.addListener((msg) => {
-        if (msg.type === 'WHITEBOARD_STROKE_LOCAL' && msg.stroke) {
+        if (msg.type === 'FAB_SETTINGS_UPDATED' && msg.payload) {
+          this.settings = { ...DEFAULT_FAB_SETTINGS, ...msg.payload };
+          if (this.settings.positionMode === 'permanent' && this.settings.savedPosition) {
+            this.currentPosition = { ...this.settings.savedPosition };
+          }
+          this.checkVisibilityAndRender();
+          if (this.hostElement) {
+            this.render();
+          }
+        } else if (msg.type === 'WHITEBOARD_STROKE_LOCAL' && msg.stroke) {
           if (!this.wbStrokes.some((s) => s.id === msg.stroke.id)) {
             this.wbStrokes.push(msg.stroke);
             if (this.activeTab === 'whiteboard') this.drawWbCanvas();

@@ -150,4 +150,14 @@ export class IdentityService {
   public getIdentitySync(): PeerIdentity | null {
     return this.currentIdentity;
   }
+
+  public getMyIdentity(): PeerIdentity {
+    if (this.currentIdentity) {
+      return this.currentIdentity;
+    }
+
+    const fallback = this.generateIdentity();
+    void this.saveIdentity(fallback);
+    return fallback;
+  }
 }

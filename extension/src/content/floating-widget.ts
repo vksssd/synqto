@@ -9,6 +9,7 @@ import {
   POMODORO_STATE_STORAGE_KEY,
   TimerMode,
 } from '@/features/timer/timer.types';
+import { WhiteboardToolType } from '@/features/whiteboard/whiteboard.types';
 
 interface ChatMessageData {
   id: string;
@@ -33,7 +34,32 @@ interface WhiteboardPoint {
 
 interface InPageStroke {
   id: string;
-  tool: 'pen' | 'brush' | 'highlighter' | 'temp_pen' | 'laser' | 'torch' | 'eraser' | 'line' | 'arrow' | 'rect' | 'circle' | 'tree_node' | 'db_cylinder' | 'cloud' | 'load_balancer' | 'message_queue' | 'server_box' | 'text';
+  tool:
+    | WhiteboardToolType
+    | 'dns_router'
+    | 'firewall'
+    | 'star'
+    | 'rounded_rect'
+    | 'triangle'
+    | 'decision_diamond'
+    | 'sticky_note'
+    | 'code_box'
+    | 'array_cells'
+    | 'stack_lifo'
+    | 'queue_fifo'
+    | 'hashmap_table'
+    | 'two_pointers'
+    | 'db_nosql'
+    | 'cache_mem'
+    | 'cdn_edge'
+    | 'object_storage'
+    | 'auth_jwt'
+    | 'websocket_gw'
+    | 'elasticsearch'
+    | 'user_client'
+    | 'mobile_client'
+    | 'async_arrow'
+    | 'tradeoff_note';
   color: string;
   width: number;
   opacity: number;
@@ -81,7 +107,7 @@ export class FloatingWidget {
     lastUpdated: Date.now(),
   };
   private timerInterval: any = null;
-  private wbTool: string = 'pen';
+  private wbTool: WhiteboardToolType = 'pen';
   private wbShowShapesDrawer: boolean = false;
   private wbShowDsaDrawer: boolean = false;
   private wbShowArchDrawer: boolean = false;
@@ -2094,10 +2120,10 @@ export class FloatingWidget {
     const cy = 160;
     const strokesToStamp: InPageStroke[] = [];
 
-    const addStk = (tool: string, color: string, width: number, geom?: any, label?: string) => {
+    const addStk = (tool: WhiteboardToolType | string, color: string, width: number, geom?: any, label?: string) => {
       const s: InPageStroke = {
         id: 'stroke-' + Math.random().toString(36).slice(2, 10),
-        tool,
+        tool: tool as WhiteboardToolType,
         color,
         width,
         opacity: 1.0,
@@ -3271,7 +3297,7 @@ export class FloatingWidget {
             if (incomingState) {
               this.timerState = incomingState;
               this.updateTimerDisplay();
-              if (this.isOpen && this.activeTab === 'timer') {
+              if (this.isOpen) {
                 this.render();
               }
             }

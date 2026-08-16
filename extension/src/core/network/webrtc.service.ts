@@ -194,12 +194,15 @@ export class WebRTCService {
    */
   public async renegotiate(remotePeerId: string): Promise<void> {
     const wrapper = this.connections.get(remotePeerId);
-    if (!wrapper || !wrapper.pc || wrapper.pc.signalingState === 'closed') return;
+    if (!wrapper || !wrapper.pc) return;
+
+    const signalingState = wrapper.pc.signalingState as string;
+    if (signalingState === 'closed') return;
 
     try {
       wrapper.makingOffer = true;
       const offer = await wrapper.pc.createOffer();
-      if (wrapper.pc.signalingState === 'closed') return;
+      if ((wrapper.pc.signalingState as string) === 'closed') return;
       await wrapper.pc.setLocalDescription(offer);
 
       this.signalNeededListeners.forEach((fn) => fn(remotePeerId, 'offer', offer));

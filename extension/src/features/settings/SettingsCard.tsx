@@ -1435,7 +1435,7 @@ export const SettingsCard: React.FC = () => {
                   fontWeight: 600,
                 }}
               >
-                FAB: {fabSettings.displayMode === 'hidden' ? 'Hidden' : fabSettings.displayMode === 'icon_only' ? 'Compact Icon' : 'Floating Pill'}
+                FAB: {fabSettings.mode === 'disabled' ? 'Hidden' : 'Floating Pill'}
               </span>
               <div
                 style={{

@@ -310,7 +310,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const downloadTriggers = document.querySelectorAll('.btn-download-trigger');
   downloadTriggers.forEach((btn) => {
     btn.addEventListener('click', () => {
-      const fileName = btn.getAttribute('href')?.split('/')?.pop() || 'synqto-v0.1.1.zip';
+      const fileName = btn.getAttribute('href')?.split('/')?.pop() || 'synqto-latest.zip';
       showToast(`Downloading ${fileName}...`, 'download');
 
       // Automatically mark step 1 checkbox

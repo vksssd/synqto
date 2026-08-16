@@ -53,18 +53,20 @@ const copyTargets = [
 ];
 
 const aliasNames = [`synqto-v${version}.zip`, `synqme-v${version}.zip`, `nerd-buddy-v${version}.zip`];
+const latestAliases = ['synqto-latest.zip', 'synqme-latest.zip', 'nerd-buddy-latest.zip'];
 
 for (const dir of copyTargets) {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  for (const alias of aliasNames) {
+
+  for (const alias of [...aliasNames, ...latestAliases]) {
     fs.copyFileSync(zipFilePath, path.resolve(dir, alias));
   }
 }
 
 // Also create aliases in dist-zip
-for (const alias of aliasNames) {
+for (const alias of [...aliasNames, ...latestAliases]) {
   fs.copyFileSync(zipFilePath, path.resolve(outputDir, alias));
 }
 

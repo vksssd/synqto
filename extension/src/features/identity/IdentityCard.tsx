@@ -1,7 +1,7 @@
-// ─── Profile & Identity Card Component ───
+// ─── Profile & Identity Card Component (Collapsible & Expandable) ───
 
 import React, { useState } from 'react';
-import { RefreshCw, Check, Edit2 } from 'lucide-react';
+import { RefreshCw, Check, Edit2, ChevronDown, ChevronUp, ShieldCheck } from 'lucide-react';
 import { PeerIdentity } from '@/core/network/packet';
 import { IdentityService } from './identity.service';
 
@@ -12,12 +12,14 @@ interface IdentityCardProps {
 
 export const IdentityCard: React.FC<IdentityCardProps> = ({ identity, isLeader = false }) => {
   const identityService = IdentityService.getInstance();
+  const [isExpanded, setIsExpanded] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
   const [customName, setCustomName] = useState(identity?.nickname || '');
 
   if (!identity) return null;
 
-  const handleRegenerate = async () => {
+  const handleRegenerate = async (e: React.MouseEvent) => {
+    e.stopPropagation();
     await identityService.regenerateIdentity();
   };
 
@@ -29,80 +31,152 @@ export const IdentityCard: React.FC<IdentityCardProps> = ({ identity, isLeader =
   };
 
   return (
-    <div className="glass-card">
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          {/* Avatar Icon */}
+    <div className="glass-card" style={{ transition: 'all 0.2s ease' }}>
+      {/* Interactive Card Header */}
+      <div
+        className="glass-card-header"
+        onClick={() => setIsExpanded(!isExpanded)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          cursor: 'pointer',
+          userSelect: 'none',
+          marginBottom: isExpanded ? '10px' : 0,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <div
             style={{
-              width: '36px',
-              height: '36px',
+              width: '28px',
+              height: '28px',
               borderRadius: '50%',
-              background: identity.color || '#6366f1',
+              background: identity.color || '#2dd4bf',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              fontSize: '20px',
-              boxShadow: `0 0 12px ${identity.color}40`,
+              fontSize: '15px',
+              boxShadow: `0 0 8px ${identity.color || '#2dd4bf'}40`,
             }}
           >
             {identity.avatar}
           </div>
-
-          {/* Nickname & Role */}
           <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ fontWeight: 700, fontSize: '12px', color: 'var(--text-primary)' }}>
+                {identity.nickname}
+              </span>
+              <span className={`badge ${isLeader ? 'badge-leader' : 'badge-peer'}`} style={{ fontSize: '9px', padding: '1px 5px' }}>
+                {isLeader ? '👑 Leader' : '⚡ Peer'}
+              </span>
+            </div>
+            <span style={{ fontSize: '9.5px', color: 'var(--text-muted)' }}>
+              Ephemeral Mesh Identity
+            </span>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <button
+            type="button"
+            className="btn btn-secondary btn-icon"
+            onClick={handleRegenerate}
+            title="Reroll Avatar & Nickname"
+            style={{ width: '24px', height: '24px', padding: 0 }}
+          >
+            <RefreshCw size={12} />
+          </button>
+          <div
+            style={{
+              width: '22px',
+              height: '22px',
+              borderRadius: '4px',
+              background: 'rgba(255, 255, 255, 0.06)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'var(--text-muted)',
+            }}
+          >
+            {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </div>
+        </div>
+      </div>
+
+      {/* Collapsible Content */}
+      {isExpanded && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '4px', borderTop: '1px solid var(--border-subtle)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '4px' }}>
+            <div style={{ fontSize: '10.5px', color: 'var(--text-secondary)' }}>
+              Display Nickname:
+            </div>
             {isEditing ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                 <input
                   type="text"
                   className="input-glass"
-                  style={{ padding: '2px 6px', width: '130px', fontSize: '12px' }}
+                  style={{ padding: '2px 6px', width: '130px', fontSize: '11px' }}
                   value={customName}
                   onChange={(e) => setCustomName(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleSaveName()}
                   autoFocus
                 />
-                <button className="btn btn-ghost btn-sm" onClick={handleSaveName}>
-                  <Check size={14} color="#10b981" />
+                <button className="btn btn-primary btn-sm" style={{ padding: '2px 6px', height: '22px' }} onClick={handleSaveName}>
+                  <Check size={12} />
                 </button>
               </div>
             ) : (
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span style={{ fontWeight: 600, fontSize: '13px', color: '#f8fafc' }}>
+                <span style={{ fontWeight: 600, fontSize: '11.5px', color: 'var(--text-primary)' }}>
                   {identity.nickname}
                 </span>
                 <button
                   className="btn btn-ghost btn-sm"
-                  style={{ padding: '2px' }}
+                  style={{ padding: '2px 4px', height: '20px' }}
                   onClick={() => {
                     setCustomName(identity.nickname);
                     setIsEditing(true);
                   }}
                   title="Edit nickname"
                 >
-                  <Edit2 size={12} />
+                  <Edit2 size={11} />
                 </button>
               </div>
             )}
+          </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px' }}>
-              <span className={`badge ${isLeader ? 'badge-leader' : 'badge-peer'}`}>
-                {isLeader ? '👑 Group Leader' : '⚡ Peer Node'}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: '10.5px', color: 'var(--text-secondary)' }}>
+              Network Node ID:
+            </span>
+            <span
+              style={{
+                fontSize: '10px',
+                fontFamily: 'var(--font-mono)',
+                color: 'var(--text-muted)',
+                background: 'rgba(0, 0, 0, 0.3)',
+                padding: '2px 6px',
+                borderRadius: '4px',
+                border: '1px solid var(--border-subtle)',
+              }}
+            >
+              {identity.peerId}
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: '10.5px', color: 'var(--text-secondary)' }}>
+              Session Role:
+            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <ShieldCheck size={12} color={isLeader ? 'var(--accent-amber)' : 'var(--primary)'} />
+              <span style={{ fontSize: '10.5px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                {isLeader ? 'Room Host (Leader)' : 'Synchronized Peer'}
               </span>
-              <span style={{ fontSize: '10px', color: 'var(--text-dim)' }}>{identity.peerId}</span>
             </div>
           </div>
         </div>
-
-        {/* Action button */}
-        <button
-          className="btn btn-secondary btn-icon"
-          onClick={handleRegenerate}
-          title="Reroll Avatar & Nickname"
-        >
-          <RefreshCw size={14} />
-        </button>
-      </div>
+      )}
     </div>
   );
 };

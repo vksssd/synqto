@@ -4,6 +4,7 @@ import { PageObserver } from './page-observer';
 import { DetectedResource } from './resource-detector';
 import { CursorOverlay } from './cursor-overlay';
 import { FloatingWidget } from './floating-widget';
+import { InPageEditorSync } from './in-page-editor-sync';
 
 console.log('[Synqto] Content script initialized on:', window.location.href);
 
@@ -26,3 +27,6 @@ new CursorOverlay();
 
 // 3. Initialize in-browser floating button and quick chat widget
 new FloatingWidget();
+
+// 4. Initialize in-situ LeetCode problem editor synchronization engine
+new InPageEditorSync();

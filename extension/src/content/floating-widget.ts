@@ -66,10 +66,11 @@ export class FloatingWidget {
   private dragMoved = false;
   private popupSize: 'compact' | 'medium' | 'large' | 'fullscreen' = 'compact';
 
-  // Whiteboard State
-  private activeTab: 'chat' | 'whiteboard' | 'timer' = 'chat';
+  // Whiteboard & Chat State
+  private activeTab: 'chat' | 'whiteboard' = 'chat';
 
-  // Focus Timer & Pomodoro State
+  // Focus Timer & Pomodoro State (Independent Popup Window)
+  private isTimerOpen: boolean = false;
   private timerConfig: PomodoroConfig = DEFAULT_POMODORO_CONFIG;
   private timerState: TimerState = {
     mode: 'pomodoro',
@@ -80,7 +81,13 @@ export class FloatingWidget {
     lastUpdated: Date.now(),
   };
   private timerInterval: any = null;
-  private wbTool: 'pen' | 'brush' | 'highlighter' | 'temp_pen' | 'laser' | 'torch' | 'eraser' | 'line' | 'arrow' | 'rect' | 'circle' | 'tree_node' | 'db_cylinder' | 'cloud' | 'load_balancer' | 'message_queue' | 'server_box' | 'text' = 'pen';
+  private wbTool: string = 'pen';
+  private wbShowShapesDrawer: boolean = false;
+  private wbShowDsaDrawer: boolean = false;
+  private wbShowArchDrawer: boolean = false;
+  private wbShowPresetsDrawer: boolean = false;
+  private wbShowThemesDrawer: boolean = false;
+  private wbPresetTab: 'dsa' | 'arch' = 'dsa';
   private toolStyles: Record<string, { color: string; width: number }> = {
     pen: { color: '#6366f1', width: 3 },
     brush: { color: '#06b6d4', width: 6 },
@@ -90,20 +97,45 @@ export class FloatingWidget {
     torch: { color: '#facc15', width: 65 },
     eraser: { color: '#ffffff', width: 18 },
     text: { color: '#ffffff', width: 3 },
+    code_box: { color: '#38bdf8', width: 2 },
     line: { color: '#6366f1', width: 3 },
     arrow: { color: '#6366f1', width: 3 },
+    arrow_bi: { color: '#6366f1', width: 3 },
     rect: { color: '#6366f1', width: 3 },
+    rounded_rect: { color: '#6366f1', width: 3 },
     circle: { color: '#6366f1', width: 3 },
+    triangle: { color: '#10b981', width: 3 },
+    star: { color: '#f59e0b', width: 3 },
+    decision_diamond: { color: '#f59e0b', width: 3 },
     tree_node: { color: '#10b981', width: 3 },
+    sticky_note: { color: '#fef3c7', width: 2 },
     db_cylinder: { color: '#10b981', width: 2.5 },
+    db_nosql: { color: '#34d399', width: 2.5 },
     cloud: { color: '#38bdf8', width: 2.5 },
     load_balancer: { color: '#f59e0b', width: 2.5 },
     message_queue: { color: '#a855f7', width: 2.5 },
     server_box: { color: '#818cf8', width: 2.5 },
+    cache_mem: { color: '#f43f5e', width: 2.5 },
+    dns_router: { color: '#38bdf8', width: 2.5 },
+    firewall: { color: '#f43f5e', width: 2.5 },
+    user_client: { color: '#3b82f6', width: 2.5 },
+    mobile_client: { color: '#06b6d4', width: 2.5 },
+    array_cells: { color: '#38bdf8', width: 2.5 },
+    stack_lifo: { color: '#f59e0b', width: 2.5 },
+    queue_fifo: { color: '#10b981', width: 2.5 },
+    hashmap_table: { color: '#a855f7', width: 2.5 },
+    two_pointers: { color: '#ec4899', width: 2 },
+    cdn_edge: { color: '#06b6d4', width: 2.5 },
+    object_storage: { color: '#f97316', width: 2.5 },
+    auth_jwt: { color: '#eab308', width: 2.5 },
+    websocket_gw: { color: '#6366f1', width: 2.5 },
+    elasticsearch: { color: '#14b8a6', width: 2.5 },
+    async_arrow: { color: '#a855f7', width: 2 },
+    tradeoff_note: { color: '#facc15', width: 2 },
   };
   private wbColor: string = '#6366f1';
   private wbWidth: number = 3;
-  private wbTheme: 'grid' | 'ruled' | 'blank' | 'dotted' | 'plot' | 'matrix' | 'white_blank' = 'grid';
+  private wbTheme: string = 'grid';
   private wbBgColor: string = '#090d16';
   private wbPrivacyMode: 'collaborative' | 'personal' = 'collaborative';
   private wbStrokes: InPageStroke[] = [];
@@ -116,6 +148,7 @@ export class FloatingWidget {
   private wbLaserTrails: { x: number; y: number; alpha: number; timestamp: number }[] = [];
   private wbTorchPos: WhiteboardPoint | null = null;
   private wbEraserPos: WhiteboardPoint | null = null;
+  private themeSettings: any = null;
 
   constructor() {
     this.init();
@@ -138,28 +171,17 @@ export class FloatingWidget {
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       try {
         const res = await chrome.storage.local.get(['synqto_server_connected', 'nerd_buddy_server_connected']);
-        if (res.synqto_server_connected !== undefined || res.nerd_buddy_server_connected !== undefined) {
-          this.isServerConnected = Boolean(res.synqto_server_connected ?? res.nerd_buddy_server_connected);
-        }
-      } catch (e) {}
+        this.isServerConnected = Boolean(res.synqto_server_connected ?? res.nerd_buddy_server_connected ?? true);
+      } catch (e) {
+        this.isServerConnected = true;
+      }
     }
   }
 
   private async loadIdentity() {
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       const res = await chrome.storage.local.get(['synqto_identity', 'nerd_buddy_identity']);
-      if (res.synqto_identity || res.nerd_buddy_identity) {
-        this.myIdentity = res.synqto_identity || res.nerd_buddy_identity;
-      }
-    }
-
-    if (!this.myIdentity) {
-      this.myIdentity = {
-        peerId: 'peer-' + Math.random().toString(36).slice(2, 10),
-        nickname: 'Coder' + Math.floor(Math.random() * 900 + 100),
-        avatar: '⚡',
-        color: '#6366f1',
-      };
+      this.myIdentity = res.synqto_identity || res.nerd_buddy_identity || null;
     }
   }
 
@@ -168,6 +190,9 @@ export class FloatingWidget {
       const res = await chrome.storage.local.get([
         FAB_STORAGE_KEY,
         SYNQTO_FAB_STORAGE_KEY,
+        'synqto_theme_settings',
+        'synqto_collab_notebook',
+        'synqto_personal_notebook',
         'synqto_active_problem',
         'nerd_buddy_active_problem',
         'synqto_live_stage',
@@ -175,6 +200,28 @@ export class FloatingWidget {
         'nerd_buddy_sidepanel_open',
         'nerd_buddy_peer_count',
       ]);
+
+      if (res.synqto_theme_settings) {
+        this.themeSettings = res.synqto_theme_settings;
+      }
+
+      if (res.synqto_collab_notebook && Array.isArray(res.synqto_collab_notebook.pages)) {
+        const nb = res.synqto_collab_notebook;
+        const activePage = nb.pages.find((p: any) => p.id === nb.activePageId) || nb.pages[0];
+        if (activePage) {
+          this.wbStrokes = activePage.strokes || [];
+          if (activePage.background) this.wbTheme = activePage.background;
+          if (activePage.bgColor) this.wbBgColor = activePage.bgColor;
+        }
+      }
+
+      if (res.synqto_personal_notebook && Array.isArray(res.synqto_personal_notebook.pages)) {
+        const nb = res.synqto_personal_notebook;
+        const activePage = nb.pages.find((p: any) => p.id === nb.activePageId) || nb.pages[0];
+        if (activePage) {
+          this.wbPersonalStrokes = activePage.strokes || [];
+        }
+      }
 
       if (res[SYNQTO_FAB_STORAGE_KEY] || res[FAB_STORAGE_KEY]) {
         this.settings = { ...DEFAULT_FAB_SETTINGS, ...(res[SYNQTO_FAB_STORAGE_KEY] || res[FAB_STORAGE_KEY]) };
@@ -345,15 +392,7 @@ export class FloatingWidget {
     this.shadow.innerHTML = `
       <style>
         :host {
-          --primary: #6366f1;
-          --primary-hover: #4f46e5;
-          --bg-card: rgba(15, 23, 42, 0.96);
-          --bg-surface-elevated: rgba(30, 41, 59, 0.85);
-          --border-subtle: rgba(255, 255, 255, 0.1);
-          --text-primary: #f8fafc;
-          --text-secondary: #94a3b8;
-          --text-muted: #64748b;
-          --text-dim: #475569;
+          ${this.getThemeCSS()}
           --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
         }
 
@@ -420,6 +459,69 @@ export class FloatingWidget {
           50% { opacity: 0.4; transform: scale(1.2); }
         }
 
+        @keyframes rocketThrust {
+          0% { transform: translateY(0px) rotate(45deg); }
+          100% { transform: translateY(-2px) rotate(52deg); }
+        }
+
+        @keyframes flameFlicker {
+          0% { opacity: 0.7; transform: scale(0.85); }
+          100% { opacity: 1; transform: scale(1.25); }
+        }
+
+        @keyframes neonTrackGlow {
+          0% { box-shadow: 0 0 5px rgba(244, 63, 94, 0.4); }
+          100% { box-shadow: 0 0 15px rgba(244, 63, 94, 0.8), 0 0 25px rgba(99, 102, 241, 0.5); }
+        }
+
+        /* Standalone Rocket Racing Focus Timer FAB */
+        .timer-fab-button {
+          position: relative;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 8px 14px;
+          border-radius: 9999px;
+          background: linear-gradient(135deg, #1e1035 0%, #0f172a 100%);
+          border: 1px solid rgba(244, 63, 94, 0.55);
+          box-shadow: 0 10px 25px -5px rgba(244, 63, 94, 0.45), 0 0 18px rgba(99, 102, 241, 0.3);
+          color: #ffffff;
+          font-size: 12px;
+          font-weight: 700;
+          cursor: pointer;
+          transition: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s, border-color 0.2s;
+          user-select: none;
+          backdrop-filter: blur(16px);
+        }
+
+        .timer-fab-button:hover {
+          transform: translateY(-2px) scale(1.03);
+          box-shadow: 0 14px 28px -5px rgba(244, 63, 94, 0.65), 0 0 25px rgba(244, 63, 94, 0.5);
+          border-color: rgba(244, 63, 94, 0.85);
+        }
+
+        .timer-fab-track {
+          width: 52px;
+          height: 6px;
+          border-radius: 3px;
+          background: rgba(255, 255, 255, 0.12);
+          position: relative;
+          overflow: hidden;
+        }
+
+        .timer-fab-fill {
+          height: 100%;
+          background: linear-gradient(90deg, #6366f1, #f43f5e);
+          box-shadow: 0 0 8px rgba(244, 63, 94, 0.8);
+          transition: width 0.4s ease;
+        }
+
+        .timer-fab-rocket {
+          font-size: 13px;
+          display: inline-block;
+          filter: drop-shadow(0 0 6px rgba(244, 63, 94, 0.9));
+        }
+
         .fab-badge {
           position: absolute;
           top: -4px;
@@ -453,6 +555,26 @@ export class FloatingWidget {
           animation: slideIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
           color: var(--text-primary);
           transition: width 0.2s cubic-bezier(0.16, 1, 0.3, 1), height 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        /* Dedicated Standalone Timer & Pomodoro Popup Window */
+        .timer-popup-card {
+          display: ${this.isTimerOpen ? 'flex' : 'none'};
+          flex-direction: column;
+          position: absolute;
+          ${isNearTop ? 'top: 52px; bottom: auto;' : 'bottom: 52px; top: auto;'}
+          ${isNearLeft ? 'left: 0; right: auto;' : 'right: 0; left: auto;'}
+          width: 320px;
+          background: rgba(15, 23, 42, 0.98);
+          border: 1px solid rgba(244, 63, 94, 0.5);
+          border-radius: 16px;
+          box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.95), 0 0 28px rgba(244, 63, 94, 0.3);
+          backdrop-filter: blur(24px);
+          -webkit-backdrop-filter: blur(24px);
+          z-index: 100;
+          overflow: hidden;
+          animation: slideIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+          color: var(--text-primary);
         }
 
         @keyframes slideIn {
@@ -874,7 +996,7 @@ export class FloatingWidget {
           </div>
         ` : ''}
 
-        <!-- Segmented Switcher for Chat, Whiteboard, and Pomodoro/Timer -->
+        <!-- Segmented Switcher for Chat and Whiteboard -->
         <div class="tab-switcher" style="display:flex;border-bottom:1px solid var(--border-subtle);background:rgba(0,0,0,0.25);">
           <button class="tab-btn ${this.activeTab === 'chat' ? 'active' : ''}" id="nb-tab-chat" style="flex:1;display:flex;align-items:center;justify-content:center;gap:5px;padding:8px 4px;font-size:11px;font-weight:600;background:transparent;border:none;border-bottom:2px solid ${this.activeTab === 'chat' ? 'var(--primary)' : 'transparent'};color:${this.activeTab === 'chat' ? '#fff' : 'var(--text-muted)'};cursor:pointer;">
             <span>💬 Live Chat</span>
@@ -882,12 +1004,6 @@ export class FloatingWidget {
           ${this.settings.enableWhiteboard ? `
             <button class="tab-btn ${this.activeTab === 'whiteboard' ? 'active' : ''}" id="nb-tab-whiteboard" style="flex:1;display:flex;align-items:center;justify-content:center;gap:5px;padding:8px 4px;font-size:11px;font-weight:600;background:transparent;border:none;border-bottom:2px solid ${this.activeTab === 'whiteboard' ? 'var(--primary)' : 'transparent'};color:${this.activeTab === 'whiteboard' ? '#fff' : 'var(--text-muted)'};cursor:pointer;">
               <span>🎨 Whiteboard</span>
-            </button>
-          ` : ''}
-          ${this.timerConfig.enabled ? `
-            <button class="tab-btn ${this.activeTab === 'timer' ? 'active' : ''}" id="nb-tab-timer" style="flex:1;display:flex;align-items:center;justify-content:center;gap:5px;padding:8px 4px;font-size:11px;font-weight:600;background:transparent;border:none;border-bottom:2px solid ${this.activeTab === 'timer' ? 'var(--primary)' : 'transparent'};color:${this.activeTab === 'timer' ? '#fff' : 'var(--text-muted)'};cursor:pointer;">
-              <span>⏱️ Focus Timer</span>
-              ${this.timerState.isRunning ? `<span class="timer-dot"></span>` : ''}
             </button>
           ` : ''}
         </div>
@@ -925,31 +1041,46 @@ export class FloatingWidget {
           </div>
         ` : ''}
 
-        <!-- Main Body: Whiteboard, Focus Timer, or Chat -->
+        <!-- Main Body: Whiteboard or Problem Chat Stream -->
         ${isWhiteboardTab ? `
           <!-- Whiteboard View -->
           <div class="whiteboard-container">
             <div class="wb-toolbar">
-              <div class="wb-tool-group">
+              <div class="wb-tool-group" style="flex-wrap:wrap;gap:2px;">
                 <button class="wb-tool-btn ${this.wbTool === 'pen' ? 'active' : ''}" data-wbtool="pen" title="Fine Pen">✏️</button>
                 <button class="wb-tool-btn ${this.wbTool === 'brush' ? 'active' : ''}" data-wbtool="brush" title="Brush Pen">✒️</button>
                 <button class="wb-tool-btn ${this.wbTool === 'highlighter' ? 'active' : ''}" data-wbtool="highlighter" title="Highlighter">🖍️</button>
-                <button class="wb-tool-btn ${this.wbTool === 'temp_pen' ? 'active' : ''}" data-wbtool="temp_pen" title="⏳ Disappearing Ink (Fades in 3s)">⏳</button>
+                <button class="wb-tool-btn ${this.wbTool === 'temp_pen' ? 'active' : ''}" data-wbtool="temp_pen" title="⏳ Disappearing Ink (3s)">⏳</button>
                 <button class="wb-tool-btn ${this.wbTool === 'laser' ? 'active' : ''}" data-wbtool="laser" title="Laser Pointer">🔴</button>
                 <button class="wb-tool-btn ${this.wbTool === 'torch' ? 'active' : ''}" data-wbtool="torch" title="Spotlight Torch">🔦</button>
                 <button class="wb-tool-btn ${this.wbTool === 'eraser' ? 'active' : ''}" data-wbtool="eraser" title="Eraser">🧹</button>
-                <button class="wb-tool-btn ${this.wbTool === 'line' ? 'active' : ''}" data-wbtool="line" title="Line">📏</button>
-                <button class="wb-tool-btn ${this.wbTool === 'arrow' ? 'active' : ''}" data-wbtool="arrow" title="Arrow">➡️</button>
-                <button class="wb-tool-btn ${this.wbTool === 'rect' ? 'active' : ''}" data-wbtool="rect" title="Box">🔲</button>
-                <button class="wb-tool-btn ${this.wbTool === 'circle' ? 'active' : ''}" data-wbtool="circle" title="Node">⭕</button>
-                <button class="wb-tool-btn ${this.wbTool === 'tree_node' ? 'active' : ''}" data-wbtool="tree_node" title="Tree Node">🌳</button>
-                <button class="wb-tool-btn ${this.wbTool === 'db_cylinder' ? 'active' : ''}" data-wbtool="db_cylinder" title="Database Cylinder">🗄️</button>
-                <button class="wb-tool-btn ${this.wbTool === 'cloud' ? 'active' : ''}" data-wbtool="cloud" title="Cloud Gateway">☁️</button>
-                <button class="wb-tool-btn ${this.wbTool === 'load_balancer' ? 'active' : ''}" data-wbtool="load_balancer" title="Load Balancer">⚖️</button>
-                <button class="wb-tool-btn ${this.wbTool === 'message_queue' ? 'active' : ''}" data-wbtool="message_queue" title="Message Queue">📨</button>
-                <button class="wb-tool-btn ${this.wbTool === 'server_box' ? 'active' : ''}" data-wbtool="server_box" title="Server Box">📦</button>
+                <button class="wb-tool-btn ${this.wbTool === 'text' ? 'active' : ''}" data-wbtool="text" title="Text Label">T</button>
+
+                <div style="width:1px;height:12px;background:var(--border-subtle);margin:0 1px;"></div>
+
+                <!-- Drawer Toggles -->
+                <button class="wb-drawer-toggle ${this.wbShowShapesDrawer ? 'active' : ''}" id="nb-wb-toggle-shapes" style="font-size:9px;padding:2px 4px;border-radius:4px;border:1px solid var(--border-subtle);background:${this.wbShowShapesDrawer ? 'rgba(99,102,241,0.25)' : 'transparent'};color:${this.wbShowShapesDrawer ? '#fff' : 'var(--text-muted)'};cursor:pointer;">
+                  🔷 Shapes ${this.wbShowShapesDrawer ? '▲' : '▼'}
+                </button>
+
+                <button class="wb-drawer-toggle ${this.wbShowDsaDrawer ? 'active' : ''}" id="nb-wb-toggle-dsa" style="font-size:9px;padding:2px 4px;border-radius:4px;border:1px solid rgba(56,189,248,0.3);background:${this.wbShowDsaDrawer ? 'rgba(56,189,248,0.2)' : 'transparent'};color:${this.wbShowDsaDrawer ? '#38bdf8' : 'var(--text-muted)'};cursor:pointer;">
+                  🔲 DSA ${this.wbShowDsaDrawer ? '▲' : '▼'}
+                </button>
+
+                <button class="wb-drawer-toggle ${this.wbShowArchDrawer ? 'active' : ''}" id="nb-wb-toggle-arch" style="font-size:9px;padding:2px 4px;border-radius:4px;border:1px solid var(--border-subtle);background:${this.wbShowArchDrawer ? 'rgba(99,102,241,0.25)' : 'transparent'};color:${this.wbShowArchDrawer ? '#fff' : 'var(--text-muted)'};cursor:pointer;">
+                  🏛️ Arch ${this.wbShowArchDrawer ? '▲' : '▼'}
+                </button>
+
+                <button class="wb-drawer-toggle ${this.wbShowPresetsDrawer ? 'active' : ''}" id="nb-wb-toggle-presets" style="font-size:9px;padding:2px 4px;border-radius:4px;border:1px solid rgba(16,185,129,0.35);background:${this.wbShowPresetsDrawer ? 'rgba(16,185,129,0.2)' : 'transparent'};color:${this.wbShowPresetsDrawer ? '#34d399' : 'var(--text-muted)'};cursor:pointer;">
+                  ⚡ Presets ${this.wbShowPresetsDrawer ? '▲' : '▼'}
+                </button>
+
+                <button class="wb-drawer-toggle ${this.wbShowThemesDrawer ? 'active' : ''}" id="nb-wb-toggle-themes" style="font-size:9px;padding:2px 4px;border-radius:4px;border:1px solid var(--border-subtle);background:${this.wbShowThemesDrawer ? 'rgba(99,102,241,0.25)' : 'transparent'};color:${this.wbShowThemesDrawer ? '#fff' : 'var(--text-muted)'};cursor:pointer;">
+                  🎨 Style ${this.wbShowThemesDrawer ? '▲' : '▼'}
+                </button>
               </div>
 
+              <!-- Right Controls -->
               <div class="wb-tool-group">
                 <div style="display:flex;gap:2px;align-items:center;background:rgba(0,0,0,0.3);padding:2px 3px;border-radius:4px;">
                   <button class="wb-privacy-btn" data-wbprivacy="collaborative" style="font-size:9px;font-weight:700;padding:2px 4px;border-radius:3px;border:none;cursor:pointer;background:${this.wbPrivacyMode === 'collaborative' ? 'var(--primary)' : 'transparent'};color:${this.wbPrivacyMode === 'collaborative' ? '#fff' : 'var(--text-muted)'};" title="👥 Collaborative with Room Peers">👥 Collab</button>
@@ -959,97 +1090,152 @@ export class FloatingWidget {
                 <button class="wb-tool-btn" id="nb-wb-redo" title="Redo">↪️</button>
                 <button class="wb-tool-btn" id="nb-wb-clear" title="Clear Canvas" style="color:#f87171;">🗑️</button>
                 <button class="wb-tool-btn" id="nb-wb-save" title="Export PNG">💾</button>
+                <button class="wb-tool-btn" id="nb-wb-popout" title="Open Standalone Popup Window">↗️</button>
               </div>
             </div>
 
-            <!-- Color Palette, Widths, BG Colors & Background Patterns -->
-            <div class="wb-palette-bar">
-              <div style="display:flex;gap:2px;align-items:center;overflow-x:auto;">
-                <button class="size-pill ${this.wbTheme === 'grid' ? 'active' : ''}" data-wbtheme="grid" title="Square Graph Grid">⬛ Grid</button>
-                <button class="size-pill ${this.wbTheme === 'ruled' ? 'active' : ''}" data-wbtheme="ruled" title="Ruled Lined Paper">📏 Ruled</button>
-                <button class="size-pill ${this.wbTheme === 'plot' ? 'active' : ''}" data-wbtheme="plot" title="Coordinate Plot (X,Y)">📈 Plot</button>
-                <button class="size-pill ${this.wbTheme === 'dotted' ? 'active' : ''}" data-wbtheme="dotted" title="Dot Grid">🟦 Dots</button>
-                <button class="size-pill ${this.wbTheme === 'matrix' ? 'active' : ''}" data-wbtheme="matrix" title="Matrix Table">📐 Matrix</button>
-              </div>
-
-              <!-- BG Colors -->
-              <div style="display:flex;gap:3px;align-items:center;">
-                ${['#090d16', '#0f172a', '#062c24', '#fef3c7', '#ffffff', '#f8fafc', '#1e1035'].map((bg) => `
-                  <div class="bg-dot" data-wbbg="${bg}" style="width:10px;height:10px;border-radius:2px;background:${bg};border:${this.wbBgColor === bg ? '2px solid #6366f1' : '1px solid rgba(255,255,255,0.2)'};cursor:pointer;" title="Background Color"></div>
+            <!-- Drawer: Shapes -->
+            ${this.wbShowShapesDrawer ? `
+              <div style="display:flex;align-items:center;gap:3px;padding:3px 6px;background:rgba(0,0,0,0.85);border-bottom:1px solid var(--border-subtle);overflow-x:auto;">
+                <span style="font-size:8.5px;color:var(--text-muted);font-weight:600;">Shapes:</span>
+                ${[
+                  { id: 'line', label: 'Line 📏' },
+                  { id: 'arrow', label: 'Arrow ➡️' },
+                  { id: 'arrow_bi', label: 'Bi-Arrow ↔️' },
+                  { id: 'rect', label: 'Rect 🔲' },
+                  { id: 'rounded_rect', label: 'Rounded ▢' },
+                  { id: 'circle', label: 'Circle ⭕' },
+                  { id: 'triangle', label: 'Triangle ▲' },
+                  { id: 'star', label: 'Star ⭐' },
+                  { id: 'decision_diamond', label: 'Diamond 💎' },
+                  { id: 'sticky_note', label: 'Sticky 📝' },
+                  { id: 'code_box', label: 'Code &lt;/&gt;' },
+                ].map((t) => `
+                  <button class="wb-tool-btn ${this.wbTool === t.id ? 'active' : ''}" data-wbtool="${t.id}" style="font-size:9px;padding:2px 5px;white-space:nowrap;">${t.label}</button>
                 `).join('')}
               </div>
+            ` : ''}
 
-              <div style="display:flex;gap:4px;align-items:center;">
-                ${['#6366f1', '#06b6d4', '#10b981', '#f59e0b', '#f43f5e', '#ffffff'].map((c) => `
-                  <div class="color-dot ${this.wbColor === c ? 'active' : ''}" data-color="${c}" style="background:${c};"></div>
+            <!-- Drawer: DSA Visualizers -->
+            ${this.wbShowDsaDrawer ? `
+              <div style="display:flex;align-items:center;gap:3px;padding:3px 6px;background:rgba(8,28,44,0.95);border-bottom:1px solid rgba(56,189,248,0.3);overflow-x:auto;">
+                <span style="font-size:8.5px;color:#7dd3fc;font-weight:700;">🔲 DSA:</span>
+                ${[
+                  { id: 'array_cells', label: 'Array [0..N]' },
+                  { id: 'two_pointers', label: 'Two Pointers (L/R)' },
+                  { id: 'stack_lifo', label: 'Stack (LIFO)' },
+                  { id: 'queue_fifo', label: 'Queue (FIFO)' },
+                  { id: 'tree_node', label: 'Tree Node' },
+                  { id: 'hashmap_table', label: 'HashMap Bucket' },
+                  { id: 'decision_diamond', label: 'Branch Diamond' },
+                  { id: 'code_box', label: 'Pseudocode Box' },
+                ].map((t) => `
+                  <button class="wb-tool-btn ${this.wbTool === t.id ? 'active' : ''}" data-wbtool="${t.id}" style="font-size:9px;padding:2px 5px;white-space:nowrap;color:#7dd3fc;">${t.label}</button>
                 `).join('')}
               </div>
+            ` : ''}
 
-              <div style="display:flex;gap:2px;align-items:center;">
-                <button class="size-pill ${this.wbWidth === 2 ? 'active' : ''}" data-size="2">S</button>
-                <button class="size-pill ${this.wbWidth === 4 ? 'active' : ''}" data-size="4">M</button>
-                <button class="size-pill ${this.wbWidth === 8 ? 'active' : ''}" data-size="8">L</button>
+            <!-- Drawer: Architecture Shapes -->
+            ${this.wbShowArchDrawer ? `
+              <div style="display:flex;align-items:center;gap:3px;padding:3px 6px;background:rgba(0,0,0,0.9);border-bottom:1px solid var(--border-subtle);overflow-x:auto;">
+                <span style="font-size:8.5px;color:var(--text-muted);font-weight:600;">Arch:</span>
+                ${[
+                  { id: 'db_cylinder', label: 'SQL DB' },
+                  { id: 'db_nosql', label: 'NoSQL' },
+                  { id: 'cache_mem', label: 'Redis' },
+                  { id: 'message_queue', label: 'Kafka' },
+                  { id: 'load_balancer', label: 'LB' },
+                  { id: 'server_box', label: 'App Server' },
+                  { id: 'cloud', label: 'API GW' },
+                  { id: 'cdn_edge', label: 'CDN Edge' },
+                  { id: 'object_storage', label: 'S3 Bucket' },
+                  { id: 'auth_jwt', label: 'Auth Shield' },
+                  { id: 'websocket_gw', label: 'WS Gateway' },
+                  { id: 'elasticsearch', label: 'ES Search' },
+                  { id: 'dns_router', label: 'DNS' },
+                  { id: 'firewall', label: 'Firewall' },
+                  { id: 'user_client', label: 'Client' },
+                  { id: 'mobile_client', label: 'Mobile' },
+                  { id: 'async_arrow', label: 'Async ⇢' },
+                  { id: 'tradeoff_note', label: '⚖️ CAP Card' },
+                ].map((t) => `
+                  <button class="wb-tool-btn ${this.wbTool === t.id ? 'active' : ''}" data-wbtool="${t.id}" style="font-size:9px;padding:2px 5px;white-space:nowrap;">${t.label}</button>
+                `).join('')}
               </div>
-            </div>
+            ` : ''}
+
+            <!-- Drawer: 1-Click Blueprints Presets -->
+            ${this.wbShowPresetsDrawer ? `
+              <div style="display:flex;flex-direction:column;gap:3px;padding:4px 6px;background:rgba(6,44,36,0.96);border-bottom:1px solid rgba(16,185,129,0.35);">
+                <div style="display:flex;gap:3px;align-items:center;">
+                  <button class="wb-preset-tab-btn" data-presettab="dsa" style="font-size:9px;font-weight:700;padding:2px 6px;border-radius:3px;border:none;background:${this.wbPresetTab === 'dsa' ? '#10b981' : 'rgba(255,255,255,0.08)'};color:${this.wbPresetTab === 'dsa' ? '#fff' : '#a7f3d0'};cursor:pointer;">🔲 DSA Presets (10)</button>
+                  <button class="wb-preset-tab-btn" data-presettab="arch" style="font-size:9px;font-weight:700;padding:2px 6px;border-radius:3px;border:none;background:${this.wbPresetTab === 'arch' ? '#10b981' : 'rgba(255,255,255,0.08)'};color:${this.wbPresetTab === 'arch' ? '#fff' : '#a7f3d0'};cursor:pointer;">🏛️ System Design (8)</button>
+                </div>
+                <div style="display:flex;gap:3px;overflow-x:auto;padding-bottom:2px;">
+                  ${this.wbPresetTab === 'dsa' ? [
+                    { id: 'two_pointers', label: '👆 Two Pointers' },
+                    { id: 'bst', label: '🌲 BST Tree' },
+                    { id: 'floyd_cycle', label: '🐢 Floyd Cycle' },
+                    { id: 'mono_stack', label: '📥 Monotonic Stack' },
+                    { id: 'dp_table', label: '📊 2D DP Table' },
+                    { id: 'trie', label: '🌳 Prefix Trie' },
+                    { id: 'graph_bfs', label: '🔵 Graph BFS' },
+                    { id: 'min_heap', label: '🏔️ Min-Heap' },
+                    { id: 'intervals', label: '📏 Intervals' },
+                    { id: 'recursion_tree', label: '🌿 Recursion' },
+                  ].map((p) => `
+                    <button class="wb-stamp-preset-btn" data-preset="${p.id}" style="font-size:9px;padding:2px 5px;border-radius:3px;background:rgba(16,185,129,0.25);border:1px solid rgba(16,185,129,0.4);color:#fff;cursor:pointer;white-space:nowrap;">${p.label}</button>
+                  `).join('') : [
+                    { id: 'url_shortener', label: '🔗 TinyURL' },
+                    { id: 'rate_limiter', label: '🚦 Rate Limiter' },
+                    { id: 'chat_system', label: '💬 Chat System' },
+                    { id: 'distributed_cache', label: '⚡ Dist. Cache' },
+                    { id: 'ecommerce_saga', label: '🛒 Order Saga' },
+                    { id: 'web_crawler', label: '🕷️ Web Crawler' },
+                    { id: 'microservices_3tier', label: '🏛️ 3-Tier App' },
+                    { id: 'search_analytics', label: '🔍 ES Cluster' },
+                  ].map((p) => `
+                    <button class="wb-stamp-preset-btn" data-preset="${p.id}" style="font-size:9px;padding:2px 5px;border-radius:3px;background:rgba(16,185,129,0.25);border:1px solid rgba(16,185,129,0.4);color:#fff;cursor:pointer;white-space:nowrap;">${p.label}</button>
+                  `).join('')}
+                </div>
+              </div>
+            ` : ''}
+
+            <!-- Drawer: Style & Themes -->
+            ${this.wbShowThemesDrawer ? `
+              <div class="wb-palette-bar" style="flex-wrap:wrap;gap:4px;">
+                <div style="display:flex;gap:2px;align-items:center;overflow-x:auto;">
+                  <button class="size-pill ${this.wbTheme === 'grid' ? 'active' : ''}" data-wbtheme="grid">⬛ Grid</button>
+                  <button class="size-pill ${this.wbTheme === 'isometric' ? 'active' : ''}" data-wbtheme="isometric">📐 3D Iso</button>
+                  <button class="size-pill ${this.wbTheme === 'ruled' ? 'active' : ''}" data-wbtheme="ruled">📏 Ruled</button>
+                  <button class="size-pill ${this.wbTheme === 'plot' ? 'active' : ''}" data-wbtheme="plot">📈 Plot</button>
+                  <button class="size-pill ${this.wbTheme === 'matrix' ? 'active' : ''}" data-wbtheme="matrix">📊 Matrix</button>
+                  <button class="size-pill ${this.wbTheme === 'dotted' ? 'active' : ''}" data-wbtheme="dotted">🟦 Dots</button>
+                  <button class="size-pill ${this.wbTheme === 'blank' ? 'active' : ''}" data-wbtheme="blank">Blank</button>
+                </div>
+
+                <div style="display:flex;gap:3px;align-items:center;">
+                  ${['#090d16', '#0f172a', '#062c24', '#fef3c7', '#ffffff', '#1e1035'].map((bg) => `
+                    <div class="bg-dot" data-wbbg="${bg}" style="width:10px;height:10px;border-radius:2px;background:${bg};border:${this.wbBgColor === bg ? '2px solid #6366f1' : '1px solid rgba(255,255,255,0.2)'};cursor:pointer;" title="Background Color"></div>
+                  `).join('')}
+                </div>
+
+                <div style="display:flex;gap:4px;align-items:center;">
+                  ${['#6366f1', '#06b6d4', '#10b981', '#f59e0b', '#f43f5e', '#ffffff'].map((c) => `
+                    <div class="color-dot ${this.wbColor === c ? 'active' : ''}" data-color="${c}" style="background:${c};"></div>
+                  `).join('')}
+                </div>
+
+                <div style="display:flex;gap:2px;align-items:center;">
+                  <button class="size-pill ${this.wbWidth === 2 ? 'active' : ''}" data-size="2">S</button>
+                  <button class="size-pill ${this.wbWidth === 4 ? 'active' : ''}" data-size="4">M</button>
+                  <button class="size-pill ${this.wbWidth === 8 ? 'active' : ''}" data-size="8">L</button>
+                </div>
+              </div>
+            ` : ''}
 
             <!-- HTML5 Interactive Canvas -->
             <canvas id="nb-whiteboard-canvas"></canvas>
-          </div>
-        ` : this.activeTab === 'timer' ? `
-          <!-- Focus Timer & Pomodoro View -->
-          <div class="timer-container" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px 16px;gap:18px;background:linear-gradient(180deg, #090d16 0%, #0f172a 100%);">
-            
-            <!-- Mode Switcher Pills -->
-            <div style="display:flex;gap:4px;background:rgba(0,0,0,0.4);padding:3px;border-radius:8px;border:1px solid rgba(255,255,255,0.08);width:100%;max-width:340px;justify-content:space-between;">
-              <button class="timer-mode-btn ${this.timerState.mode === 'pomodoro' ? 'active' : ''}" data-tmode="pomodoro" style="flex:1;font-size:10px;font-weight:700;padding:6px 4px;border-radius:6px;border:none;cursor:pointer;background:${this.timerState.mode === 'pomodoro' ? '#f43f5e' : 'transparent'};color:${this.timerState.mode === 'pomodoro' ? '#fff' : 'var(--text-muted)'};transition:all 0.15s ease;">🍅 Focus</button>
-              <button class="timer-mode-btn ${this.timerState.mode === 'short_break' ? 'active' : ''}" data-tmode="short_break" style="flex:1;font-size:10px;font-weight:700;padding:6px 4px;border-radius:6px;border:none;cursor:pointer;background:${this.timerState.mode === 'short_break' ? '#10b981' : 'transparent'};color:${this.timerState.mode === 'short_break' ? '#fff' : 'var(--text-muted)'};transition:all 0.15s ease;">☕ Break</button>
-              <button class="timer-mode-btn ${this.timerState.mode === 'long_break' ? 'active' : ''}" data-tmode="long_break" style="flex:1;font-size:10px;font-weight:700;padding:6px 4px;border-radius:6px;border:none;cursor:pointer;background:${this.timerState.mode === 'long_break' ? '#06b6d4' : 'transparent'};color:${this.timerState.mode === 'long_break' ? '#fff' : 'var(--text-muted)'};transition:all 0.15s ease;">🌴 Long</button>
-              <button class="timer-mode-btn ${this.timerState.mode === 'stopwatch' ? 'active' : ''}" data-tmode="stopwatch" style="flex:1;font-size:10px;font-weight:700;padding:6px 4px;border-radius:6px;border:none;cursor:pointer;background:${this.timerState.mode === 'stopwatch' ? '#8b5cf6' : 'transparent'};color:${this.timerState.mode === 'stopwatch' ? '#fff' : 'var(--text-muted)'};transition:all 0.15s ease;">⏱️ Clock</button>
-            </div>
-
-            <!-- Digital Clock Display & Progress -->
-            <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;width:100%;max-width:320px;padding:24px 16px;background:rgba(255,255,255,0.02);border:1px solid ${this.timerState.isRunning ? (this.timerState.mode === 'pomodoro' ? '#f43f5e50' : this.timerState.mode === 'short_break' ? '#10b98150' : this.timerState.mode === 'long_break' ? '#06b6d450' : '#8b5cf650') : 'rgba(255,255,255,0.08)'};border-radius:16px;box-shadow:${this.timerState.isRunning ? '0 10px 30px -10px rgba(0,0,0,0.8)' : 'none'};position:relative;overflow:hidden;">
-              
-              <!-- Progress Bar Indicator -->
-              <div style="position:absolute;top:0;left:0;right:0;height:4px;background:rgba(255,255,255,0.06);">
-                <div id="nb-timer-progress-fill" style="height:100%;width:${this.getTimerProgressPct()}%;background:${this.timerState.mode === 'pomodoro' ? '#f43f5e' : this.timerState.mode === 'short_break' ? '#10b981' : this.timerState.mode === 'long_break' ? '#06b6d4' : '#8b5cf6'};transition:width 0.3s ease;"></div>
-              </div>
-
-              <div id="nb-timer-time" style="font-family:var(--font-mono);font-size:46px;font-weight:800;color:#ffffff;letter-spacing:-1px;line-height:1;text-shadow:0 2px 10px rgba(0,0,0,0.5);">
-                ${this.formatTimerTime(this.timerState.timeLeftSec)}
-              </div>
-
-              <div style="font-size:11px;font-weight:600;margin-top:8px;color:${this.timerState.mode === 'pomodoro' ? '#fca5a5' : this.timerState.mode === 'short_break' ? '#6ee7b7' : this.timerState.mode === 'long_break' ? '#67e8f9' : '#c4b5fd'};text-transform:uppercase;letter-spacing:0.5px;">
-                ${this.timerState.mode === 'pomodoro' ? '🍅 Deep Focus Session' : this.timerState.mode === 'short_break' ? '☕ Short Refresh Break' : this.timerState.mode === 'long_break' ? '🌴 Extended Rest' : '⏱️ Open-Ended Stopwatch'}
-              </div>
-
-              ${this.timerState.sessionsCompleted > 0 ? `
-                <div style="display:flex;align-items:center;gap:4px;margin-top:10px;font-size:10px;padding:2px 8px;border-radius:10px;background:rgba(244,63,94,0.15);color:#f43f5e;font-weight:600;">
-                  <span>🎯</span>
-                  <span>${this.timerState.sessionsCompleted} Focus Sessions Done</span>
-                </div>
-              ` : ''}
-            </div>
-
-            <!-- Timer Action Buttons -->
-            <div style="display:flex;align-items:center;gap:10px;width:100%;max-width:320px;">
-              <button id="nb-timer-toggle" style="flex:2;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;border-radius:10px;border:none;background:${this.timerState.isRunning ? '#ef4444' : 'linear-gradient(135deg, #4f46e5, #7c3aed)'};color:#ffffff;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 4px 15px rgba(99,102,241,0.4);transition:transform 0.15s ease;">
-                <span>${this.timerState.isRunning ? '⏸ Pause' : '▶ Start Focus'}</span>
-              </button>
-
-              <button id="nb-timer-add-1m" style="flex:1;padding:12px 6px;border-radius:10px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.06);color:#f8fafc;font-size:11px;font-weight:600;cursor:pointer;" title="Add 1 minute">
-                +1m
-              </button>
-
-              <button id="nb-timer-add-5m" style="flex:1;padding:12px 6px;border-radius:10px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.06);color:#f8fafc;font-size:11px;font-weight:600;cursor:pointer;" title="Add 5 minutes">
-                +5m
-              </button>
-
-              <button id="nb-timer-reset" style="padding:12px 14px;border-radius:10px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.06);color:#f8fafc;font-size:12px;font-weight:600;cursor:pointer;" title="Reset Timer">
-                🔄
-              </button>
-            </div>
-
           </div>
         ` : `
           <!-- Chat Messages View -->
@@ -1119,18 +1305,104 @@ export class FloatingWidget {
         `}
       </div>
 
-      <!-- Draggable Floating Action Button (FAB) -->
-      <button class="fab-button" id="nb-fab-trigger" title="Drag anywhere or click to open">
-        <span class="drag-grip">⠿</span>
-        ${isLive ? `<span class="live-dot"></span>` : `<span>${fabIcon}</span>`}
-        <span>${fabLabel}</span>
-        ${this.timerConfig.enabled && this.timerState.isRunning ? `
-          <span id="nb-fab-timer-pill" style="display:inline-flex;align-items:center;padding:1px 5px;border-radius:10px;background:rgba(244,63,94,0.3);border:1px solid rgba(244,63,94,0.6);font-size:9px;font-family:var(--font-mono);font-weight:700;color:#ffffff;margin-left:2px;">
-            ${this.formatTimerTime(this.timerState.timeLeftSec)}
-          </span>
+      <!-- Dedicated Standalone Focus Timer & Pomodoro Popup Window -->
+      <div class="timer-popup-card" id="nb-timer-popup-card">
+        <!-- Timer Header Bar -->
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid rgba(255,255,255,0.08);background:linear-gradient(135deg, rgba(30, 16, 53, 0.95), rgba(15, 23, 42, 0.95));">
+          <div style="display:flex;align-items:center;gap:7px;">
+            <span style="font-size:16px;">🍅</span>
+            <div>
+              <div style="font-size:12px;font-weight:700;color:#ffffff;line-height:1.2;">Focus Timer & Pomodoro</div>
+              <div style="font-size:9.5px;color:#fca5a5;font-weight:600;text-transform:uppercase;">
+                ${this.timerState.mode === 'pomodoro' ? 'Deep Focus Session' : this.timerState.mode === 'short_break' ? 'Short Refresh Break' : this.timerState.mode === 'long_break' ? 'Extended Rest' : 'Open Stopwatch'}
+              </div>
+            </div>
+          </div>
+          <button class="icon-btn" id="nb-close-timer-popup" title="Minimize Timer" style="width:24px;height:24px;border-radius:6px;background:rgba(255,255,255,0.06);border:none;color:#94a3b8;cursor:pointer;display:flex;align-items:center;justify-content:center;">
+            ✕
+          </button>
+        </div>
+
+        <!-- Timer Body -->
+        <div style="padding:16px 14px;display:flex;flex-direction:column;gap:14px;align-items:center;">
+          <!-- Mode Switcher Pills -->
+          <div style="display:flex;gap:4px;background:rgba(0,0,0,0.4);padding:3px;border-radius:8px;border:1px solid rgba(255,255,255,0.08);width:100%;justify-content:space-between;">
+            <button class="timer-mode-btn ${this.timerState.mode === 'pomodoro' ? 'active' : ''}" data-tmode="pomodoro" style="flex:1;font-size:10px;font-weight:700;padding:6px 2px;border-radius:6px;border:none;cursor:pointer;background:${this.timerState.mode === 'pomodoro' ? '#f43f5e' : 'transparent'};color:${this.timerState.mode === 'pomodoro' ? '#fff' : 'var(--text-muted)'};">🍅 Focus</button>
+            <button class="timer-mode-btn ${this.timerState.mode === 'short_break' ? 'active' : ''}" data-tmode="short_break" style="flex:1;font-size:10px;font-weight:700;padding:6px 2px;border-radius:6px;border:none;cursor:pointer;background:${this.timerState.mode === 'short_break' ? '#10b981' : 'transparent'};color:${this.timerState.mode === 'short_break' ? '#fff' : 'var(--text-muted)'};">☕ Break</button>
+            <button class="timer-mode-btn ${this.timerState.mode === 'long_break' ? 'active' : ''}" data-tmode="long_break" style="flex:1;font-size:10px;font-weight:700;padding:6px 2px;border-radius:6px;border:none;cursor:pointer;background:${this.timerState.mode === 'long_break' ? '#06b6d4' : 'transparent'};color:${this.timerState.mode === 'long_break' ? '#fff' : 'var(--text-muted)'};">🌴 Long</button>
+            <button class="timer-mode-btn ${this.timerState.mode === 'stopwatch' ? 'active' : ''}" data-tmode="stopwatch" style="flex:1;font-size:10px;font-weight:700;padding:6px 2px;border-radius:6px;border:none;cursor:pointer;background:${this.timerState.mode === 'stopwatch' ? '#8b5cf6' : 'transparent'};color:${this.timerState.mode === 'stopwatch' ? '#fff' : 'var(--text-muted)'};">⏱️ Clock</button>
+          </div>
+
+          <!-- Digital Clock Display & Rocket Racing Track -->
+          <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;width:100%;padding:18px 12px;background:rgba(255,255,255,0.02);border:1px solid ${this.timerState.isRunning ? (this.timerState.mode === 'pomodoro' ? '#f43f5e50' : this.timerState.mode === 'short_break' ? '#10b98150' : this.timerState.mode === 'long_break' ? '#06b6d450' : '#8b5cf650') : 'rgba(255,255,255,0.08)'};border-radius:14px;box-shadow:${this.timerState.isRunning ? '0 10px 30px -10px rgba(0,0,0,0.8)' : 'none'};position:relative;overflow:hidden;box-sizing:border-box;">
+            
+            <!-- 🚀 Rocket Racing Progress Track -->
+            <div style="width:100%;height:8px;background:rgba(255,255,255,0.08);position:relative;overflow:hidden;border-radius:4px;">
+              <div id="nb-timer-progress-fill" style="height:100%;width:${this.getTimerProgressPct()}%;background:linear-gradient(90deg, #6366f1, ${this.timerState.mode === 'pomodoro' ? '#f43f5e' : this.timerState.mode === 'short_break' ? '#10b981' : this.timerState.mode === 'long_break' ? '#06b6d4' : '#8b5cf6'});transition:width 0.4s ease;box-shadow:${this.timerState.isRunning ? '0 0 10px rgba(244,63,94,0.8)' : 'none'};"></div>
+              <div style="position:absolute;top:-4px;left:calc(${Math.min(94, Math.max(2, this.getTimerProgressPct()))}% - 8px);font-size:11px;pointer-events:none;transition:left 0.4s ease;">
+                <span style="display:inline-block;animation:${this.timerState.isRunning ? 'rocketThrust 0.8s ease-in-out infinite alternate' : 'none'};">🚀</span>
+              </div>
+            </div>
+
+            <div id="nb-timer-time" style="font-family:var(--font-mono);font-size:42px;font-weight:800;color:#ffffff;letter-spacing:-1px;line-height:1;margin-top:12px;">
+              ${this.formatTimerTime(this.timerState.timeLeftSec)}
+            </div>
+
+            <!-- Racing Track Waypoints -->
+            <div style="display:flex;justify-content:space-between;width:100%;font-size:9px;color:var(--text-muted);margin-top:8px;padding:0 2px;">
+              <span>🛫 Launchpad</span>
+              <span style="font-weight:700;color:#fca5a5;">${Math.round(this.getTimerProgressPct())}% Completed</span>
+              <span>🏁 Goal</span>
+            </div>
+
+            ${this.timerState.sessionsCompleted > 0 ? `
+              <div style="display:flex;align-items:center;gap:4px;margin-top:8px;font-size:10px;padding:2px 8px;border-radius:10px;background:rgba(244,63,94,0.15);color:#f43f5e;font-weight:600;">
+                <span>🎯</span>
+                <span>${this.timerState.sessionsCompleted} Sessions Done</span>
+              </div>
+            ` : ''}
+          </div>
+
+          <!-- Timer Action Buttons -->
+          <div style="display:flex;align-items:center;gap:8px;width:100%;">
+            <button id="nb-timer-toggle" style="flex:2;display:flex;align-items:center;justify-content:center;gap:6px;padding:10px;border-radius:8px;border:none;background:${this.timerState.isRunning ? '#ef4444' : 'linear-gradient(135deg, #4f46e5, #7c3aed)'};color:#ffffff;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 4px 15px rgba(99,102,241,0.4);">
+              <span>${this.timerState.isRunning ? '⏸ Pause' : '▶ Start Focus'}</span>
+            </button>
+            <button id="nb-timer-add-1m" style="flex:1;padding:10px 4px;border-radius:8px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.06);color:#f8fafc;font-size:11px;font-weight:600;cursor:pointer;" title="Add 1 minute">+1m</button>
+            <button id="nb-timer-add-5m" style="flex:1;padding:10px 4px;border-radius:8px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.06);color:#f8fafc;font-size:11px;font-weight:600;cursor:pointer;" title="Add 5 minutes">+5m</button>
+            <button id="nb-timer-reset" style="padding:10px 12px;border-radius:8px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.06);color:#f8fafc;font-size:12px;font-weight:600;cursor:pointer;" title="Reset Timer">🔄</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- FAB Controls Row: Standalone Rocket Racing Timer FAB + Main Synqto FAB -->
+      <div class="fab-row" style="display:flex;align-items:center;gap:8px;position:relative;">
+        <!-- 1. Separate Standalone Rocket Racing Focus Timer FAB (Shown when timer is on/enabled) -->
+        ${(this.timerConfig.enabled || this.timerState.isRunning) ? `
+          <button class="timer-fab-button" id="nb-timer-fab-trigger" title="Focus Timer (Click to open, click play icon to toggle)">
+            <span style="font-size:13px;">${this.timerState.mode === 'pomodoro' ? '🍅' : this.timerState.mode === 'short_break' ? '☕' : this.timerState.mode === 'long_break' ? '🌴' : '⏱️'}</span>
+            <span class="timer-fab-rocket" style="animation:${this.timerState.isRunning ? 'rocketThrust 0.8s ease-in-out infinite alternate' : 'none'};">🚀</span>
+            ${this.timerState.isRunning ? `<span style="font-size:10px;margin-left:-5px;animation:flameFlicker 0.3s ease-in-out infinite alternate;">🔥</span>` : ''}
+            <div class="timer-fab-track">
+              <div id="nb-timer-fab-fill" class="timer-fab-fill" style="width:${this.getTimerProgressPct()}%;"></div>
+            </div>
+            <span id="nb-timer-fab-time" style="font-family:var(--font-mono);font-size:11px;font-weight:800;color:#ffffff;min-width:38px;">
+              ${this.formatTimerTime(this.timerState.timeLeftSec)}
+            </span>
+            <span id="nb-timer-fab-toggle-btn" style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:${this.timerState.isRunning ? '#ef4444' : 'rgba(255,255,255,0.15)'};color:#ffffff;font-size:9px;margin-left:2px;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,0.3);" title="${this.timerState.isRunning ? 'Pause Timer' : 'Start Timer'}">
+              ${this.timerState.isRunning ? '⏸' : '▶'}
+            </span>
+          </button>
         ` : ''}
-        ${this.unreadCount > 0 ? `<span class="fab-badge">${this.unreadCount}</span>` : ''}
-      </button>
+
+        <!-- 2. Main Synqto App FAB -->
+        <button class="fab-button" id="nb-fab-trigger" title="Drag anywhere or click to open Synqto">
+          <span class="drag-grip">⠿</span>
+          ${isLive ? `<span class="live-dot"></span>` : `<span>${fabIcon}</span>`}
+          <span>${fabLabel}</span>
+          ${this.unreadCount > 0 ? `<span class="fab-badge">${this.unreadCount}</span>` : ''}
+        </button>
+      </div>
     `;
 
     this.attachEventListeners();
@@ -1237,6 +1509,27 @@ export class FloatingWidget {
       });
     }
 
+    // Separate Standalone Focus Timer FAB Events
+    const timerFabBtn = this.shadow.getElementById('nb-timer-fab-trigger');
+    const timerFabToggleBtn = this.shadow.getElementById('nb-timer-fab-toggle-btn');
+
+    timerFabToggleBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.toggleTimer();
+    });
+
+    timerFabBtn?.addEventListener('click', () => {
+      this.isTimerOpen = !this.isTimerOpen;
+      this.render();
+    });
+
+    // Close Dedicated Timer Popup Button
+    const closeTimerBtn = this.shadow.getElementById('nb-close-timer-popup');
+    closeTimerBtn?.addEventListener('click', () => {
+      this.isTimerOpen = false;
+      this.render();
+    });
+
     // Size Mode Switcher (S, M, L, XL)
     const sizePillBtns = this.shadow.querySelectorAll('.size-mode-pill[data-popsize]');
     sizePillBtns.forEach((btn) => {
@@ -1249,7 +1542,7 @@ export class FloatingWidget {
       });
     });
 
-    // Close Popup Button
+    // Close Main Popup Button
     const closeBtn = this.shadow.getElementById('nb-close-popup');
     closeBtn?.addEventListener('click', () => {
       this.isOpen = false;
@@ -1266,7 +1559,7 @@ export class FloatingWidget {
       }
     });
 
-    // Tab Switchers
+    // Tab Switchers (Main Popup: Chat and Whiteboard only)
     const tabChat = this.shadow.getElementById('nb-tab-chat');
     tabChat?.addEventListener('click', () => {
       this.activeTab = 'chat';
@@ -1277,12 +1570,6 @@ export class FloatingWidget {
     const tabWb = this.shadow.getElementById('nb-tab-whiteboard');
     tabWb?.addEventListener('click', () => {
       this.activeTab = 'whiteboard';
-      this.render();
-    });
-
-    const tabTimer = this.shadow.getElementById('nb-tab-timer');
-    tabTimer?.addEventListener('click', () => {
-      this.activeTab = 'timer';
       this.render();
     });
 
@@ -1399,6 +1686,59 @@ export class FloatingWidget {
       });
     });
 
+    // Drawer Toggles
+    const toggleDrawer = (drawer: 'shapes' | 'dsa' | 'arch' | 'presets' | 'themes') => {
+      this.wbShowShapesDrawer = drawer === 'shapes' ? !this.wbShowShapesDrawer : false;
+      this.wbShowDsaDrawer = drawer === 'dsa' ? !this.wbShowDsaDrawer : false;
+      this.wbShowArchDrawer = drawer === 'arch' ? !this.wbShowArchDrawer : false;
+      this.wbShowPresetsDrawer = drawer === 'presets' ? !this.wbShowPresetsDrawer : false;
+      this.wbShowThemesDrawer = drawer === 'themes' ? !this.wbShowThemesDrawer : false;
+      this.render();
+    };
+
+    this.shadow.getElementById('nb-wb-toggle-shapes')?.addEventListener('click', () => toggleDrawer('shapes'));
+    this.shadow.getElementById('nb-wb-toggle-dsa')?.addEventListener('click', () => toggleDrawer('dsa'));
+    this.shadow.getElementById('nb-wb-toggle-arch')?.addEventListener('click', () => toggleDrawer('arch'));
+    this.shadow.getElementById('nb-wb-toggle-presets')?.addEventListener('click', () => toggleDrawer('presets'));
+    this.shadow.getElementById('nb-wb-toggle-themes')?.addEventListener('click', () => toggleDrawer('themes'));
+
+    // Preset Tabs
+    const presetTabBtns = this.shadow.querySelectorAll('.wb-preset-tab-btn[data-presettab]');
+    presetTabBtns.forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const tab = (e.currentTarget as HTMLElement).getAttribute('data-presettab') as any;
+        if (tab) {
+          this.wbPresetTab = tab;
+          this.render();
+        }
+      });
+    });
+
+    // Preset Stamp Buttons
+    const stampBtns = this.shadow.querySelectorAll('.wb-stamp-preset-btn[data-preset]');
+    stampBtns.forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const pId = (e.currentTarget as HTMLElement).getAttribute('data-preset');
+        if (pId) {
+          this.handleStampPreset(pId);
+        }
+      });
+    });
+
+    // Popout Standalone Popup Window
+    this.shadow.getElementById('nb-wb-popout')?.addEventListener('click', () => {
+      if (typeof chrome !== 'undefined' && chrome.windows?.create) {
+        chrome.windows.create({
+          url: chrome.runtime.getURL('sidepanel.html?view=whiteboard'),
+          type: 'popup',
+          width: 900,
+          height: 650,
+        });
+      } else if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+        chrome.runtime.sendMessage({ type: 'OPEN_STANDALONE_WHITEBOARD' }).catch(() => {});
+      }
+    });
+
     // Attach Privacy Mode Selector (Collab vs Personal)
     const privacyBtns = this.shadow.querySelectorAll('.wb-privacy-btn[data-wbprivacy]');
     privacyBtns.forEach((btn) => {
@@ -1421,6 +1761,9 @@ export class FloatingWidget {
           if (theme === 'clean_white' && this.wbColor === '#ffffff') {
             this.wbColor = '#0f172a';
           }
+          if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage && this.wbPrivacyMode === 'collaborative') {
+            chrome.runtime.sendMessage({ type: 'WHITEBOARD_BG_LOCAL', background: theme, bgColor: this.wbBgColor }).catch(() => {});
+          }
           this.render();
         }
       });
@@ -1433,6 +1776,9 @@ export class FloatingWidget {
         const bg = (e.currentTarget as HTMLElement).getAttribute('data-wbbg');
         if (bg) {
           this.wbBgColor = bg;
+          if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage && this.wbPrivacyMode === 'collaborative') {
+            chrome.runtime.sendMessage({ type: 'WHITEBOARD_BG_LOCAL', background: this.wbTheme, bgColor: bg }).catch(() => {});
+          }
           this.render();
         }
       });
@@ -1562,6 +1908,15 @@ export class FloatingWidget {
       return { x: cx - rect.left, y: cy - rect.top };
     };
 
+    const isGeomTool = (tool: string) => [
+      'line', 'arrow', 'arrow_bi', 'rect', 'rounded_rect', 'circle', 'triangle', 'star',
+      'decision_diamond', 'tree_node', 'sticky_note', 'text', 'code_box',
+      'db_cylinder', 'db_nosql', 'cloud', 'cdn_edge', 'object_storage', 'auth_jwt',
+      'websocket_gw', 'elasticsearch', 'load_balancer', 'message_queue', 'server_box',
+      'cache_mem', 'dns_router', 'firewall', 'user_client', 'mobile_client', 'async_arrow',
+      'tradeoff_note', 'array_cells', 'two_pointers', 'stack_lifo', 'queue_fifo', 'hashmap_table'
+    ].includes(tool);
+
     const isStrokeIntersecting = (s: InPageStroke, eraserPt: WhiteboardPoint, radius: number): boolean => {
       if (s.geometry) {
         const { x1, y1, x2, y2 } = s.geometry;
@@ -1663,7 +2018,7 @@ export class FloatingWidget {
       }
 
       if (!this.isWbDrawing) return;
-      const isGeom = ['line', 'arrow', 'rect', 'circle', 'tree_node', 'db_cylinder', 'cloud', 'load_balancer', 'message_queue', 'server_box'].includes(this.wbTool);
+      const isGeom = isGeomTool(this.wbTool);
 
       if (isGeom && this.wbStartPoint) {
         this.drawWbCanvas(undefined, {
@@ -1695,7 +2050,7 @@ export class FloatingWidget {
       if (!this.isWbDrawing) return;
       this.isWbDrawing = false;
       const endPt = getCoords(e);
-      const isGeom = ['line', 'arrow', 'rect', 'circle', 'tree_node', 'db_cylinder', 'cloud', 'load_balancer', 'message_queue', 'server_box'].includes(this.wbTool);
+      const isGeom = isGeomTool(this.wbTool);
       const width = this.wbTool === 'highlighter' ? 16 : this.wbWidth;
 
       const stroke: InPageStroke = {
@@ -1734,6 +2089,179 @@ export class FloatingWidget {
     canvas.addEventListener('mouseleave', handleMouseUp);
   }
 
+  private handleStampPreset(type: string) {
+    const cx = 190;
+    const cy = 160;
+    const strokesToStamp: InPageStroke[] = [];
+
+    const addStk = (tool: string, color: string, width: number, geom?: any, label?: string) => {
+      const s: InPageStroke = {
+        id: 'stroke-' + Math.random().toString(36).slice(2, 10),
+        tool,
+        color,
+        width,
+        opacity: 1.0,
+        points: [],
+        geometry: geom ? { ...geom, label } : undefined,
+      };
+      strokesToStamp.push(s);
+    };
+
+    // ─── 10 DSA Presets ───
+    if (type === 'two_pointers') {
+      addStk('array_cells', '#38bdf8', 2.5, { x1: cx - 110, y1: cy, x2: cx + 110, y2: cy + 34 });
+      addStk('two_pointers', '#ec4899', 2, { x1: cx - 90, y1: cy + 38, x2: cx - 90, y2: cy + 58 }, 'L (left=0)');
+      addStk('two_pointers', '#10b981', 2, { x1: cx + 70, y1: cy + 38, x2: cx + 70, y2: cy + 58 }, 'R (right=4)');
+      addStk('text', '#f59e0b', 3, { x1: cx - 100, y1: cy - 25, x2: cx - 100, y2: cy - 25 }, 'Target = nums[L] + nums[R]');
+    } else if (type === 'bst') {
+      addStk('tree_node', '#10b981', 3, { x1: cx, y1: cy, x2: cx, y2: cy }, '50');
+      addStk('tree_node', '#06b6d4', 3, { x1: cx - 60, y1: cy + 55, x2: cx - 60, y2: cy + 55 }, '30');
+      addStk('tree_node', '#06b6d4', 3, { x1: cx + 60, y1: cy + 55, x2: cx + 60, y2: cy + 55 }, '70');
+      addStk('arrow', '#6366f1', 2, { x1: cx - 10, y1: cy + 10, x2: cx - 45, y2: cy + 45 });
+      addStk('arrow', '#6366f1', 2, { x1: cx + 10, y1: cy + 10, x2: cx + 45, y2: cy + 45 });
+      addStk('text', '#34d399', 2.5, { x1: cx - 80, y1: cy - 20, x2: cx - 80, y2: cy - 20 }, 'BST: Left < Root < Right');
+    } else if (type === 'floyd_cycle') {
+      const startX = cx - 110;
+      for (let i = 0; i < 3; i++) {
+        const nx = startX + i * 55;
+        addStk('rounded_rect', '#38bdf8', 2.5, { x1: nx, y1: cy, x2: nx + 38, y2: cy + 24 }, `N${i + 1}`);
+        addStk('arrow', '#f59e0b', 2, { x1: nx + 38, y1: cy + 12, x2: nx + 55, y2: cy + 12 });
+      }
+      addStk('rounded_rect', '#ec4899', 2.5, { x1: startX + 165, y1: cy + 35, x2: startX + 203, y2: cy + 59 }, 'N4');
+      addStk('rounded_rect', '#ec4899', 2.5, { x1: startX + 110, y1: cy + 50, x2: startX + 148, y2: cy + 74 }, 'N5');
+      addStk('arrow', '#ec4899', 2, { x1: startX + 148, y1: cy + 24, x2: startX + 165, y2: cy + 35 });
+      addStk('arrow', '#ec4899', 2, { x1: startX + 165, y1: cy + 55, x2: startX + 148, y2: cy + 62 });
+      addStk('arrow', '#ec4899', 2, { x1: startX + 110, y1: cy + 58, x2: startX + 110, y2: cy + 24 });
+      addStk('two_pointers', '#10b981', 2, { x1: startX + 70, y1: cy - 20, x2: startX + 70, y2: cy - 4 }, '🐢 Slow');
+      addStk('two_pointers', '#f59e0b', 2, { x1: startX + 165, y1: cy - 20, x2: startX + 165, y2: cy - 4 }, '🐇 Fast');
+    } else if (type === 'mono_stack') {
+      addStk('array_cells', '#38bdf8', 2.5, { x1: cx - 110, y1: cy + 10, x2: cx - 10, y2: cy + 40 });
+      addStk('stack_lifo', '#f59e0b', 2.5, { x1: cx + 25, y1: cy - 10, x2: cx + 75, y2: cy + 70 });
+      addStk('arrow', '#ec4899', 2, { x1: cx - 15, y1: cy + 15, x2: cx + 20, y2: cy + 25 });
+      addStk('text', '#f59e0b', 2.5, { x1: cx - 90, y1: cy - 20, x2: cx - 90, y2: cy - 20 }, 'Monotonic Stack (NGE)');
+    } else if (type === 'dp_table') {
+      this.wbTheme = 'matrix';
+      addStk('text', '#38bdf8', 3, { x1: cx - 90, y1: cy - 25, x2: cx - 90, y2: cy - 25 }, 'DP[i][j] = DP[i-1][j] + DP[i][j-1]');
+      addStk('tradeoff_note', '#facc15', 2, { x1: cx - 80, y1: cy + 20, x2: cx + 80, y2: cy + 70 }, 'Base Case: DP[0][j]=1');
+    } else if (type === 'trie') {
+      addStk('tree_node', '#10b981', 3, { x1: cx, y1: cy, x2: cx, y2: cy }, '*');
+      addStk('tree_node', '#38bdf8', 2.5, { x1: cx - 50, y1: cy + 50, x2: cx - 50, y2: cy + 50 }, 'c');
+      addStk('tree_node', '#38bdf8', 2.5, { x1: cx - 50, y1: cy + 100, x2: cx - 50, y2: cy + 100 }, 'a');
+      addStk('tree_node', '#ec4899', 2.5, { x1: cx - 80, y1: cy + 145, x2: cx - 80, y2: cy + 145 }, 't (end)');
+      addStk('tree_node', '#ec4899', 2.5, { x1: cx - 20, y1: cy + 145, x2: cx - 20, y2: cy + 145 }, 'r (end)');
+      addStk('arrow', '#6366f1', 2, { x1: cx - 8, y1: cy + 8, x2: cx - 42, y2: cy + 42 });
+      addStk('arrow', '#6366f1', 2, { x1: cx - 50, y1: cy + 62, x2: cx - 50, y2: cy + 88 });
+      addStk('arrow', '#6366f1', 2, { x1: cx - 55, y1: cy + 112, x2: cx - 72, y2: cy + 135 });
+      addStk('arrow', '#6366f1', 2, { x1: cx - 45, y1: cy + 112, x2: cx - 28, y2: cy + 135 });
+    } else if (type === 'graph_bfs') {
+      addStk('tree_node', '#10b981', 3, { x1: cx - 70, y1: cy, x2: cx - 70, y2: cy }, '1');
+      addStk('tree_node', '#38bdf8', 3, { x1: cx - 30, y1: cy + 40, x2: cx - 30, y2: cy + 40 }, '2');
+      addStk('tree_node', '#38bdf8', 3, { x1: cx - 30, y1: cy - 40, x2: cx - 30, y2: cy - 40 }, '3');
+      addStk('tree_node', '#818cf8', 3, { x1: cx + 20, y1: cy + 40, x2: cx + 20, y2: cy + 40 }, '4');
+      addStk('arrow', '#6366f1', 2, { x1: cx - 58, y1: cy + 8, x2: cx - 38, y2: cy + 30 });
+      addStk('arrow', '#6366f1', 2, { x1: cx - 58, y1: cy - 8, x2: cx - 38, y2: cy - 30 });
+      addStk('arrow', '#6366f1', 2, { x1: cx - 18, y1: cy + 40, x2: cx + 8, y2: cy + 40 });
+      addStk('queue_fifo', '#10b981', 2, { x1: cx + 55, y1: cy - 15, x2: cx + 130, y2: cy + 15 }, 'Queue');
+    } else if (type === 'min_heap') {
+      addStk('tree_node', '#10b981', 3, { x1: cx, y1: cy, x2: cx, y2: cy }, '10');
+      addStk('tree_node', '#38bdf8', 2.5, { x1: cx - 40, y1: cy + 40, x2: cx - 40, y2: cy + 40 }, '15');
+      addStk('tree_node', '#38bdf8', 2.5, { x1: cx + 40, y1: cy + 40, x2: cx + 40, y2: cy + 40 }, '20');
+      addStk('arrow', '#6366f1', 2, { x1: cx - 8, y1: cy + 8, x2: cx - 32, y2: cy + 32 });
+      addStk('arrow', '#6366f1', 2, { x1: cx + 8, y1: cy + 8, x2: cx + 32, y2: cy + 32 });
+      addStk('array_cells', '#f59e0b', 2.5, { x1: cx - 65, y1: cy + 75, x2: cx + 65, y2: cy + 100 });
+    } else if (type === 'intervals') {
+      addStk('line', '#38bdf8', 4, { x1: cx - 100, y1: cy, x2: cx - 30, y2: cy }, '[1, 4]');
+      addStk('line', '#ec4899', 4, { x1: cx - 60, y1: cy + 20, x2: cx + 20, y2: cy + 20 }, '[2, 6]');
+      addStk('line', '#10b981', 4, { x1: cx + 40, y1: cy, x2: cx + 100, y2: cy }, '[8, 10]');
+      addStk('arrow', '#f59e0b', 2, { x1: cx - 20, y1: cy + 35, x2: cx - 20, y2: cy + 55 });
+      addStk('line', '#10b981', 6, { x1: cx - 100, y1: cy + 70, x2: cx + 20, y2: cy + 70 }, 'Merged: [1, 6]');
+    } else if (type === 'recursion_tree') {
+      addStk('code_box', '#818cf8', 2, { x1: cx - 35, y1: cy, x2: cx + 35, y2: cy + 25 }, 'solve(N)');
+      addStk('code_box', '#38bdf8', 2, { x1: cx - 85, y1: cy + 50, x2: cx - 25, y2: cy + 75 }, 'solve(N/2)');
+      addStk('code_box', '#38bdf8', 2, { x1: cx + 25, y1: cy + 50, x2: cx + 85, y2: cy + 75 }, 'solve(N/2)');
+      addStk('arrow', '#6366f1', 2, { x1: cx - 15, y1: cy + 25, x2: cx - 50, y2: cy + 50 });
+      addStk('arrow', '#6366f1', 2, { x1: cx + 15, y1: cy + 25, x2: cx + 50, y2: cy + 50 });
+    }
+
+    // ─── 8 System Design Presets ───
+    else if (type === 'url_shortener') {
+      addStk('user_client', '#3b82f6', 2.5, { x1: cx - 120, y1: cy, x2: cx - 85, y2: cy + 35 }, 'Client');
+      addStk('arrow', '#6366f1', 2, { x1: cx - 85, y1: cy + 17, x2: cx - 60, y2: cy + 17 });
+      addStk('load_balancer', '#f59e0b', 2.5, { x1: cx - 60, y1: cy - 5, x2: cx - 15, y2: cy + 38 }, 'LB');
+      addStk('arrow', '#6366f1', 2, { x1: cx - 15, y1: cy + 17, x2: cx + 10, y2: cy + 17 });
+      addStk('server_box', '#818cf8', 2.5, { x1: cx + 10, y1: cy - 5, x2: cx + 65, y2: cy + 35 }, 'App Srv');
+      addStk('arrow', '#10b981', 2, { x1: cx + 65, y1: cy + 8, x2: cx + 90, y2: cy - 15 });
+      addStk('cache_mem', '#f43f5e', 2.5, { x1: cx + 90, y1: cy - 35, x2: cx + 145, y2: cy - 5 }, 'Redis');
+      addStk('arrow', '#10b981', 2, { x1: cx + 65, y1: cy + 24, x2: cx + 90, y2: cy + 40 });
+      addStk('db_cylinder', '#10b981', 2.5, { x1: cx + 90, y1: cy + 25, x2: cx + 145, y2: cy + 70 }, 'SQL DB');
+    } else if (type === 'rate_limiter') {
+      addStk('user_client', '#3b82f6', 2.5, { x1: cx - 120, y1: cy, x2: cx - 85, y2: cy + 35 }, 'Client');
+      addStk('arrow', '#6366f1', 2, { x1: cx - 85, y1: cy + 17, x2: cx - 50, y2: cy + 17 });
+      addStk('cloud', '#38bdf8', 2.5, { x1: cx - 50, y1: cy - 10, x2: cx + 10, y2: cy + 40 }, 'API GW');
+      addStk('arrow', '#f59e0b', 2, { x1: cx - 20, y1: cy + 40, x2: cx - 20, y2: cy + 65 });
+      addStk('cache_mem', '#f43f5e', 2.5, { x1: cx - 50, y1: cy + 65, x2: cx + 10, y2: cy + 100 }, 'Token Redis');
+      addStk('arrow', '#10b981', 2, { x1: cx + 10, y1: cy + 17, x2: cx + 45, y2: cy + 17 });
+      addStk('server_box', '#818cf8', 2.5, { x1: cx + 45, y1: cy - 5, x2: cx + 110, y2: cy + 35 }, 'Microservices');
+    } else if (type === 'chat_system') {
+      addStk('user_client', '#3b82f6', 2.5, { x1: cx - 120, y1: cy - 25, x2: cx - 85, y2: cy + 10 }, 'User A');
+      addStk('user_client', '#3b82f6', 2.5, { x1: cx - 120, y1: cy + 30, x2: cx - 85, y2: cy + 65 }, 'User B');
+      addStk('arrow_bi', '#6366f1', 2, { x1: cx - 85, y1: cy - 8, x2: cx - 40, y2: cy + 8 });
+      addStk('arrow_bi', '#6366f1', 2, { x1: cx - 85, y1: cy + 45, x2: cx - 40, y2: cy + 25 });
+      addStk('websocket_gw', '#6366f1', 2.5, { x1: cx - 40, y1: cy, x2: cx + 15, y2: cy + 40 }, 'WS GW');
+      addStk('arrow', '#a855f7', 2, { x1: cx + 15, y1: cy + 20, x2: cx + 50, y2: cy + 20 });
+      addStk('message_queue', '#a855f7', 2.5, { x1: cx + 50, y1: cy + 5, x2: cx + 115, y2: cy + 38 }, 'Redis PubSub');
+      addStk('db_nosql', '#34d399', 2.5, { x1: cx + 60, y1: cy + 60, x2: cx + 110, y2: cy + 105 }, 'Cassandra');
+    } else if (type === 'distributed_cache') {
+      addStk('server_box', '#818cf8', 2.5, { x1: cx - 100, y1: cy, x2: cx - 40, y2: cy + 38 }, 'App Srv');
+      addStk('arrow', '#f43f5e', 2, { x1: cx - 40, y1: cy + 18, x2: cx + 5, y2: cy + 18 });
+      addStk('cache_mem', '#f43f5e', 2.5, { x1: cx + 5, y1: cy, x2: cx + 65, y2: cy + 38 }, 'Redis');
+      addStk('async_arrow', '#10b981', 2, { x1: cx + 65, y1: cy + 18, x2: cx + 100, y2: cy + 18 });
+      addStk('db_cylinder', '#10b981', 2.5, { x1: cx + 100, y1: cy - 10, x2: cx + 150, y2: cy + 45 }, 'Postgres');
+    } else if (type === 'ecommerce_saga') {
+      addStk('server_box', '#818cf8', 2.5, { x1: cx - 110, y1: cy, x2: cx - 50, y2: cy + 35 }, 'Order API');
+      addStk('arrow', '#a855f7', 2, { x1: cx - 50, y1: cy + 17, x2: cx - 10, y2: cy + 17 });
+      addStk('message_queue', '#a855f7', 2.5, { x1: cx - 10, y1: cy, x2: cx + 55, y2: cy + 35 }, 'Kafka Bus');
+      addStk('arrow', '#10b981', 2, { x1: cx + 55, y1: cy + 8, x2: cx + 85, y2: cy - 15 });
+      addStk('server_box', '#10b981', 2, { x1: cx + 85, y1: cy - 30, x2: cx + 140, y2: cy - 2 }, 'Payment');
+      addStk('arrow', '#10b981', 2, { x1: cx + 55, y1: cy + 25, x2: cx + 85, y2: cy + 45 });
+      addStk('server_box', '#10b981', 2, { x1: cx + 85, y1: cy + 35, x2: cx + 140, y2: cy + 63 }, 'Inventory');
+    } else if (type === 'web_crawler') {
+      addStk('message_queue', '#a855f7', 2.5, { x1: cx - 110, y1: cy, x2: cx - 45, y2: cy + 35 }, 'URL Queue');
+      addStk('arrow', '#6366f1', 2, { x1: cx - 45, y1: cy + 17, x2: cx - 10, y2: cy + 17 });
+      addStk('server_box', '#818cf8', 2.5, { x1: cx - 10, y1: cy, x2: cx + 45, y2: cy + 35 }, 'Fetchers');
+      addStk('arrow', '#f59e0b', 2, { x1: cx + 45, y1: cy + 17, x2: cx + 75, y2: cy + 17 });
+      addStk('object_storage', '#f97316', 2.5, { x1: cx + 75, y1: cy - 10, x2: cx + 125, y2: cy + 40 }, 'S3 Storage');
+    } else if (type === 'microservices_3tier') {
+      addStk('cdn_edge', '#06b6d4', 2.5, { x1: cx - 120, y1: cy - 10, x2: cx - 75, y2: cy + 30 }, 'CDN Edge');
+      addStk('arrow', '#6366f1', 2, { x1: cx - 75, y1: cy + 12, x2: cx - 45, y2: cy + 12 });
+      addStk('load_balancer', '#f59e0b', 2.5, { x1: cx - 45, y1: cy - 10, x2: cx + 5, y2: cy + 30 }, 'ALB');
+      addStk('arrow', '#6366f1', 2, { x1: cx + 5, y1: cy + 12, x2: cx + 30, y2: cy + 12 });
+      addStk('server_box', '#818cf8', 2.5, { x1: cx + 30, y1: cy - 10, x2: cx + 90, y2: cy + 28 }, 'Services');
+      addStk('arrow', '#10b981', 2, { x1: cx + 90, y1: cy + 12, x2: cx + 110, y2: cy + 12 });
+      addStk('db_cylinder', '#10b981', 2.5, { x1: cx + 110, y1: cy - 18, x2: cx + 155, y2: cy + 35 }, 'SQL Master');
+    } else if (type === 'search_analytics') {
+      addStk('server_box', '#818cf8', 2.5, { x1: cx - 120, y1: cy, x2: cx - 65, y2: cy + 35 }, 'Logs');
+      addStk('arrow', '#a855f7', 2, { x1: cx - 65, y1: cy + 17, x2: cx - 30, y2: cy + 17 });
+      addStk('message_queue', '#a855f7', 2.5, { x1: cx - 30, y1: cy, x2: cx + 30, y2: cy + 35 }, 'Kafka');
+      addStk('arrow', '#14b8a6', 2, { x1: cx + 30, y1: cy + 17, x2: cx + 65, y2: cy + 17 });
+      addStk('elasticsearch', '#14b8a6', 2.5, { x1: cx + 65, y1: cy - 5, x2: cx + 125, y2: cy + 35 }, 'Elasticsearch');
+    }
+
+    if (this.wbPrivacyMode === 'personal') {
+      this.wbPersonalStrokes.push(...strokesToStamp);
+    } else {
+      this.wbStrokes.push(...strokesToStamp);
+      strokesToStamp.forEach((s) => {
+        if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+          chrome.runtime.sendMessage({ type: 'WHITEBOARD_STROKE_LOCAL', stroke: s }).catch(() => {});
+        }
+      });
+    }
+
+    this.wbShowPresetsDrawer = false;
+    this.render();
+  }
+
   private drawWbCanvas(previewPoints?: WhiteboardPoint[], previewGeometry?: any) {
     if (!this.shadow) return;
     const canvas = this.shadow.getElementById('nb-whiteboard-canvas') as HTMLCanvasElement;
@@ -1750,7 +2278,7 @@ export class FloatingWidget {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     if (this.wbTheme === 'ruled') {
-      ctx.strokeStyle = 'rgba(99, 102, 241, 0.18)';
+      ctx.strokeStyle = isLightBg ? 'rgba(99, 102, 241, 0.25)' : 'rgba(99, 102, 241, 0.18)';
       ctx.lineWidth = 1;
       for (let y = 28; y < canvas.height; y += 24) {
         ctx.beginPath();
@@ -1776,7 +2304,7 @@ export class FloatingWidget {
       ctx.lineTo(midX, canvas.height);
       ctx.stroke();
     } else if (this.wbTheme === 'dotted') {
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.16)';
+      ctx.fillStyle = isLightBg ? 'rgba(0, 0, 0, 0.25)' : 'rgba(255, 255, 255, 0.16)';
       for (let x = 8; x < canvas.width; x += 18) {
         for (let y = 8; y < canvas.height; y += 18) {
           ctx.beginPath();
@@ -1785,7 +2313,7 @@ export class FloatingWidget {
         }
       }
     } else if (this.wbTheme === 'matrix') {
-      ctx.strokeStyle = 'rgba(99, 102, 241, 0.15)';
+      ctx.strokeStyle = isLightBg ? 'rgba(99, 102, 241, 0.22)' : 'rgba(99, 102, 241, 0.15)';
       ctx.lineWidth = 1;
       const cell = 26;
       for (let x = 0; x < canvas.width; x += cell) {
@@ -1800,8 +2328,24 @@ export class FloatingWidget {
         ctx.lineTo(canvas.width, y);
         ctx.stroke();
       }
+    } else if (this.wbTheme === 'isometric') {
+      ctx.strokeStyle = isLightBg ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.08)';
+      ctx.lineWidth = 1;
+      const isoStep = 24;
+      const tan30 = Math.tan((30 * Math.PI) / 180);
+      for (let x = -canvas.width; x < canvas.width * 2; x += isoStep * 2) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x + canvas.height / tan30, canvas.height);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x - canvas.height / tan30, canvas.height);
+        ctx.stroke();
+      }
     } else if (this.wbTheme === 'grid') {
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
+      ctx.strokeStyle = isLightBg ? 'rgba(0, 0, 0, 0.07)' : 'rgba(255, 255, 255, 0.04)';
       ctx.lineWidth = 1;
       const gridSize = 20;
       for (let x = 0; x < canvas.width; x += gridSize) {
@@ -1836,7 +2380,7 @@ export class FloatingWidget {
       if (s.tool === 'eraser') return;
       ctx.save();
       let drawColor = s.color;
-      if (this.wbTheme === 'white_blank' && (drawColor === '#ffffff' || drawColor === '#fff')) {
+      if (isLightBg && (drawColor === '#ffffff' || drawColor === '#fff')) {
         drawColor = '#0f172a';
       }
       ctx.strokeStyle = drawColor;
@@ -1848,11 +2392,23 @@ export class FloatingWidget {
 
       if (s.geometry) {
         const { x1, y1, x2, y2 } = s.geometry;
+        const minX = Math.min(x1, x2);
+        const minY = Math.min(y1, y2);
+        const w = Math.abs(x2 - x1);
+        const h = Math.abs(y2 - y1);
+        const midX = minX + w / 2;
+        const midY = minY + h / 2;
+
         if (s.tool === 'line') {
           ctx.beginPath();
           ctx.moveTo(x1, y1);
           ctx.lineTo(x2, y2);
           ctx.stroke();
+          if (s.geometry.label) {
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 10px monospace';
+            ctx.fillText(s.geometry.label, (x1 + x2) / 2, (y1 + y2) / 2 - 6);
+          }
         } else if (s.tool === 'arrow') {
           ctx.beginPath();
           ctx.moveTo(x1, y1);
@@ -1866,84 +2422,35 @@ export class FloatingWidget {
           ctx.moveTo(x2, y2);
           ctx.lineTo(x2 - headLen * Math.cos(angle + Math.PI / 6), y2 - headLen * Math.sin(angle + Math.PI / 6));
           ctx.stroke();
+        } else if (s.tool === 'arrow_bi') {
+          ctx.beginPath();
+          ctx.moveTo(x1, y1);
+          ctx.lineTo(x2, y2);
+          ctx.stroke();
+          const angle = Math.atan2(y2 - y1, x2 - x1);
+          const headLen = Math.max(10, s.width * 3);
+          ctx.beginPath();
+          ctx.moveTo(x2, y2);
+          ctx.lineTo(x2 - headLen * Math.cos(angle - Math.PI / 6), y2 - headLen * Math.sin(angle - Math.PI / 6));
+          ctx.moveTo(x2, y2);
+          ctx.lineTo(x2 - headLen * Math.cos(angle + Math.PI / 6), y2 - headLen * Math.sin(angle + Math.PI / 6));
+          ctx.moveTo(x1, y1);
+          ctx.lineTo(x1 + headLen * Math.cos(angle - Math.PI / 6), y1 + headLen * Math.sin(angle - Math.PI / 6));
+          ctx.moveTo(x1, y1);
+          ctx.lineTo(x1 + headLen * Math.cos(angle + Math.PI / 6), y1 + headLen * Math.sin(angle + Math.PI / 6));
+          ctx.stroke();
         } else if (s.tool === 'rect') {
-          ctx.strokeRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1));
-        } else if (s.tool === 'circle') {
-          const rx = Math.abs(x2 - x1) / 2;
-          const ry = Math.abs(y2 - y1) / 2;
-          ctx.beginPath();
-          ctx.ellipse(Math.min(x1, x2) + rx, Math.min(y1, y2) + ry, rx, ry, 0, 0, Math.PI * 2);
-          ctx.stroke();
-        } else if (s.tool === 'tree_node') {
-          const r = Math.max(16, s.width * 3.5);
-          ctx.beginPath();
-          ctx.arc(x1, y1, r, 0, Math.PI * 2);
-          ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
-          ctx.fill();
-          ctx.stroke();
-          if (s.geometry.label) {
-            ctx.fillStyle = '#ffffff';
-            ctx.font = 'bold 11px monospace';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(s.geometry.label, x1, y1);
-          }
-        } else if (s.tool === 'db_cylinder') {
-          const w = Math.max(50, Math.abs(x2 - x1));
-          const h = Math.max(55, Math.abs(y2 - y1));
-          const minX = Math.min(x1, x2);
-          const minY = Math.min(y1, y2);
-          const ry = Math.min(14, h * 0.2);
-          ctx.fillStyle = 'rgba(15, 23, 42, 0.95)';
-          ctx.beginPath();
-          ctx.ellipse(minX + w / 2, minY + ry, w / 2, ry, 0, Math.PI, 0);
-          ctx.lineTo(minX + w, minY + h - ry);
-          ctx.ellipse(minX + w / 2, minY + h - ry, w / 2, ry, 0, 0, Math.PI);
-          ctx.lineTo(minX, minY + ry);
-          ctx.fill();
-          ctx.stroke();
-          ctx.beginPath();
-          ctx.ellipse(minX + w / 2, minY + ry, w / 2, ry, 0, 0, Math.PI * 2);
-          ctx.stroke();
+          ctx.strokeRect(minX, minY, w, h);
           if (s.geometry.label) {
             ctx.fillStyle = '#ffffff';
             ctx.font = 'bold 10px sans-serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillText(s.geometry.label, minX + w / 2, minY + h / 2 + 4);
+            ctx.fillText(s.geometry.label, midX, midY);
           }
-        } else if (s.tool === 'cloud') {
-          const w = Math.max(65, Math.abs(x2 - x1));
-          const h = Math.max(40, Math.abs(y2 - y1));
-          const minX = Math.min(x1, x2);
-          const minY = Math.min(y1, y2);
-          ctx.fillStyle = 'rgba(15, 23, 42, 0.95)';
+        } else if (s.tool === 'rounded_rect') {
           ctx.beginPath();
-          ctx.roundRect(minX, minY, w, h, 14);
-          ctx.fill();
-          ctx.stroke();
-          if (s.geometry.label) {
-            ctx.fillStyle = '#ffffff';
-            ctx.font = 'bold 10px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(s.geometry.label, minX + w / 2, minY + h / 2);
-          }
-        } else if (s.tool === 'load_balancer') {
-          const w = Math.max(55, Math.abs(x2 - x1));
-          const h = Math.max(55, Math.abs(y2 - y1));
-          const minX = Math.min(x1, x2);
-          const minY = Math.min(y1, y2);
-          const midX = minX + w / 2;
-          const midY = minY + h / 2;
-          ctx.fillStyle = 'rgba(15, 23, 42, 0.95)';
-          ctx.beginPath();
-          ctx.moveTo(midX, minY);
-          ctx.lineTo(minX + w, midY);
-          ctx.lineTo(midX, minY + h);
-          ctx.lineTo(minX, midY);
-          ctx.closePath();
-          ctx.fill();
+          ctx.roundRect(minX, minY, Math.max(20, w), Math.max(20, h), 8);
           ctx.stroke();
           if (s.geometry.label) {
             ctx.fillStyle = '#ffffff';
@@ -1952,31 +2459,285 @@ export class FloatingWidget {
             ctx.textBaseline = 'middle';
             ctx.fillText(s.geometry.label, midX, midY);
           }
-        } else if (s.tool === 'message_queue') {
-          const w = Math.max(70, Math.abs(x2 - x1));
-          const h = Math.max(34, Math.abs(y2 - y1));
-          const minX = Math.min(x1, x2);
-          const minY = Math.min(y1, y2);
-          ctx.fillStyle = 'rgba(15, 23, 42, 0.95)';
+        } else if (s.tool === 'circle') {
+          const rx = w / 2;
+          const ry = h / 2;
           ctx.beginPath();
-          ctx.roundRect(minX, minY, w, h, 6);
-          ctx.fill();
+          ctx.ellipse(minX + rx, minY + ry, rx, ry, 0, 0, Math.PI * 2);
           ctx.stroke();
           if (s.geometry.label) {
             ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 10px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(s.geometry.label, midX, midY);
+          }
+        } else if (s.tool === 'triangle') {
+          ctx.beginPath();
+          ctx.moveTo(midX, minY);
+          ctx.lineTo(minX + w, minY + h);
+          ctx.lineTo(minX, minY + h);
+          ctx.closePath();
+          ctx.stroke();
+        } else if (s.tool === 'decision_diamond') {
+          ctx.beginPath();
+          ctx.moveTo(midX, minY);
+          ctx.lineTo(minX + w, midY);
+          ctx.lineTo(midX, minY + h);
+          ctx.lineTo(minX, midY);
+          ctx.closePath();
+          ctx.stroke();
+          if (s.geometry.label) {
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 10px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(s.geometry.label, midX, midY);
+          }
+        } else if (s.tool === 'tree_node') {
+          const r = Math.max(16, s.width * 3.5);
+          ctx.beginPath();
+          ctx.arc(x1, y1, r, 0, Math.PI * 2);
+          ctx.fillStyle = isLightBg ? 'rgba(255, 255, 255, 0.95)' : 'rgba(15, 23, 42, 0.9)';
+          ctx.fill();
+          ctx.stroke();
+          if (s.geometry.label) {
+            ctx.fillStyle = isLightBg ? '#0f172a' : '#ffffff';
+            ctx.font = 'bold 11px monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(s.geometry.label, x1, y1);
+          }
+        } else if (s.tool === 'sticky_note') {
+          const noteW = Math.max(80, w);
+          const noteH = Math.max(60, h);
+          ctx.fillStyle = '#fef3c7';
+          ctx.strokeStyle = '#f59e0b';
+          ctx.beginPath();
+          ctx.roundRect(minX, minY, noteW, noteH, 6);
+          ctx.fill();
+          ctx.stroke();
+          if (s.geometry.label) {
+            ctx.fillStyle = '#78350f';
+            ctx.font = '10px sans-serif';
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'top';
+            ctx.fillText(s.geometry.label, minX + 6, minY + 6);
+          }
+        } else if (s.tool === 'text') {
+          ctx.fillStyle = drawColor;
+          ctx.font = 'bold 12px sans-serif';
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'top';
+          ctx.fillText(s.geometry.label || 'Label', x1, y1);
+        } else if (s.tool === 'code_box') {
+          const boxW = Math.max(80, w);
+          const boxH = Math.max(32, h);
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.95)';
+          ctx.strokeStyle = '#38bdf8';
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.roundRect(minX, minY, boxW, boxH, 4);
+          ctx.fill();
+          ctx.stroke();
+          if (s.geometry.label) {
+            ctx.fillStyle = '#38bdf8';
+            ctx.font = 'bold 10px monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(s.geometry.label, minX + boxW / 2, minY + boxH / 2);
+          }
+        }
+
+        // DSA Primitives
+        else if (s.tool === 'array_cells') {
+          const numCells = 5;
+          const cellW = Math.max(22, Math.floor(Math.max(100, w) / numCells));
+          const cellH = Math.max(24, Math.min(40, h || 28));
+          ctx.fillStyle = isLightBg ? 'rgba(255, 255, 255, 0.95)' : 'rgba(15, 23, 42, 0.9)';
+          for (let i = 0; i < numCells; i++) {
+            const cx = minX + i * cellW;
+            ctx.fillRect(cx, minY, cellW, cellH);
+            ctx.strokeRect(cx, minY, cellW, cellH);
+            ctx.fillStyle = isLightBg ? '#64748b' : '#94a3b8';
+            ctx.font = '9px monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'bottom';
+            ctx.fillText(`[${i}]`, cx + cellW / 2, minY - 2);
+            ctx.fillStyle = isLightBg ? '#0f172a' : '#ffffff';
+            ctx.font = 'bold 11px monospace';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(`${i * 2 + 1}`, cx + cellW / 2, minY + cellH / 2);
+            ctx.fillStyle = isLightBg ? 'rgba(255, 255, 255, 0.95)' : 'rgba(15, 23, 42, 0.9)';
+          }
+        } else if (s.tool === 'stack_lifo') {
+          const stkW = Math.max(45, w);
+          const stkH = Math.max(70, h);
+          ctx.beginPath();
+          ctx.moveTo(minX, minY);
+          ctx.lineTo(minX, minY + stkH);
+          ctx.lineTo(minX + stkW, minY + stkH);
+          ctx.lineTo(minX + stkW, minY);
+          ctx.stroke();
+          const items = 3;
+          const itemH = Math.floor((stkH - 8) / items);
+          for (let i = 0; i < items; i++) {
+            const iy = minY + stkH - (i + 1) * itemH;
+            ctx.fillStyle = isLightBg ? 'rgba(245, 158, 11, 0.15)' : 'rgba(245, 158, 11, 0.25)';
+            ctx.fillRect(minX + 3, iy, stkW - 6, itemH - 2);
+            ctx.strokeRect(minX + 3, iy, stkW - 6, itemH - 2);
+            ctx.fillStyle = isLightBg ? '#0f172a' : '#ffffff';
+            ctx.font = 'bold 9px monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(i === items - 1 ? 'TOP' : `val_${i + 1}`, minX + stkW / 2, iy + itemH / 2);
+          }
+        } else if (s.tool === 'queue_fifo') {
+          const qW = Math.max(75, w);
+          const qH = Math.max(28, h);
+          ctx.beginPath();
+          ctx.moveTo(minX, minY);
+          ctx.lineTo(minX + qW, minY);
+          ctx.moveTo(minX, minY + qH);
+          ctx.lineTo(minX + qW, minY + qH);
+          ctx.stroke();
+          const qItems = 3;
+          const qItemW = Math.floor((qW - 8) / qItems);
+          for (let i = 0; i < qItems; i++) {
+            const qx = minX + 4 + i * qItemW;
+            ctx.fillStyle = isLightBg ? 'rgba(16, 185, 129, 0.15)' : 'rgba(16, 185, 129, 0.25)';
+            ctx.fillRect(qx, minY + 3, qItemW - 2, qH - 6);
+            ctx.strokeRect(qx, minY + 3, qItemW - 2, qH - 6);
+            ctx.fillStyle = isLightBg ? '#0f172a' : '#ffffff';
+            ctx.font = 'bold 9px monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(`e${i + 1}`, qx + qItemW / 2, minY + qH / 2);
+          }
+        } else if (s.tool === 'hashmap_table') {
+          const hmW = Math.max(75, w);
+          const hmH = Math.max(50, h);
+          ctx.strokeRect(minX, minY, hmW, hmH);
+          const rows = 3;
+          const rH = hmH / rows;
+          for (let i = 1; i < rows; i++) {
+            ctx.beginPath();
+            ctx.moveTo(minX, minY + i * rH);
+            ctx.lineTo(minX + hmW, minY + i * rH);
+            ctx.stroke();
+          }
+          ctx.beginPath();
+          ctx.moveTo(minX + 22, minY);
+          ctx.lineTo(minX + 22, minY + hmH);
+          ctx.stroke();
+          for (let i = 0; i < rows; i++) {
+            ctx.fillStyle = isLightBg ? '#64748b' : '#94a3b8';
+            ctx.font = 'bold 9px monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(`${i}`, minX + 11, minY + i * rH + rH / 2);
+            ctx.fillStyle = isLightBg ? '#0f172a' : '#ffffff';
+            ctx.fillText(`k${i + 1} ➔ v${i + 1}`, minX + 26 + (hmW - 26) / 2, minY + i * rH + rH / 2);
+          }
+        } else if (s.tool === 'two_pointers') {
+          ctx.beginPath();
+          ctx.moveTo(x1, y1);
+          ctx.lineTo(x2, y2);
+          ctx.stroke();
+          const angle = Math.atan2(y2 - y1, x2 - x1);
+          const headLen = Math.max(8, s.width * 2.5);
+          ctx.beginPath();
+          ctx.moveTo(x2, y2);
+          ctx.lineTo(x2 - headLen * Math.cos(angle - Math.PI / 6), y2 - headLen * Math.sin(angle - Math.PI / 6));
+          ctx.moveTo(x2, y2);
+          ctx.lineTo(x2 - headLen * Math.cos(angle + Math.PI / 6), y2 - headLen * Math.sin(angle + Math.PI / 6));
+          ctx.stroke();
+          if (s.geometry.label) {
+            ctx.fillStyle = drawColor;
+            ctx.font = 'bold 10px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(s.geometry.label, x1, y1 - 4);
+          }
+        }
+
+        // Architecture Nodes
+        else if (s.tool === 'db_cylinder' || s.tool === 'db_nosql') {
+          const dbW = Math.max(50, w);
+          const dbH = Math.max(55, h);
+          const ry = Math.min(14, dbH * 0.2);
+          ctx.fillStyle = isLightBg ? 'rgba(255, 255, 255, 0.95)' : 'rgba(15, 23, 42, 0.95)';
+          ctx.beginPath();
+          ctx.ellipse(minX + dbW / 2, minY + ry, dbW / 2, ry, 0, Math.PI, 0);
+          ctx.lineTo(minX + dbW, minY + dbH - ry);
+          ctx.ellipse(minX + dbW / 2, minY + dbH - ry, dbW / 2, ry, 0, 0, Math.PI);
+          ctx.lineTo(minX, minY + ry);
+          ctx.fill();
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.ellipse(minX + dbW / 2, minY + ry, dbW / 2, ry, 0, 0, Math.PI * 2);
+          ctx.stroke();
+          if (s.geometry.label) {
+            ctx.fillStyle = isLightBg ? '#0f172a' : '#ffffff';
+            ctx.font = 'bold 10px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(s.geometry.label, minX + dbW / 2, minY + dbH / 2 + 4);
+          }
+        } else if (s.tool === 'cloud') {
+          const cW = Math.max(65, w);
+          const cH = Math.max(40, h);
+          ctx.fillStyle = isLightBg ? 'rgba(255, 255, 255, 0.95)' : 'rgba(15, 23, 42, 0.95)';
+          ctx.beginPath();
+          ctx.roundRect(minX, minY, cW, cH, 14);
+          ctx.fill();
+          ctx.stroke();
+          if (s.geometry.label) {
+            ctx.fillStyle = isLightBg ? '#0f172a' : '#ffffff';
+            ctx.font = 'bold 10px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(s.geometry.label, minX + cW / 2, minY + cH / 2);
+          }
+        } else if (s.tool === 'load_balancer') {
+          const lbW = Math.max(55, w);
+          const lbH = Math.max(55, h);
+          ctx.fillStyle = isLightBg ? 'rgba(255, 255, 255, 0.95)' : 'rgba(15, 23, 42, 0.95)';
+          ctx.beginPath();
+          ctx.moveTo(minX + lbW / 2, minY);
+          ctx.lineTo(minX + lbW, minY + lbH / 2);
+          ctx.lineTo(minX + lbW / 2, minY + lbH);
+          ctx.lineTo(minX, minY + lbH / 2);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+          if (s.geometry.label) {
+            ctx.fillStyle = isLightBg ? '#0f172a' : '#ffffff';
+            ctx.font = 'bold 10px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(s.geometry.label, minX + lbW / 2, minY + lbH / 2);
+          }
+        } else if (s.tool === 'message_queue') {
+          const mqW = Math.max(70, w);
+          const mqH = Math.max(34, h);
+          ctx.fillStyle = isLightBg ? 'rgba(255, 255, 255, 0.95)' : 'rgba(15, 23, 42, 0.95)';
+          ctx.beginPath();
+          ctx.roundRect(minX, minY, mqW, mqH, 6);
+          ctx.fill();
+          ctx.stroke();
+          if (s.geometry.label) {
+            ctx.fillStyle = isLightBg ? '#0f172a' : '#ffffff';
             ctx.font = 'bold 9px sans-serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillText(s.geometry.label, minX + w / 2, minY + h / 2);
+            ctx.fillText(s.geometry.label, minX + mqW / 2, minY + mqH / 2);
           }
         } else if (s.tool === 'server_box') {
-          const w = Math.max(65, Math.abs(x2 - x1));
-          const h = Math.max(40, Math.abs(y2 - y1));
-          const minX = Math.min(x1, x2);
-          const minY = Math.min(y1, y2);
-          ctx.fillStyle = 'rgba(15, 23, 42, 0.95)';
+          const sW = Math.max(65, w);
+          const sH = Math.max(40, h);
+          ctx.fillStyle = isLightBg ? 'rgba(255, 255, 255, 0.95)' : 'rgba(15, 23, 42, 0.95)';
           ctx.beginPath();
-          ctx.roundRect(minX, minY, w, h, 6);
+          ctx.roundRect(minX, minY, sW, sH, 6);
           ctx.fill();
           ctx.stroke();
           ctx.fillStyle = '#10b981';
@@ -1984,12 +2745,136 @@ export class FloatingWidget {
           ctx.arc(minX + 10, minY + 10, 3, 0, Math.PI * 2);
           ctx.fill();
           if (s.geometry.label) {
-            ctx.fillStyle = '#ffffff';
+            ctx.fillStyle = isLightBg ? '#0f172a' : '#ffffff';
             ctx.font = 'bold 9px sans-serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillText(s.geometry.label, minX + w / 2, minY + h / 2 + 2);
+            ctx.fillText(s.geometry.label, minX + sW / 2, minY + sH / 2 + 2);
           }
+        } else if (s.tool === 'cache_mem') {
+          const caW = Math.max(65, w);
+          const caH = Math.max(32, h);
+          ctx.fillStyle = isLightBg ? 'rgba(244, 63, 94, 0.1)' : 'rgba(244, 63, 94, 0.2)';
+          ctx.beginPath();
+          ctx.roundRect(minX, minY, caW, caH, 5);
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = isLightBg ? '#0f172a' : '#ffffff';
+          ctx.font = 'bold 9px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(s.geometry.label || '⚡ Redis Cache', minX + caW / 2, minY + caH / 2);
+        } else if (s.tool === 'cdn_edge') {
+          const cdnW = Math.max(65, w);
+          const cdnH = Math.max(36, h);
+          ctx.fillStyle = isLightBg ? 'rgba(6, 182, 212, 0.1)' : 'rgba(6, 182, 212, 0.2)';
+          ctx.beginPath();
+          ctx.roundRect(minX, minY, cdnW, cdnH, 12);
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = isLightBg ? '#0f172a' : '#ffffff';
+          ctx.font = 'bold 9px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(s.geometry.label || '🌐 CDN Edge', minX + cdnW / 2, minY + cdnH / 2);
+        } else if (s.tool === 'object_storage') {
+          const obW = Math.max(65, w);
+          const obH = Math.max(45, h);
+          ctx.fillStyle = isLightBg ? 'rgba(249, 115, 22, 0.1)' : 'rgba(249, 115, 22, 0.2)';
+          ctx.beginPath();
+          ctx.roundRect(minX, minY, obW, obH, 6);
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = isLightBg ? '#0f172a' : '#ffffff';
+          ctx.font = 'bold 9px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(s.geometry.label || '📦 S3 Storage', minX + obW / 2, minY + obH / 2);
+        } else if (s.tool === 'auth_jwt') {
+          const auW = Math.max(60, w);
+          const auH = Math.max(40, h);
+          ctx.beginPath();
+          ctx.moveTo(minX + auW / 2, minY);
+          ctx.lineTo(minX + auW, minY + auH * 0.3);
+          ctx.lineTo(minX + auW / 2, minY + auH);
+          ctx.lineTo(minX, minY + auH * 0.3);
+          ctx.closePath();
+          ctx.fillStyle = isLightBg ? 'rgba(234, 179, 8, 0.15)' : 'rgba(234, 179, 8, 0.25)';
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = isLightBg ? '#0f172a' : '#ffffff';
+          ctx.font = 'bold 9px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(s.geometry.label || '🛡️ JWT Auth', minX + auW / 2, minY + auH / 2);
+        } else if (s.tool === 'websocket_gw') {
+          const wsW = Math.max(65, w);
+          const wsH = Math.max(36, h);
+          ctx.fillStyle = isLightBg ? 'rgba(99, 102, 241, 0.15)' : 'rgba(99, 102, 241, 0.25)';
+          ctx.beginPath();
+          ctx.roundRect(minX, minY, wsW, wsH, 6);
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = isLightBg ? '#0f172a' : '#ffffff';
+          ctx.font = 'bold 9px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(s.geometry.label || '⚡ WS Gateway', minX + wsW / 2, minY + wsH / 2);
+        } else if (s.tool === 'elasticsearch') {
+          const esW = Math.max(65, w);
+          const esH = Math.max(36, h);
+          ctx.fillStyle = isLightBg ? 'rgba(20, 184, 166, 0.15)' : 'rgba(20, 184, 166, 0.25)';
+          ctx.beginPath();
+          ctx.roundRect(minX, minY, esW, esH, 6);
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = isLightBg ? '#0f172a' : '#ffffff';
+          ctx.font = 'bold 9px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(s.geometry.label || '🔍 Search / ES', minX + esW / 2, minY + esH / 2);
+        } else if (s.tool === 'user_client' || s.tool === 'mobile_client') {
+          const clW = Math.max(50, w);
+          const clH = Math.max(34, h);
+          ctx.fillStyle = isLightBg ? 'rgba(59, 130, 246, 0.15)' : 'rgba(59, 130, 246, 0.25)';
+          ctx.beginPath();
+          ctx.roundRect(minX, minY, clW, clH, 6);
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = isLightBg ? '#0f172a' : '#ffffff';
+          ctx.font = 'bold 9px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(s.geometry.label || (s.tool === 'mobile_client' ? '📱 Mobile' : '💻 Client'), minX + clW / 2, minY + clH / 2);
+        } else if (s.tool === 'async_arrow') {
+          ctx.setLineDash([4, 4]);
+          ctx.beginPath();
+          ctx.moveTo(x1, y1);
+          ctx.lineTo(x2, y2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          const angle = Math.atan2(y2 - y1, x2 - x1);
+          const headLen = Math.max(10, s.width * 3);
+          ctx.beginPath();
+          ctx.moveTo(x2, y2);
+          ctx.lineTo(x2 - headLen * Math.cos(angle - Math.PI / 6), y2 - headLen * Math.sin(angle - Math.PI / 6));
+          ctx.moveTo(x2, y2);
+          ctx.lineTo(x2 - headLen * Math.cos(angle + Math.PI / 6), y2 - headLen * Math.sin(angle + Math.PI / 6));
+          ctx.stroke();
+        } else if (s.tool === 'tradeoff_note') {
+          const trW = Math.max(90, w);
+          const trH = Math.max(45, h);
+          ctx.fillStyle = 'rgba(250, 204, 21, 0.18)';
+          ctx.strokeStyle = '#facc15';
+          ctx.beginPath();
+          ctx.roundRect(minX, minY, trW, trH, 4);
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = isLightBg ? '#78350f' : '#fef08a';
+          ctx.font = 'bold 9px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(s.geometry.label || '⚖️ Trade-off / CAP Analysis', minX + trW / 2, minY + trH / 2);
         }
       } else if (s.points && s.points.length > 0) {
         if (s.points.length === 1) {
@@ -2098,6 +2983,13 @@ export class FloatingWidget {
             this.wbStrokes.push(msg.stroke);
             if (this.activeTab === 'whiteboard') this.drawWbCanvas();
           }
+        } else if (msg.type === 'WHITEBOARD_TEMP_STROKE_LOCAL' && msg.stroke) {
+          this.tempDisappearingStrokes.push({
+            stroke: msg.stroke,
+            createdAt: Date.now(),
+            durationMs: msg.durationMs || 3000,
+          });
+          if (this.activeTab === 'whiteboard') this.drawWbCanvas();
         } else if (msg.type === 'WHITEBOARD_CLEAR_LOCAL') {
           this.wbStrokes = [];
           this.wbRedoStack = [];
@@ -2105,6 +2997,18 @@ export class FloatingWidget {
         } else if (msg.type === 'WHITEBOARD_UNDO_LOCAL' && msg.strokeId) {
           this.wbStrokes = this.wbStrokes.filter((s) => s.id !== msg.strokeId);
           if (this.activeTab === 'whiteboard') this.drawWbCanvas();
+        } else if (msg.type === 'WHITEBOARD_BG_LOCAL') {
+          if (msg.background) this.wbTheme = msg.background;
+          if (msg.bgColor) this.wbBgColor = msg.bgColor;
+          if (this.activeTab === 'whiteboard') this.drawWbCanvas();
+        } else if (msg.type === 'WHITEBOARD_SNAPSHOT' && msg.notebook?.pages) {
+          const activePage = msg.notebook.pages.find((p: any) => p.id === msg.notebook.activePageId) || msg.notebook.pages[0];
+          if (activePage) {
+            this.wbStrokes = activePage.strokes || [];
+            if (activePage.background) this.wbTheme = activePage.background;
+            if (activePage.bgColor) this.wbBgColor = activePage.bgColor;
+            if (this.activeTab === 'whiteboard') this.drawWbCanvas();
+          }
         }
       });
     }
@@ -2325,6 +3229,36 @@ export class FloatingWidget {
             }
             this.render();
           }
+          if (changes.synqto_theme_settings) {
+            this.themeSettings = changes.synqto_theme_settings.newValue;
+            this.render();
+          }
+          if (changes.synqto_collab_notebook) {
+            const nb = changes.synqto_collab_notebook.newValue;
+            if (nb && Array.isArray(nb.pages)) {
+              const activePage = nb.pages.find((p: any) => p.id === nb.activePageId) || nb.pages[0];
+              if (activePage) {
+                this.wbStrokes = activePage.strokes || [];
+                if (activePage.background) this.wbTheme = activePage.background;
+                if (activePage.bgColor) this.wbBgColor = activePage.bgColor;
+                if (this.activeTab === 'whiteboard') this.drawWbCanvas();
+              }
+            }
+          }
+          if (changes.synqto_personal_notebook) {
+            const nb = changes.synqto_personal_notebook.newValue;
+            if (nb && Array.isArray(nb.pages)) {
+              const activePage = nb.pages.find((p: any) => p.id === nb.activePageId) || nb.pages[0];
+              if (activePage) {
+                this.wbPersonalStrokes = activePage.strokes || [];
+                if (this.wbPrivacyMode === 'personal') {
+                  if (activePage.background) this.wbTheme = activePage.background;
+                  if (activePage.bgColor) this.wbBgColor = activePage.bgColor;
+                  if (this.activeTab === 'whiteboard') this.drawWbCanvas();
+                }
+              }
+            }
+          }
           if (changes[POMODORO_CONFIG_STORAGE_KEY]) {
             const newCfg = changes[POMODORO_CONFIG_STORAGE_KEY].newValue;
             if (newCfg) {
@@ -2426,14 +3360,14 @@ export class FloatingWidget {
     if (timeEl) {
       timeEl.textContent = this.formatTimerTime(this.timerState.timeLeftSec);
     }
-    const fabTimerBadge = this.shadow.getElementById('nb-fab-timer-pill');
-    if (fabTimerBadge) {
-      if (this.timerConfig.enabled && this.timerState.isRunning) {
-        fabTimerBadge.style.display = 'inline-flex';
-        fabTimerBadge.textContent = this.formatTimerTime(this.timerState.timeLeftSec);
-      } else {
-        fabTimerBadge.style.display = 'none';
-      }
+    const timerFabTime = this.shadow.getElementById('nb-timer-fab-time');
+    if (timerFabTime) {
+      timerFabTime.textContent = this.formatTimerTime(this.timerState.timeLeftSec);
+    }
+    const timerFabFill = this.shadow.getElementById('nb-timer-fab-fill') as HTMLElement;
+    if (timerFabFill) {
+      const pct = this.getTimerProgressPct();
+      timerFabFill.style.width = `${pct}%`;
     }
     const barEl = this.shadow.getElementById('nb-timer-progress-fill') as HTMLElement;
     if (barEl) {
@@ -2551,5 +3485,178 @@ export class FloatingWidget {
       playTone(783.99, 0.3, 1.5);
       playTone(1046.5, 0.45, 2.0);
     } catch (e) {}
+  }
+
+  private getThemeCSS(): string {
+    const mode = this.themeSettings?.mode || 'system';
+    const isLight =
+      mode === 'day' ||
+      mode === 'light' ||
+      mode === 'leetcode_light' ||
+      mode === 'solarized_light' ||
+      mode === 'sakura' ||
+      (mode === 'system' && typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: light)').matches);
+
+    let bgCard = 'rgba(26, 38, 41, 0.96)';
+    let bgElevated = 'rgba(38, 55, 59, 0.95)';
+    let borderSubtle = 'rgba(45, 212, 191, 0.18)';
+    let textPrimary = '#ecfdf5';
+    let textSecondary = '#a7f3d0';
+    let primary = '#2dd4bf';
+    let primaryHover = '#14b8a6';
+
+    if (this.themeSettings?.customPaletteEnabled) {
+      bgCard = this.themeSettings.customBgSurface || '#1e2b2f';
+      bgElevated = this.themeSettings.customBgSurface || '#26373b';
+      primary = this.themeSettings.customPrimary || '#2dd4bf';
+      primaryHover = this.themeSettings.customPrimary || '#14b8a6';
+      textPrimary = this.themeSettings.customTextPrimary || '#ecfdf5';
+      textSecondary = this.themeSettings.customTextSecondary || '#94a3b8';
+      borderSubtle = `${textSecondary}33`;
+    } else if (mode === 'nordic_forest') {
+      bgCard = 'rgba(26, 38, 41, 0.96)';
+      bgElevated = 'rgba(38, 55, 59, 0.95)';
+      borderSubtle = 'rgba(45, 212, 191, 0.22)';
+      textPrimary = '#ecfdf5';
+      textSecondary = '#a7f3d0';
+      primary = '#2dd4bf';
+      primaryHover = '#14b8a6';
+    } else if (mode === 'leetcode_dark') {
+      bgCard = 'rgba(38, 38, 38, 0.96)';
+      bgElevated = 'rgba(48, 48, 48, 0.95)';
+      borderSubtle = 'rgba(255, 161, 22, 0.25)';
+      textPrimary = '#eff1f6';
+      textSecondary = '#abb2bf';
+      primary = '#FFA116';
+      primaryHover = '#f59e0b';
+    } else if (mode === 'leetcode_light') {
+      bgCard = '#ffffff';
+      bgElevated = '#f7f7f8';
+      borderSubtle = 'rgba(230, 138, 0, 0.25)';
+      textPrimary = '#262626';
+      textSecondary = '#595959';
+      primary = '#e68a00';
+      primaryHover = '#cc7a00';
+    } else if (mode === 'oled') {
+      bgCard = 'rgba(10, 10, 10, 0.98)';
+      bgElevated = 'rgba(24, 24, 24, 0.95)';
+      borderSubtle = 'rgba(255, 255, 255, 0.18)';
+      textPrimary = '#ffffff';
+      textSecondary = '#e2e8f0';
+    } else if (mode === 'espresso') {
+      bgCard = 'rgba(32, 21, 14, 0.96)';
+      bgElevated = 'rgba(48, 32, 22, 0.95)';
+      borderSubtle = 'rgba(245, 158, 11, 0.2)';
+      textPrimary = '#fef3c7';
+      textSecondary = '#fde68a';
+      primary = '#f59e0b';
+      primaryHover = '#d97706';
+    } else if (mode === 'forest') {
+      bgCard = 'rgba(8, 28, 17, 0.96)';
+      bgElevated = 'rgba(14, 42, 27, 0.95)';
+      borderSubtle = 'rgba(16, 185, 129, 0.2)';
+      textPrimary = '#ecfdf5';
+      textSecondary = '#a7f3d0';
+      primary = '#10b981';
+      primaryHover = '#059669';
+    } else if (mode === 'nord') {
+      bgCard = 'rgba(46, 52, 64, 0.96)';
+      bgElevated = 'rgba(59, 66, 82, 0.95)';
+      borderSubtle = 'rgba(136, 192, 208, 0.2)';
+      textPrimary = '#eceff4';
+      textSecondary = '#e5e9f0';
+      primary = '#88c0d0';
+      primaryHover = '#81a1c1';
+    } else if (mode === 'dracula') {
+      bgCard = 'rgba(40, 42, 54, 0.96)';
+      bgElevated = 'rgba(68, 71, 90, 0.95)';
+      borderSubtle = 'rgba(189, 147, 249, 0.2)';
+      textPrimary = '#f8f8f2';
+      textSecondary = '#bd93f9';
+      primary = '#bd93f9';
+      primaryHover = '#a855f7';
+    } else if (mode === 'synthwave') {
+      bgCard = 'rgba(38, 20, 71, 0.96)';
+      bgElevated = 'rgba(54, 28, 102, 0.95)';
+      borderSubtle = 'rgba(244, 114, 182, 0.25)';
+      textPrimary = '#fff0f5';
+      textSecondary = '#f472b6';
+      primary = '#f472b6';
+      primaryHover = '#ec4899';
+    } else if (mode === 'solarized_dark') {
+      bgCard = 'rgba(0, 43, 54, 0.96)';
+      bgElevated = 'rgba(7, 54, 66, 0.95)';
+      borderSubtle = 'rgba(42, 161, 152, 0.25)';
+      textPrimary = '#fdf6e3';
+      textSecondary = '#eee8d5';
+      primary = '#2aa198';
+      primaryHover = '#268bd2';
+    } else if (mode === 'solarized_light') {
+      bgCard = '#fdf6e3';
+      bgElevated = '#eee8d5';
+      borderSubtle = 'rgba(7, 54, 66, 0.2)';
+      textPrimary = '#073642';
+      textSecondary = '#586e75';
+      primary = '#268bd2';
+      primaryHover = '#1e6ea8';
+    } else if (mode === 'sakura') {
+      bgCard = '#ffffff';
+      bgElevated = '#fff0f3';
+      borderSubtle = 'rgba(244, 63, 94, 0.2)';
+      textPrimary = '#4c0519';
+      textSecondary = '#881337';
+      primary = '#f43f5e';
+      primaryHover = '#e11d48';
+    } else if (isLight) {
+      bgCard = '#ffffff';
+      bgElevated = '#f6f8fa';
+      borderSubtle = 'rgba(31, 35, 40, 0.15)';
+      textPrimary = '#1f2328';
+      textSecondary = '#4b5563';
+      primary = '#4f46e5';
+      primaryHover = '#4338ca';
+    } else if (mode === 'night') {
+      bgCard = 'rgba(22, 27, 34, 0.96)';
+      bgElevated = 'rgba(33, 38, 45, 0.95)';
+      borderSubtle = 'rgba(255, 255, 255, 0.12)';
+      textPrimary = '#f0f6fc';
+      textSecondary = '#c9d1d9';
+      primary = '#6366f1';
+      primaryHover = '#4f46e5';
+    }
+
+    if (!this.themeSettings?.customPaletteEnabled) {
+      if (this.themeSettings?.accent === 'leetcode') {
+        primary = '#FFA116';
+        primaryHover = '#f59e0b';
+      } else if (this.themeSettings?.accent === 'emerald') {
+        primary = '#10b981';
+        primaryHover = '#059669';
+      } else if (this.themeSettings?.accent === 'cyan') {
+        primary = '#06b6d4';
+        primaryHover = '#0891b2';
+      } else if (this.themeSettings?.accent === 'rose') {
+        primary = '#f43f5e';
+        primaryHover = '#e11d48';
+      } else if (this.themeSettings?.accent === 'amber') {
+        primary = '#f59e0b';
+        primaryHover = '#d97706';
+      } else if (this.themeSettings?.accent === 'purple') {
+        primary = '#a855f7';
+        primaryHover = '#9333ea';
+      }
+    }
+
+    return `
+      --primary: ${primary};
+      --primary-hover: ${primaryHover};
+      --bg-card: ${bgCard};
+      --bg-surface-elevated: ${bgElevated};
+      --border-subtle: ${borderSubtle};
+      --text-primary: ${textPrimary};
+      --text-secondary: ${textSecondary};
+      --text-muted: ${isLight ? '#6b7280' : '#8b949e'};
+      --text-dim: ${isLight ? '#9ca3af' : '#6e7681'};
+    `;
   }
 }

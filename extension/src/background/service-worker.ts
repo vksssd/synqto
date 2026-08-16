@@ -57,10 +57,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     message.type === 'LOCAL_CLICK_PULSE' ||
     message.type === 'WHITEBOARD_STROKE_LOCAL' ||
     message.type === 'WHITEBOARD_CLEAR_LOCAL' ||
-    message.type === 'WHITEBOARD_UNDO_LOCAL'
+    message.type === 'WHITEBOARD_UNDO_LOCAL' ||
+    message.type === 'WHITEBOARD_BG_LOCAL' ||
+    message.type === 'WHITEBOARD_PAGE_SYNC_LOCAL' ||
+    message.type === 'TIMER_STATE_SYNC' ||
+    message.type === 'CODE_DELTA_LOCAL' ||
+    message.type === 'CODE_CURSOR_LOCAL' ||
+    message.type === 'CODE_SYNC_LOCAL' ||
+    message.type === 'CODE_DELTA_REMOTE' ||
+    message.type === 'CODE_CURSOR_REMOTE' ||
+    message.type === 'CODE_SYNC_REMOTE'
   ) {
-    // Forward to sidepanel / offscreen for DataChannel broadcast
+    // 1. Forward to sidepanel / extension views / offscreen
     chrome.runtime.sendMessage(message).catch(() => {});
+
+    // 2. Broadcast to all active content script tabs
+    chrome.tabs.query({}, (tabs) => {
+      tabs.forEach((tab) => {
+        if (tab.id && tab.id !== sender.tab?.id) {
+          chrome.tabs.sendMessage(tab.id, message).catch(() => {});
+        }
+      });
+    });
   } else if (message.type === 'OPEN_SIDEPANEL') {
     const tabId = sender.tab?.id;
     const windowId = sender.tab?.windowId;

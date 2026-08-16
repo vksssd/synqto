@@ -188,6 +188,21 @@ export const DiaryView: React.FC = () => {
     }, 50);
   };
 
+  // Full Template Inserter (DSA Solution / System Design Blueprint)
+  const insertTemplate = (templateMarkdown: string) => {
+    const textarea = document.getElementById('diary-content-textarea') as HTMLTextAreaElement;
+    const baseContent = localContent.trim() ? `${localContent}\n\n` : '';
+    const updated = `${baseContent}${templateMarkdown}`;
+    setLocalContent(updated);
+    debouncedSave(localTitle, updated);
+    setTimeout(() => {
+      if (textarea) {
+        textarea.focus();
+        textarea.setSelectionRange(updated.length, updated.length);
+      }
+    }, 50);
+  };
+
   // Tag Handlers
   const handleAddTag = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && newTagInput.trim() && activeEntry && activeDiary) {
@@ -865,6 +880,80 @@ export const DiaryView: React.FC = () => {
                       style={{ padding: '2px 5px', fontSize: '9.5px' }}
                     >
                       <List size={11} />
+                    </button>
+
+                    <div style={{ width: '1px', height: '12px', background: 'var(--border-subtle)', margin: '0 2px' }} />
+
+                    {/* DSA & System Design Note Templates */}
+                    <span style={{ fontSize: '9px', color: '#818cf8', fontWeight: 700, marginLeft: '2px' }}>⚡ Templates:</span>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        insertTemplate(
+                          `### 💡 Problem Intuition & Core Invariant\n- **Pattern**: [Two Pointers / Sliding Window / Monotonic Stack / 2D DP / Binary Search]\n- **Key Insight**: \n- **Invariant**: \n\n### 📐 Step-by-Step Algorithm\n1. Initialize data structures / boundary pointers.\n2. Iterate through input elements while maintaining invariants.\n3. Return computed optimal result.\n\n### ⚠️ Edge Cases & Pitfalls\n- [ ] Empty input / single element ($N = 0, 1$)\n- [ ] Duplicate values / all equal elements\n- [ ] Negative numbers / zero boundary\n- [ ] Integer overflow ($> 2^{31}-1$)\n\n### ⏱️ Complexity\n- **Time Complexity**: $O(N)$\n- **Space Complexity**: $O(1)$ auxiliary space\n\n### 💻 Optimal Implementation\n\`\`\`python\ndef solve(nums: list[int], target: int) -> int:\n    left, right = 0, len(nums) - 1\n    while left < right:\n        curr = nums[left] + nums[right]\n        if curr == target:\n            return [left, right]\n        elif curr < target:\n            left += 1\n        else:\n            right -= 1\n    return -1\n\`\`\`\n`
+                        )
+                      }
+                      title="Insert LeetCode / DSA Solution Blueprint"
+                      style={{
+                        padding: '2px 6px',
+                        fontSize: '9px',
+                        fontWeight: 600,
+                        borderRadius: '4px',
+                        border: '1px solid rgba(99, 102, 241, 0.3)',
+                        background: 'rgba(99, 102, 241, 0.15)',
+                        color: '#c7d2fe',
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      🔲 DSA Blueprint
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        insertTemplate(
+                          `# 🏛️ System Design Architecture: [System Name]\n\n### 1. Requirements Exploration\n- **Functional Requirements**:\n  1. Users can submit ...\n  2. Users can retrieve ...\n  3. Real-time updates for ...\n- **Non-Functional Requirements**:\n  - High Availability (99.99%) & Low Latency (< 50ms p99)\n  - Read:Write Ratio: 100:1 (Read-heavy)\n  - CAP Choice: AP (High Availability with Eventual Consistency)\n\n### 2. Capacity & Scale Estimation\n- **Traffic**: 100M DAU × 10 requests = 1B requests/day (~12,000 QPS average, ~25,000 QPS peak)\n- **Storage**: 1B writes/day × 500 bytes = 500 GB/day → ~180 TB/year\n\n### 3. High-Level Architecture Blueprint\n- **Edge**: Cloudflare CDN (Static caching) + GeoDNS\n- **Ingress**: AWS ALB / NGINX with Token Bucket Rate Limiter\n- **Web Tier**: Stateless Microservices (Auto-scaling cluster)\n- **Cache**: Redis Cluster (LRU eviction, Cache-Aside)\n- **Database**: Sharded PostgreSQL (Primary write + Read replicas)\n- **Async Queue**: Apache Kafka + Worker fleet\n\n### 4. Data Model & Schema\n\`\`\`sql\nCREATE TABLE items (\n    id VARCHAR(64) PRIMARY KEY,\n    user_id VARCHAR(64) NOT NULL,\n    payload JSONB NOT NULL,\n    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()\n);\nCREATE INDEX idx_user_items ON items(user_id, created_at DESC);\n\`\`\`\n\n### 5. Deep-Dive & Trade-offs (CAP Theorem)\n- **Consistent Hashing**: Virtual nodes for database partition balance.\n- **Cache Invalidation**: Redis Pub/Sub event broadcast on mutation.\n- **Trade-off**: CP vs AP — chose AP with idempotent retry queues.\n`
+                        )
+                      }
+                      title="Insert System Design Interview Framework"
+                      style={{
+                        padding: '2px 6px',
+                        fontSize: '9px',
+                        fontWeight: 600,
+                        borderRadius: '4px',
+                        border: '1px solid rgba(16, 185, 129, 0.3)',
+                        background: 'rgba(16, 185, 129, 0.15)',
+                        color: '#6ee7b7',
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      🏛️ System Design Blueprint
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        insertTemplate(
+                          `### ⚡ Algorithm Pattern Cheat Sheet\n\n#### 1. Binary Search (Left-Closed, Right-Open)\n\`\`\`python\ndef binary_search(nums: list[int], target: int) -> int:\n    left, right = 0, len(nums)\n    while left < right:\n        mid = left + (right - left) // 2\n        if nums[mid] >= target:\n            right = mid\n        else:\n            left = mid + 1\n    return left\n\`\`\`\n\n#### 2. Sliding Window (Dynamic Expansion & Contraction)\n\`\`\`python\ndef sliding_window(s: str, k: int) -> int:\n    counts = {}\n    left = max_len = 0\n    for right, ch in enumerate(s):\n        counts[ch] = counts.get(ch, 0) + 1\n        while len(counts) > k:\n            counts[s[left]] -= 1\n            if counts[s[left]] == 0:\n                del counts[s[left]]\n            left += 1\n        max_len = max(max_len, right - left + 1)\n    return max_len\n\`\`\`\n`
+                        )
+                      }
+                      title="Insert Algorithm Cheat Sheet (Binary Search & Sliding Window)"
+                      style={{
+                        padding: '2px 6px',
+                        fontSize: '9px',
+                        fontWeight: 600,
+                        borderRadius: '4px',
+                        border: '1px solid rgba(245, 158, 11, 0.3)',
+                        background: 'rgba(245, 158, 11, 0.15)',
+                        color: '#fcd34d',
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      📑 Cheat Sheet
                     </button>
                   </div>
 

@@ -145,16 +145,16 @@ export class VoiceService {
   }
 
   /**
-   * Opens a dedicated permission prompt tab to let user grant microphone access to the extension origin.
+   * Opens a dedicated permission prompt tab to let user grant microphone and camera access to the extension origin.
    */
   public requestMicrophonePermission(): void {
     if (typeof chrome !== 'undefined' && chrome.tabs) {
       chrome.tabs.create({
-        url: chrome.runtime.getURL('sidepanel.html?requestMic=1'),
+        url: chrome.runtime.getURL('permission.html'),
         active: true,
       });
     } else {
-      window.open('sidepanel.html?requestMic=1', '_blank');
+      window.open('permission.html', '_blank');
     }
   }
 

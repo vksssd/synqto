@@ -4,7 +4,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { App } from './App';
 import { setupChromePolyfill } from '@/core/chrome-polyfill';
-import './index.css';
+import './synqtoDesign.css';
 
 // Ensure chrome API polyfills exist for standalone web mode
 setupChromePolyfill();

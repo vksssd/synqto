@@ -1,7 +1,7 @@
 // ─── Navigation Bar Component with Dedicated Whiteboard Tab ───
 
 import React from 'react';
-import { MessageSquare, Palette, Users, Compass, Settings, Flame } from 'lucide-react';
+import { MessageSquare, Palette, Users, Compass, Settings, Flame, Code2 } from 'lucide-react';
 
 export type NavTabType = 'chat' | 'whiteboard' | 'groups' | 'peers' | 'profile';
 

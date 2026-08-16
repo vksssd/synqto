@@ -1,15 +1,18 @@
-// ─── WebRTC Peer Connection & Multi-Subscriber Media Mesh Service ───
+// ─── WebRTC Peer Connection & Dual-Channel Mesh Service (Perfect Negotiation) ───
 
 import { NetworkPacket } from './packet';
 
 export interface PeerConnectionWrapper {
   peerId: string;
   pc: RTCPeerConnection;
-  dataChannel: RTCDataChannel | null;
+  controlChannel: RTCDataChannel | null;
+  bulkChannel: RTCDataChannel | null;
   remoteStream: MediaStream | null;
   isInitiator: boolean;
   status: 'connecting' | 'connected' | 'disconnected' | 'failed';
-  isMakingOffer: boolean;
+  makingOffer: boolean;
+  ignoreOffer: boolean;
+  isPolite: boolean;
 }
 
 export class WebRTCService {
@@ -149,7 +152,7 @@ export class WebRTCService {
   }
 
   private async syncTracksToAllPeers(kindFilter?: 'audio' | 'video') {
-    for (const [peerId, wrapper] of this.connections.entries()) {
+    for (const [, wrapper] of this.connections.entries()) {
       if (!wrapper.pc || wrapper.pc.connectionState === 'closed') continue;
 
       const transceivers = wrapper.pc.getTransceivers();
@@ -181,34 +184,34 @@ export class WebRTCService {
       }
 
       if (needsRenegotiation) {
-        await this.renegotiate(peerId);
+        await this.renegotiate(wrapper.peerId);
       }
     }
   }
 
   /**
-   * Renegotiates SDP offer with a remote peer when tracks are added/removed.
+   * Renegotiates SDP offer using Perfect Negotiation
    */
   public async renegotiate(remotePeerId: string): Promise<void> {
     const wrapper = this.connections.get(remotePeerId);
     if (!wrapper || !wrapper.pc || wrapper.pc.signalingState === 'closed') return;
 
     try {
-      wrapper.isMakingOffer = true;
+      wrapper.makingOffer = true;
       const offer = await wrapper.pc.createOffer();
-      if (wrapper.pc.connectionState === 'closed') return;
+      if (wrapper.pc.signalingState === 'closed') return;
       await wrapper.pc.setLocalDescription(offer);
 
       this.signalNeededListeners.forEach((fn) => fn(remotePeerId, 'offer', offer));
     } catch (err) {
       console.warn(`[WebRTCService] Renegotiation offer error for ${remotePeerId}:`, err);
     } finally {
-      if (wrapper) wrapper.isMakingOffer = false;
+      if (wrapper) wrapper.makingOffer = false;
     }
   }
 
   /**
-   * Initiates a WebRTC connection to a remote peer (creates Offer and DataChannel)
+   * Initiates a WebRTC connection with Dual DataChannels (control & bulk)
    */
   public async initiateConnection(remotePeerId: string): Promise<void> {
     if (this.connections.has(remotePeerId)) {
@@ -219,25 +222,38 @@ export class WebRTCService {
       this.closeConnection(remotePeerId);
     }
 
+    const isPolite = this.myPeerId ? this.myPeerId < remotePeerId : false;
     const pc = this.createPeerConnection(remotePeerId);
-    const dc = pc.createDataChannel('synqto-data', {
+
+    // 1. Control channel (Ordered, low-latency, ACKs, presence, cursor, voice signaling)
+    const controlChannel = pc.createDataChannel('synqto_control', {
       ordered: true,
+      maxRetransmits: 5,
     });
-    this.setupDataChannel(remotePeerId, dc);
+    this.setupDataChannel(remotePeerId, controlChannel, 'control');
+
+    // 2. Bulk channel (Unordered high throughput for screenshots, whiteboard state, blobs)
+    const bulkChannel = pc.createDataChannel('synqto_bulk', {
+      ordered: false,
+    });
+    this.setupDataChannel(remotePeerId, bulkChannel, 'bulk');
 
     const wrapper: PeerConnectionWrapper = {
       peerId: remotePeerId,
       pc,
-      dataChannel: dc,
+      controlChannel,
+      bulkChannel,
       remoteStream: null,
       isInitiator: true,
       status: 'connecting',
-      isMakingOffer: false,
+      makingOffer: false,
+      ignoreOffer: false,
+      isPolite,
     };
     this.connections.set(remotePeerId, wrapper);
 
     try {
-      wrapper.isMakingOffer = true;
+      wrapper.makingOffer = true;
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
@@ -246,7 +262,7 @@ export class WebRTCService {
       console.error(`[WebRTCService] Failed to create offer for ${remotePeerId}:`, err);
       this.handleConnectionFailure(remotePeerId);
     } finally {
-      wrapper.isMakingOffer = false;
+      wrapper.makingOffer = false;
     }
   }
 
@@ -267,7 +283,7 @@ export class WebRTCService {
   }
 
   /**
-   * Handles incoming SDP offer (supports initial connection and Perfect Negotiation renegotiation)
+   * Handles incoming SDP offer with W3C Perfect Negotiation
    */
   public async handleIncomingOffer(
     remotePeerId: string,
@@ -276,15 +292,20 @@ export class WebRTCService {
     let wrapper = this.connections.get(remotePeerId);
     const isPolite = this.myPeerId ? this.myPeerId < remotePeerId : false;
 
-    // Handle existing connection renegotiation
+    // Handle existing connection renegotiation / offer collision
     if (wrapper && wrapper.pc && wrapper.pc.signalingState !== 'closed') {
-      const offerCollision = wrapper.isMakingOffer || wrapper.pc.signalingState !== 'stable';
+      const offerCollision = wrapper.makingOffer || wrapper.pc.signalingState !== 'stable';
+      wrapper.ignoreOffer = !isPolite && offerCollision;
+
+      if (wrapper.ignoreOffer) {
+        console.log(`[WebRTCService] Impolite peer ignoring colliding offer from ${remotePeerId}`);
+        return;
+      }
+
       if (offerCollision) {
-        if (!isPolite) {
-          // Impolite peer ignores colliding offer; polite peer rolls back
-          return;
-        }
-        await wrapper.pc.setLocalDescription({ type: 'rollback' });
+        try {
+          await wrapper.pc.setLocalDescription({ type: 'rollback' });
+        } catch (e) {}
       }
 
       try {
@@ -296,7 +317,7 @@ export class WebRTCService {
         this.signalNeededListeners.forEach((fn) => fn(remotePeerId, 'answer', answer));
         return;
       } catch (err) {
-        console.warn(`[WebRTCService] Renegotiation answer failed for ${remotePeerId}, resetting:`, err);
+        console.warn(`[WebRTCService] Perfect negotiation answer failed for ${remotePeerId}, resetting:`, err);
       }
     }
 
@@ -308,11 +329,14 @@ export class WebRTCService {
     wrapper = {
       peerId: remotePeerId,
       pc,
-      dataChannel: null,
+      controlChannel: null,
+      bulkChannel: null,
       remoteStream: null,
       isInitiator: false,
       status: 'connecting',
-      isMakingOffer: false,
+      makingOffer: false,
+      ignoreOffer: false,
+      isPolite,
     };
     this.connections.set(remotePeerId, wrapper);
 
@@ -378,7 +402,6 @@ export class WebRTCService {
       iceCandidatePoolSize: 2,
     });
 
-    // Create exactly one audio and one video transceiver with initial tracks
     try {
       pc.addTransceiver(
         this.localAudioTrack && this.localAudioTrack.readyState === 'live' ? this.localAudioTrack : 'audio',
@@ -417,14 +440,20 @@ export class WebRTCService {
 
     pc.ondatachannel = (event) => {
       const dc = event.channel;
+      const label = dc.label || '';
+      const kind = label.includes('bulk') ? 'bulk' : 'control';
       const wrapper = this.connections.get(remotePeerId);
       if (wrapper) {
-        wrapper.dataChannel = dc;
+        if (kind === 'bulk') {
+          wrapper.bulkChannel = dc;
+        } else {
+          wrapper.controlChannel = dc;
+        }
       }
-      this.setupDataChannel(remotePeerId, dc);
+      this.setupDataChannel(remotePeerId, dc, kind);
     };
 
-    // Remote media track received (Screen share / Camera / Mic)
+    // Remote media track received
     pc.ontrack = (event) => {
       const wrapper = this.connections.get(remotePeerId);
       let stream: MediaStream;
@@ -448,7 +477,7 @@ export class WebRTCService {
     return pc;
   }
 
-  private setupDataChannel(remotePeerId: string, dc: RTCDataChannel) {
+  private setupDataChannel(remotePeerId: string, dc: RTCDataChannel, _kind: 'control' | 'bulk') {
     const handleOpen = () => {
       const wrapper = this.connections.get(remotePeerId);
       if (wrapper) {
@@ -473,36 +502,72 @@ export class WebRTCService {
     dc.onclose = () => {
       const wrapper = this.connections.get(remotePeerId);
       if (wrapper) {
-        wrapper.status = 'disconnected';
+        const isStillConnected = Boolean(
+          (wrapper.controlChannel && wrapper.controlChannel.readyState === 'open') ||
+          (wrapper.bulkChannel && wrapper.bulkChannel.readyState === 'open')
+        );
+        if (!isStillConnected) {
+          wrapper.status = 'disconnected';
+        }
       }
     };
 
     dc.onerror = () => {};
   }
 
+  /**
+   * Intelligently routes packet to either control or bulk DataChannel
+   */
   public sendPacket(remotePeerId: string, packet: NetworkPacket): boolean {
     const wrapper = this.connections.get(remotePeerId);
-    if (!wrapper || !wrapper.dataChannel || wrapper.dataChannel.readyState !== 'open') {
-      return false;
+    if (!wrapper) return false;
+
+    const data = JSON.stringify(packet);
+
+    if (packet.channelPriority === 'bulk' && wrapper.bulkChannel && wrapper.bulkChannel.readyState === 'open') {
+      try {
+        wrapper.bulkChannel.send(data);
+        return true;
+      } catch (e) {}
     }
 
-    try {
-      wrapper.dataChannel.send(JSON.stringify(packet));
-      return true;
-    } catch (err) {
-      return false;
+    if (wrapper.controlChannel && wrapper.controlChannel.readyState === 'open') {
+      try {
+        wrapper.controlChannel.send(data);
+        return true;
+      } catch (e) {
+        return false;
+      }
     }
+
+    if (wrapper.bulkChannel && wrapper.bulkChannel.readyState === 'open') {
+      try {
+        wrapper.bulkChannel.send(data);
+        return true;
+      } catch (e) {
+        return false;
+      }
+    }
+
+    return false;
   }
 
   public isConnected(remotePeerId: string): boolean {
     const wrapper = this.connections.get(remotePeerId);
-    return Boolean(wrapper && wrapper.dataChannel && wrapper.dataChannel.readyState === 'open');
+    if (!wrapper) return false;
+    return Boolean(
+      (wrapper.controlChannel && wrapper.controlChannel.readyState === 'open') ||
+      (wrapper.bulkChannel && wrapper.bulkChannel.readyState === 'open')
+    );
   }
 
   public getConnectedPeers(): string[] {
     const result: string[] = [];
     this.connections.forEach((wrapper, peerId) => {
-      if (wrapper.dataChannel && wrapper.dataChannel.readyState === 'open') {
+      if (
+        (wrapper.controlChannel && wrapper.controlChannel.readyState === 'open') ||
+        (wrapper.bulkChannel && wrapper.bulkChannel.readyState === 'open')
+      ) {
         result.push(peerId);
       }
     });
@@ -513,9 +578,14 @@ export class WebRTCService {
     const wrapper = this.connections.get(remotePeerId);
     if (!wrapper) return;
 
-    if (wrapper.dataChannel) {
+    if (wrapper.controlChannel) {
       try {
-        wrapper.dataChannel.close();
+        wrapper.controlChannel.close();
+      } catch (e) {}
+    }
+    if (wrapper.bulkChannel) {
+      try {
+        wrapper.bulkChannel.close();
       } catch (e) {}
     }
     if (wrapper.pc) {
@@ -541,3 +611,4 @@ export class WebRTCService {
     this.connectionStateListeners.forEach((fn) => fn(remotePeerId, 'failed'));
   }
 }
+

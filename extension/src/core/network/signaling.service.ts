@@ -12,15 +12,18 @@ export interface RosterData {
   peers: RosterPeer[];
   leaders: string[];
   yourLeader: string;
+  yourStandbyLeader?: string;
 }
 
 export interface PromoteData {
   clusterPeers: string[];
   backboneLeaders: string[];
+  standbyPeers?: string[];
 }
 
 export interface DemoteData {
   newLeader: string;
+  newStandbyLeader?: string;
 }
 
 export interface ServerMessage {
@@ -118,7 +121,20 @@ export class SignalingService {
     this.nickname = nickname;
     this.reconnectAttempts = 0;
 
+    // Fire non-blocking prewarm ping to wake up dormant Render services
+    this.prewarmServer();
+
     this.establishConnection();
+  }
+
+  /**
+   * Fast non-blocking HTTP ping to wake up dormant Render container before WebSocket connection
+   */
+  private prewarmServer() {
+    try {
+      const httpUrl = this.serverUrl.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:').replace(/\/ws\/?$/, '');
+      fetch(`${httpUrl}/ping`, { method: 'GET', mode: 'cors' }).catch(() => {});
+    } catch (e) {}
   }
 
   public reconnect() {
@@ -137,6 +153,7 @@ export class SignalingService {
     if (!this.nickname) {
       this.nickname = 'Buddy';
     }
+    this.prewarmServer();
     this.establishConnection();
   }
 
@@ -320,12 +337,17 @@ export class SignalingService {
     if (!this.currentRoomId) return;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
 
-    const baseDelay = this.reconnectAttempts > 4 ? 20000 : 1000;
-    const maxDelay = this.reconnectAttempts > 4 ? 40000 : 15000;
-    const delay = backoffDelay(this.reconnectAttempts, baseDelay, maxDelay, 500);
+    // Full Jitter Exponential Backoff: spreads reconnection spikes during Render redeploys
+    // to prevent thundering herd CPU saturation.
+    const cappedAttempt = Math.min(this.reconnectAttempts, 6);
+    const exponential = Math.min(10000, 500 * Math.pow(1.8, cappedAttempt));
+    const jitter = Math.floor(Math.random() * 1500);
+    const delay = Math.floor(exponential + jitter);
+
     this.reconnectAttempts++;
 
     this.reconnectTimer = setTimeout(() => {
+      this.prewarmServer();
       this.establishConnection();
     }, delay);
   }

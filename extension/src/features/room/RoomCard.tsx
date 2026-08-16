@@ -174,7 +174,7 @@ export const RoomCard: React.FC<RoomCardProps> = ({
           onChange={(e) => statusService.setStatus(e.target.value as PeerStatus)}
         >
           {Object.values(STATUS_PRESETS).map((p) => (
-            <option key={p.status} value={p.status} style={{ background: '#0f172a', color: '#fff' }}>
+            <option key={p.status} value={p.status} style={{ background: 'var(--bg-surface)', color: 'var(--text-primary)' }}>
               {p.emoji} {p.label}
             </option>
           ))}

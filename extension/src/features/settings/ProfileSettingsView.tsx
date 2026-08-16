@@ -44,10 +44,10 @@ export const ProfileSettingsView: React.FC<ProfileSettingsViewProps> = ({ isLead
       <div
         style={{
           display: 'flex',
-          background: 'rgba(15, 23, 42, 0.75)',
+          background: 'var(--bg-surface-elevated)',
           padding: '3px',
           borderRadius: '8px',
-          border: '1px solid rgba(255, 255, 255, 0.08)',
+          border: '1px solid var(--border-subtle)',
           gap: '3px',
         }}
       >

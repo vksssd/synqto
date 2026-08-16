@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Synqto - Live P2P Problem Solving & Tutor Stage",
   "short_name": "Synqto",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Instant P2P study rooms that form automatically when solving LeetCode & Codeforces problems. Screen share, laser pointers & in-page chat.",
   "permissions": [
     "storage",
@@ -42,6 +42,24 @@
       ],
       "js": ["content/content-script.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": ["content/in-page-bridge.js"],
+      "run_at": "document_idle",
+      "world": "MAIN"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "content/in-page-bridge.js"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
     }
   ],
   "icons": {

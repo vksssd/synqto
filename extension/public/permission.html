@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Synqto - Enable Microphone & Camera</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #090d16;
+      --card-bg: rgba(18, 24, 38, 0.85);
+      --border: rgba(255, 255, 255, 0.1);
+      --primary: #3b82f6;
+      --primary-hover: #2563eb;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --success: #10b981;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      background: radial-gradient(circle at top center, #1e1b4b 0%, #090d16 100%);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      padding: 40px 32px;
+      max-width: 480px;
+      width: 100%;
+      text-align: center;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(20px);
+    }
+
+    .icon-box {
+      width: 72px;
+      height: 72px;
+      margin: 0 auto 24px;
+      background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(139, 92, 246, 0.2));
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      border-radius: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 32px;
+    }
+
+    h1 {
+      font-size: 24px;
+      font-weight: 700;
+      margin-bottom: 12px;
+      letter-spacing: -0.02em;
+    }
+
+    p {
+      font-size: 15px;
+      color: var(--text-muted);
+      line-height: 1.6;
+      margin-bottom: 32px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      background: linear-gradient(135deg, var(--primary), #6366f1);
+      color: #fff;
+      font-size: 16px;
+      font-weight: 600;
+      padding: 14px 28px;
+      border-radius: 14px;
+      border: none;
+      cursor: pointer;
+      width: 100%;
+      transition: all 0.2s ease;
+      box-shadow: 0 4px 20px rgba(59, 130, 246, 0.4);
+    }
+
+    .btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 24px rgba(59, 130, 246, 0.5);
+    }
+
+    .btn:active {
+      transform: translateY(0);
+    }
+
+    .status-msg {
+      margin-top: 20px;
+      font-size: 14px;
+      font-weight: 500;
+      display: none;
+    }
+
+    .status-msg.success {
+      display: block;
+      color: var(--success);
+    }
+
+    .status-msg.error {
+      display: block;
+      color: #ef4444;
+    }
+
+    .feature-list {
+      margin: 24px 0;
+      text-align: left;
+      background: rgba(255, 255, 255, 0.03);
+      border-radius: 12px;
+      padding: 16px;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .feature-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 13px;
+      color: #cbd5e1;
+      margin-bottom: 8px;
+    }
+    .feature-item:last-child {
+      margin-bottom: 0;
+    }
+    .feature-item span.emoji {
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon-box">🎙️</div>
+    <h1>Enable Mic & Camera</h1>
+    <p>
+      Synqto requires microphone and camera access for crystal-clear P2P voice chat and live problem walkthroughs.
+    </p>
+
+    <div class="feature-list">
+      <div class="feature-item">
+        <span class="emoji">🔒</span>
+        <span>100% Direct P2P (Zero server recordings)</span>
+      </div>
+      <div class="feature-item">
+        <span class="emoji">⚡</span>
+        <span>Ultra low-latency Opus audio codec</span>
+      </div>
+      <div class="feature-item">
+        <span class="emoji">🖥️</span>
+        <span>Toggle screen or webcam anytime during stream</span>
+      </div>
+    </div>
+
+    <button id="grant-btn" class="btn">
+      <span>Allow Access</span>
+    </button>
+
+    <div id="status-msg" class="status-msg"></div>
+  </div>
+
+  <script>
+    const grantBtn = document.getElementById('grant-btn');
+    const statusMsg = document.getElementById('status-msg');
+
+    grantBtn.addEventListener('click', async () => {
+      grantBtn.disabled = true;
+      grantBtn.innerText = 'Requesting Permission...';
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+        
+        // Stop tracks immediately after granting
+        stream.getTracks().forEach(track => track.stop());
+
+        statusMsg.className = 'status-msg success';
+        statusMsg.innerHTML = '✅ Permission Granted! Closing in 2 seconds...';
+
+        if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+          await chrome.storage.local.set({
+            synqto_mic_permission: 'granted',
+            synqto_camera_permission: 'granted'
+          });
+        }
+
+        setTimeout(() => {
+          window.close();
+        }, 1800);
+      } catch (err) {
+        console.error('Permission request failed:', err);
+        // Fallback: try audio only
+        try {
+          const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          audioStream.getTracks().forEach(track => track.stop());
+          statusMsg.className = 'status-msg success';
+          statusMsg.innerHTML = '✅ Microphone Granted! Closing in 2 seconds...';
+          setTimeout(() => {
+            window.close();
+          }, 1800);
+        } catch (audioErr) {
+          statusMsg.className = 'status-msg error';
+          statusMsg.innerHTML = '❌ Permission was dismissed or denied. Please click the camera/mic icon in the browser URL bar to allow access.';
+          grantBtn.disabled = false;
+          grantBtn.innerText = 'Try Again';
+        }
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,14 +1,13 @@
-// ─── Milestone Achievement Badge Gallery Component ───
-
 import React, { useState } from 'react';
 import { Badge } from './gamification.types';
-import { Award, Lock, CheckCircle2 } from 'lucide-react';
+import { Award, Lock, CheckCircle2, ChevronDown, ChevronUp } from 'lucide-react';
 
 interface BadgeGalleryProps {
   badges: Badge[];
 }
 
 export const BadgeGallery: React.FC<BadgeGalleryProps> = ({ badges }) => {
+  const [isExpanded, setIsExpanded] = useState(true);
   const [selectedCategory, setSelectedCategory] = useState<'all' | 'streak' | 'problem' | 'focus' | 'social'>('all');
 
   const filteredBadges = badges.filter(
@@ -18,24 +17,54 @@ export const BadgeGallery: React.FC<BadgeGalleryProps> = ({ badges }) => {
   const unlockedCount = badges.filter((b) => Boolean(b.unlockedAt)).length;
 
   return (
-    <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-      <div className="glass-card-header" style={{ marginBottom: 0 }}>
+    <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: isExpanded ? '10px' : '0' }}>
+      <div
+        className="glass-card-header"
+        onClick={() => setIsExpanded(!isExpanded)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          cursor: 'pointer',
+          userSelect: 'none',
+          marginBottom: isExpanded ? '4px' : 0,
+        }}
+      >
         <div className="glass-card-title">
           <Award size={16} color="var(--primary)" />
           <span>Milestone Badges ({unlockedCount}/{badges.length})</span>
         </div>
-        <span
-          className="badge"
-          style={{
-            fontSize: '10px',
-            background: 'rgba(99, 102, 241, 0.15)',
-            borderColor: 'rgba(99, 102, 241, 0.4)',
-            color: '#c4b5fd',
-          }}
-        >
-          {Math.round((unlockedCount / badges.length) * 100)}% Complete
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span
+            className="badge"
+            style={{
+              fontSize: '10px',
+              background: 'rgba(99, 102, 241, 0.15)',
+              borderColor: 'var(--border-focus)',
+              color: 'var(--primary)',
+            }}
+          >
+            {Math.round((unlockedCount / badges.length) * 100)}% Complete
+          </span>
+          <div
+            style={{
+              width: '22px',
+              height: '22px',
+              borderRadius: '4px',
+              background: 'rgba(255, 255, 255, 0.06)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'var(--text-muted)',
+            }}
+          >
+            {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </div>
+        </div>
       </div>
+
+      {isExpanded && (
+        <>
 
       {/* Category Filter Pills */}
       <div style={{ display: 'flex', gap: '4px', overflowX: 'auto', paddingBottom: '2px' }}>
@@ -50,7 +79,7 @@ export const BadgeGallery: React.FC<BadgeGalleryProps> = ({ badges }) => {
               padding: '2px 8px',
               background: selectedCategory === cat ? 'rgba(99, 102, 241, 0.22)' : undefined,
               borderColor: selectedCategory === cat ? 'var(--primary)' : undefined,
-              color: selectedCategory === cat ? '#f8fafc' : undefined,
+              color: selectedCategory === cat ? 'var(--text-primary)' : undefined,
             }}
           >
             {cat}
@@ -72,9 +101,9 @@ export const BadgeGallery: React.FC<BadgeGalleryProps> = ({ badges }) => {
                 borderRadius: 'var(--radius-md)',
                 background: isUnlocked
                   ? 'linear-gradient(135deg, rgba(99, 102, 241, 0.15), rgba(139, 92, 246, 0.1))'
-                  : 'rgba(255, 255, 255, 0.02)',
+                  : 'var(--bg-surface-elevated, rgba(255, 255, 255, 0.02))',
                 border: isUnlocked
-                  ? '1px solid rgba(99, 102, 241, 0.35)'
+                  ? '1px solid var(--border-focus)'
                   : '1px solid var(--border-subtle)',
                 display: 'flex',
                 flexDirection: 'column',
@@ -95,7 +124,7 @@ export const BadgeGallery: React.FC<BadgeGalleryProps> = ({ badges }) => {
               </div>
 
               <div>
-                <div style={{ fontSize: '11px', fontWeight: 600, color: isUnlocked ? '#f8fafc' : 'var(--text-muted)' }}>
+                <div style={{ fontSize: '11px', fontWeight: 600, color: isUnlocked ? 'var(--text-primary)' : 'var(--text-muted)' }}>
                   {badge.title}
                 </div>
                 <div style={{ fontSize: '10px', color: 'var(--text-dim)', lineHeight: 1.3, marginTop: '2px' }}>
@@ -134,6 +163,8 @@ export const BadgeGallery: React.FC<BadgeGalleryProps> = ({ badges }) => {
           );
         })}
       </div>
+        </>
+      )}
     </div>
   );
 };

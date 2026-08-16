@@ -9,6 +9,9 @@ import {
   ChatReactionPayload,
   ChatPollVotePayload,
   ChatQuizAnswerPayload,
+  SyncDigestPayload,
+  SyncDeltaRequestPayload,
+  SyncDeltaResponsePayload,
   PeerIdentity,
   StoredChatMessage,
   ChatMessageType,
@@ -26,6 +29,8 @@ export interface ChatMessageItem extends StoredChatMessage {
   isSelf: boolean;
   expectedAcks?: number;
   receivedAcks?: Set<string>;
+  seq?: number;
+  lamportTime?: number;
 }
 
 export interface ChatNotificationData {
@@ -49,6 +54,9 @@ export class ChatService {
   private currentRoomId = '';
   private myPeerId = '';
   private myNickname = '';
+  private mySeq = 0;
+  private peerSeqs: Map<string, number> = new Map();
+  private lamportClock = 0;
   private messages: ChatMessageItem[] = [];
   private unackedQueue: Map<string, { message: ChatMessageItem; payload: ChatMessagePayload; attempts: number; timer: any }> = new Map();
 
@@ -84,13 +92,15 @@ export class ChatService {
     // 1. Load local cached messages
     this.loadCachedMessages();
 
-    // 2. Request history catch-up from live peers
+    // 2. Request history catch-up & broadcast anti-entropy sync digest
     this.requestHistorySync();
+    this.broadcastSyncDigest();
 
     // 3. Retry history sync after initial WebRTC channel negotiation
     setTimeout(() => {
       if (this.messages.length < 5) {
         this.requestHistorySync();
+        this.broadcastSyncDigest();
       }
     }, 1500);
   }
@@ -100,12 +110,67 @@ export class ChatService {
     this.network.on('presence:join', () => {
       if (this.messages.length < 30) {
         this.requestHistorySync();
+        this.broadcastSyncDigest();
+      }
+    });
+
+    // 0. Anti-entropy Sync Digest listener
+    this.network.on<SyncDigestPayload>('sync:digest', (payload, packet) => {
+      if (packet.from.peerId === this.myPeerId) return;
+
+      this.lamportClock = Math.max(this.lamportClock, payload.latestLamport || 0) + 1;
+
+      // Find messages from this client that the remote peer might have missed
+      const remoteLastSeqForMe = payload.lastSeqByPeer?.[this.myPeerId] || 0;
+      const missing = this.messages.filter((m) => m.isSelf && (m.seq || 0) > remoteLastSeqForMe);
+
+      if (missing.length > 0) {
+        this.network.send<SyncDeltaResponsePayload>(
+          packet.from.peerId,
+          'sync:delta_response',
+          {
+            messages: missing,
+            latestLamport: this.lamportClock,
+          },
+          { channelPriority: 'bulk' }
+        );
+      }
+    });
+
+    // 0b. Anti-entropy Delta Response listener
+    this.network.on<SyncDeltaResponsePayload>('sync:delta_response', (payload) => {
+      if (!payload?.messages || payload.messages.length === 0) return;
+
+      this.lamportClock = Math.max(this.lamportClock, payload.latestLamport || 0) + 1;
+      let added = false;
+
+      payload.messages.forEach((remoteMsg) => {
+        if (!this.messages.some((m) => m.id === remoteMsg.id)) {
+          this.messages.push({
+            ...remoteMsg,
+            status: 'delivered',
+            isSelf: remoteMsg.from.peerId === this.myPeerId,
+          });
+          added = true;
+        }
+      });
+
+      if (added) {
+        this.messages.sort((a, b) => (a.lamportTime || a.timestamp) - (b.lamportTime || b.timestamp));
+        this.saveMessagesDebounced();
+        this.emitMessages();
       }
     });
 
     // 1. Inbound chat message
     this.network.on<ChatMessagePayload>('chat:message', (payload, packet) => {
       if (packet.roomId !== this.currentRoomId) return;
+
+      // Update Lamport clock and sequence tracking
+      this.lamportClock = Math.max(this.lamportClock, packet.lamportTime || 0) + 1;
+      if (packet.seq) {
+        this.peerSeqs.set(packet.from.peerId, Math.max(this.peerSeqs.get(packet.from.peerId) || 0, packet.seq));
+      }
 
       const incomingId = payload.messageId || packet.id;
       // Deduplicate
@@ -118,6 +183,8 @@ export class ChatService {
         from: packet.from,
         text: payload.text,
         timestamp: packet.timestamp,
+        seq: packet.seq,
+        lamportTime: packet.lamportTime,
         messageType: payload.messageType || 'text',
         replyTo: payload.replyTo,
         replyPreview: payload.replyPreview,
@@ -134,7 +201,7 @@ export class ChatService {
       };
 
       this.messages.push(msg);
-      this.messages.sort((a, b) => a.timestamp - b.timestamp);
+      this.messages.sort((a, b) => (a.lamportTime || a.timestamp) - (b.lamportTime || b.timestamp));
       this.saveMessagesDebounced();
       this.emitMessages();
 
@@ -363,11 +430,16 @@ export class ChatService {
       }
     }
 
+    this.mySeq++;
+    this.lamportClock++;
+
     const msg: ChatMessageItem = {
       id: messageId,
       from: fromIdentity,
       text: rawText,
       timestamp: Date.now(),
+      seq: this.mySeq,
+      lamportTime: this.lamportClock,
       messageType: options?.messageType || 'text',
       replyTo: replyTo?.id,
       replyPreview: replyTo?.preview,
@@ -388,7 +460,11 @@ export class ChatService {
     this.saveMessagesDebounced();
     this.emitMessages();
 
-    // Broadcast to room
+    // Determine channel priority (Bulk for screenshots/files/large images, Control for fast chat)
+    const isBulk = msg.messageType === 'image' || msg.messageType === 'screenshot' || msg.messageType === 'file';
+    const channelPriority = isBulk ? 'bulk' : 'control';
+
+    // Broadcast to room with sequence tracking & clocking
     const payload: ChatMessagePayload = {
       messageId,
       text: msg.text,
@@ -404,12 +480,40 @@ export class ChatService {
       mentions: msg.mentions,
       reactions: msg.reactions,
     };
-    this.network.broadcast('chat:message', payload);
+    this.network.broadcast('chat:message', payload, {
+      channelPriority,
+      seq: this.mySeq,
+      lamportTime: this.lamportClock,
+    });
 
     // Queue for reliable ACK retry with exponential backoff
     this.queueUnacked(msg, payload);
 
     return msg;
+  }
+
+  /**
+   * Broadcasts an anti-entropy sync digest to discover missing messages after failover
+   */
+  public broadcastSyncDigest() {
+    if (!this.myPeerId || !this.currentRoomId) return;
+
+    const digest: Record<string, number> = {};
+    if (this.mySeq > 0) {
+      digest[this.myPeerId] = this.mySeq;
+    }
+    this.peerSeqs.forEach((seq, peerId) => {
+      digest[peerId] = seq;
+    });
+
+    this.network.broadcast<SyncDigestPayload>(
+      'sync:digest',
+      {
+        lastSeqByPeer: digest,
+        latestLamport: this.lamportClock,
+      },
+      { channelPriority: 'control' }
+    );
   }
 
   /**

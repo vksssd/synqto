@@ -30,13 +30,24 @@ export type PacketType =
   | 'whiteboard:background'
   | 'whiteboard:laser'
   | 'whiteboard:page_sync'
+  | 'whiteboard:sync_request'
+  | 'whiteboard:sync_response'
   | 'canvas:cursor'
   | 'canvas:click'
+  | 'code:sync'
+  | 'code:delta'
+  | 'code:cursor'
+  | 'code:run'
+  | 'code:run_result'
+  | 'code:lang_change'
   | 'community:wave'
   | 'community:poke'
   | 'community:problem_mention'
   | 'sync:request'
-  | 'sync:response';
+  | 'sync:response'
+  | 'sync:digest'
+  | 'sync:delta_request'
+  | 'sync:delta_response';
 
 /** Identity information attached to every packet. */
 export interface PeerIdentity {
@@ -66,10 +77,16 @@ export interface NetworkPacket {
   roomId: string;
   /** Packet-specific payload data. */
   payload: unknown;
-  /** Monotonic-ish timestamp (Date.now()). */
+  /** Monotonic timestamp (Date.now()). */
   timestamp: number;
   /** Hop counter — decremented by each relay, dropped at 0. */
   ttl: number;
+  /** Channel routing priority: 'control' for low-latency reliable, 'bulk' for large streams/blobs. */
+  channelPriority?: 'control' | 'bulk';
+  /** Monotonically increasing sequence number from the originating peer. */
+  seq?: number;
+  /** Logical Lamport clock for deterministic causal ordering. */
+  lamportTime?: number;
 }
 
 /** Default TTL for new packets. */
@@ -81,8 +98,16 @@ export function createPacket(
   from: PeerIdentity,
   roomId: string,
   payload: unknown,
-  to?: string
+  to?: string,
+  options?: { channelPriority?: 'control' | 'bulk'; seq?: number; lamportTime?: number }
 ): NetworkPacket {
+  const isBulk =
+    options?.channelPriority === 'bulk' ||
+    type === 'whiteboard:page_sync' ||
+    type === 'whiteboard:sync_response' ||
+    type === 'chat:history:response' ||
+    type === 'sync:delta_response';
+
   return {
     id: crypto.randomUUID(),
     type,
@@ -92,6 +117,9 @@ export function createPacket(
     payload,
     timestamp: Date.now(),
     ttl: DEFAULT_TTL,
+    channelPriority: options?.channelPriority || (isBulk ? 'bulk' : 'control'),
+    seq: options?.seq,
+    lamportTime: options?.lamportTime,
   };
 }
 
@@ -217,4 +245,61 @@ export interface PresencePayload {
   problemTitle?: string;
   problemUrl?: string;
   startedAt?: number;
+}
+
+// ─── Anti-Entropy Delta Sync payload types ───
+
+export interface SyncDigestPayload {
+  lastSeqByPeer: Record<string, number>;
+  latestLamport: number;
+}
+
+export interface SyncDeltaRequestPayload {
+  peerId: string;
+  sinceSeq: number;
+}
+
+export interface SyncDeltaResponsePayload {
+  messages: StoredChatMessage[];
+  latestLamport: number;
+}
+
+// ─── Code Together Collaborative Coding payload types ───
+
+export interface CodeSyncPayload {
+  code: string;
+  language: string;
+  version: number;
+  updatedBy: string;
+  timestamp: number;
+}
+
+export interface CodeDeltaPayload {
+  code: string;
+  language: string;
+  version: number;
+  cursorLine?: number;
+  cursorCol?: number;
+}
+
+export interface CodeCursorPayload {
+  peerId: string;
+  nickname: string;
+  color: string;
+  line: number;
+  ch: number;
+}
+
+export interface CodeRunPayload {
+  code: string;
+  language: string;
+  input?: string;
+  initiatedBy: string;
+}
+
+export interface CodeRunResultPayload {
+  stdout: string;
+  stderr?: string;
+  executionTimeMs: number;
+  status: 'success' | 'error' | 'timeout';
 }

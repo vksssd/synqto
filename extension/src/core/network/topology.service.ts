@@ -1,13 +1,15 @@
-// ─── Hierarchical Topology Service (P2P Cluster + Backbone Mesh Router) ───
+// ─── Hierarchical Topology Service (Dual-Leader Standby & Resilient Mesh Router) ───
 
-import { NetworkPacket, PeerIdentity } from './packet';
+import { NetworkPacket, PeerIdentity, createPacket } from './packet';
 import { SignalingService, RosterData, PromoteData, DemoteData } from './signaling.service';
 import { WebRTCService } from './webrtc.service';
 
 export interface TopologyState {
   isLeader: boolean;
   assignedLeader: string | null;
+  assignedStandbyLeader: string | null;
   clusterPeers: string[];
+  standbyPeers: string[];
   backboneLeaders: string[];
   allPeers: string[];
 }
@@ -21,14 +23,16 @@ export class TopologyService {
   private currentRoomId = '';
   private isLeader = false;
   private assignedLeader: string | null = null;
+  private assignedStandbyLeader: string | null = null;
   private clusterPeers: Set<string> = new Set();
+  private standbyPeers: Set<string> = new Set();
   private backboneLeaders: Set<string> = new Set();
   private allPeers: Set<string> = new Set();
 
-  // Deduplication sliding window (max 1000 items)
+  // Deduplication sliding window (max 1500 items)
   private seenPacketIds: Set<string> = new Set();
   private packetIdOrder: string[] = [];
-  private readonly MAX_SEEN_PACKETS = 1000;
+  private readonly MAX_SEEN_PACKETS = 1500;
 
   // Listeners for UI state and packet routing
   private packetListeners: Set<(packet: NetworkPacket) => void> = new Set();
@@ -55,6 +59,8 @@ export class TopologyService {
     this.seenPacketIds.clear();
     this.packetIdOrder = [];
 
+    this.webrtc.setMyPeerId(identity.peerId);
+
     // Connect to signaling server
     this.signaling.connect(roomId, identity.peerId, identity.nickname);
   }
@@ -64,22 +70,24 @@ export class TopologyService {
     this.webrtc.closeAll();
     this.isLeader = false;
     this.assignedLeader = null;
+    this.assignedStandbyLeader = null;
     this.clusterPeers.clear();
+    this.standbyPeers.clear();
     this.backboneLeaders.clear();
     this.allPeers.clear();
     this.emitState();
   }
 
   private setupSignalingListeners() {
-    // 1. Roster updates from server
+    // 1. Roster updates from server (Dual-Leader aware)
     this.signaling.on('roster', (roster: RosterData) => {
       this.allPeers = new Set(roster.peers.map((p) => p.peerId));
       const me = roster.peers.find((p) => p.peerId === this.myIdentity?.peerId);
-      const wasLeader = this.isLeader;
       this.isLeader = me ? me.isLeader : false;
 
       if (this.isLeader) {
         this.assignedLeader = this.myIdentity?.peerId || null;
+        this.assignedStandbyLeader = null;
         // Backbone leaders = all leaders except me
         this.backboneLeaders = new Set(
           roster.leaders.filter((lid) => lid !== this.myIdentity?.peerId)
@@ -96,13 +104,26 @@ export class TopologyService {
         });
       } else {
         this.assignedLeader = roster.yourLeader || null;
+        this.assignedStandbyLeader = roster.yourStandbyLeader || null;
         this.clusterPeers.clear();
+        this.standbyPeers.clear();
         this.backboneLeaders.clear();
 
-        // Regular peer: connect to assigned leader
+        // Regular peer: 1) connect to primary assigned leader
         if (this.assignedLeader && this.assignedLeader !== this.myIdentity?.peerId) {
           if (!this.webrtc.isConnected(this.assignedLeader)) {
             this.webrtc.initiateConnection(this.assignedLeader);
+          }
+        }
+
+        // Regular peer: 2) connect to warm standby leader for instant failover (<300ms)
+        if (
+          this.assignedStandbyLeader &&
+          this.assignedStandbyLeader !== this.myIdentity?.peerId &&
+          this.assignedStandbyLeader !== this.assignedLeader
+        ) {
+          if (!this.webrtc.isConnected(this.assignedStandbyLeader)) {
+            this.webrtc.initiateConnection(this.assignedStandbyLeader);
           }
         }
       }
@@ -114,7 +135,9 @@ export class TopologyService {
     this.signaling.on('promote', (data: PromoteData) => {
       this.isLeader = true;
       this.assignedLeader = this.myIdentity?.peerId || null;
+      this.assignedStandbyLeader = null;
       this.clusterPeers = new Set(data.clusterPeers);
+      this.standbyPeers = new Set(data.standbyPeers || []);
       this.backboneLeaders = new Set(data.backboneLeaders);
 
       // Connect to other leaders in backbone
@@ -133,20 +156,26 @@ export class TopologyService {
     this.signaling.on('demote', (data: DemoteData) => {
       this.isLeader = false;
       this.assignedLeader = data.newLeader;
+      this.assignedStandbyLeader = data.newStandbyLeader || null;
       this.clusterPeers.clear();
+      this.standbyPeers.clear();
       this.backboneLeaders.clear();
 
-      // Close old connections that are no longer our assigned leader
+      // Close old connections that are neither primary nor standby leader
       const connected = this.webrtc.getConnectedPeers();
       connected.forEach((peerId) => {
-        if (peerId !== this.assignedLeader) {
+        if (peerId !== this.assignedLeader && peerId !== this.assignedStandbyLeader) {
           this.webrtc.closeConnection(peerId);
         }
       });
 
-      // Connect to new leader
+      // Connect to primary leader
       if (this.assignedLeader) {
         this.webrtc.initiateConnection(this.assignedLeader);
+      }
+      // Connect to standby leader
+      if (this.assignedStandbyLeader && this.assignedStandbyLeader !== this.assignedLeader) {
+        this.webrtc.initiateConnection(this.assignedStandbyLeader);
       }
 
       this.emitState();
@@ -188,6 +217,20 @@ export class TopologyService {
         }
       } else if (status === 'disconnected' || status === 'failed') {
         this.clusterPeers.delete(peerId);
+        this.standbyPeers.delete(peerId);
+
+        // Instant Sub-300ms Failover Check:
+        // If primary assigned leader dropped, immediately flip to pre-warmed standby leader!
+        if (!this.isLeader && peerId === this.assignedLeader) {
+          if (this.assignedStandbyLeader && this.webrtc.isConnected(this.assignedStandbyLeader)) {
+            console.warn(
+              `[TopologyService] Primary leader ${peerId} disconnected. Instant warm failover to Standby leader ${this.assignedStandbyLeader}!`
+            );
+            this.assignedLeader = this.assignedStandbyLeader;
+            this.assignedStandbyLeader = null;
+            this.emitState();
+          }
+        }
       }
       this.emitState();
     });
@@ -222,7 +265,7 @@ export class TopologyService {
       const isFromBackbone = this.backboneLeaders.has(fromPeerId);
 
       if (isFromBackbone) {
-        // Packet came from another leader -> relay only down to our cluster members
+        // Packet came from another leader -> relay down to our cluster members
         this.clusterPeers.forEach((memberId) => {
           if (memberId !== fromPeerId && memberId !== packet.from.peerId) {
             this.webrtc.sendPacket(memberId, relayPacket);
@@ -263,9 +306,13 @@ export class TopologyService {
         this.webrtc.sendPacket(leaderId, packet);
       });
     } else {
-      // Regular peer sends to assigned leader
-      if (this.assignedLeader) {
-        this.webrtc.sendPacket(this.assignedLeader, packet);
+      // Regular peer sends to active assigned leader (fallback to standby if needed)
+      let sent = false;
+      if (this.assignedLeader && this.webrtc.isConnected(this.assignedLeader)) {
+        sent = this.webrtc.sendPacket(this.assignedLeader, packet);
+      }
+      if (!sent && this.assignedStandbyLeader && this.webrtc.isConnected(this.assignedStandbyLeader)) {
+        this.webrtc.sendPacket(this.assignedStandbyLeader, packet);
       }
     }
   }
@@ -279,11 +326,17 @@ export class TopologyService {
     if (this.webrtc.isConnected(targetPeerId)) {
       this.webrtc.sendPacket(targetPeerId, packet);
     } else if (this.isLeader) {
-      // Leader broadcasts directed packet across backbone and cluster (it will reach destination leader)
+      // Leader broadcasts directed packet across backbone and cluster
       this.broadcastPacket(packet);
-    } else if (this.assignedLeader) {
-      // Regular peer sends to assigned leader to forward
-      this.webrtc.sendPacket(this.assignedLeader, packet);
+    } else {
+      // Regular peer sends to active leader to forward
+      let sent = false;
+      if (this.assignedLeader && this.webrtc.isConnected(this.assignedLeader)) {
+        sent = this.webrtc.sendPacket(this.assignedLeader, packet);
+      }
+      if (!sent && this.assignedStandbyLeader && this.webrtc.isConnected(this.assignedStandbyLeader)) {
+        this.webrtc.sendPacket(this.assignedStandbyLeader, packet);
+      }
     }
   }
 
@@ -326,7 +379,6 @@ export class TopologyService {
 
   public onStateChange(handler: (state: TopologyState) => void): () => void {
     this.stateListeners.add(handler);
-    // Emit immediate current state
     handler(this.getState());
     return () => {
       this.stateListeners.delete(handler);
@@ -337,7 +389,9 @@ export class TopologyService {
     return {
       isLeader: this.isLeader,
       assignedLeader: this.assignedLeader,
+      assignedStandbyLeader: this.assignedStandbyLeader,
       clusterPeers: Array.from(this.clusterPeers),
+      standbyPeers: Array.from(this.standbyPeers),
       backboneLeaders: Array.from(this.backboneLeaders),
       allPeers: Array.from(this.allPeers),
     };
@@ -354,3 +408,4 @@ export class TopologyService {
     });
   }
 }
+

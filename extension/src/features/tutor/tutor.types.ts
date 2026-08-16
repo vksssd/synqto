@@ -39,6 +39,8 @@ export interface ActiveStreamInfo {
   broadcasterIdentity: PeerIdentity;
   title: string;
   broadcastType: BroadcastType;
+  withMic?: boolean;
+  isMicMuted?: boolean;
   startedAt: number;
 }
 
@@ -52,6 +54,8 @@ export interface TutorStageState {
   myRole: StageRole;
   isAudioLive: boolean;
   isVideoLive: boolean;
+  withMic?: boolean;
+  isMicMuted?: boolean;
   broadcastType: BroadcastType;
   streamTitle?: string;
   activeStreams: ActiveStreamInfo[]; // All concurrent active streams in room

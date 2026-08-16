@@ -325,7 +325,7 @@ export const App: React.FC = () => {
           padding: '8px 12px',
           borderBottom: isConnected ? '1px solid var(--border-subtle)' : '1px solid rgba(239, 68, 68, 0.45)',
           background: isConnected
-            ? 'rgba(15, 23, 42, 0.85)'
+            ? 'var(--bg-surface)'
             : 'linear-gradient(135deg, rgba(239, 68, 68, 0.22), rgba(185, 28, 28, 0.16))',
           backdropFilter: 'blur(12px)',
           flexShrink: 0,
@@ -334,7 +334,7 @@ export const App: React.FC = () => {
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <span style={{ fontSize: '15px' }}>⚡</span>
-          <span style={{ fontWeight: 700, fontSize: '13px', color: '#f8fafc', letterSpacing: '-0.01em' }}>
+          <span style={{ fontWeight: 700, fontSize: '13px', color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>
             Synqto
           </span>
           <span
@@ -575,9 +575,9 @@ export const App: React.FC = () => {
             zIndex: 65,
             background: chatToast.isMention
               ? 'linear-gradient(135deg, rgba(245, 158, 11, 0.95), rgba(217, 119, 6, 0.95))'
-              : 'linear-gradient(135deg, rgba(15, 23, 42, 0.95), rgba(30, 41, 59, 0.95))',
-            border: chatToast.isMention ? '1px solid #fde68a' : '1px solid rgba(99, 102, 241, 0.5)',
-            color: '#ffffff',
+              : 'var(--bg-surface-elevated)',
+            border: chatToast.isMention ? '1px solid #fde68a' : '1px solid var(--border-medium)',
+            color: 'var(--text-primary)',
             padding: '8px 12px',
             borderRadius: '10px',
             boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 0 15px rgba(99, 102, 241, 0.3)',

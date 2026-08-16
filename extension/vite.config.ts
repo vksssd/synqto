@@ -52,6 +52,27 @@ function buildExtensionScripts() {
             alias: { '@': resolve(__dirname, 'src') },
           },
         });
+
+        // Build in-page bridge as IIFE for MAIN world injection
+        await viteBuild({
+          configFile: false,
+          build: {
+            emptyOutDir: false,
+            outDir: resolve(__dirname, 'dist'),
+            lib: {
+              entry: resolve(__dirname, 'src/content/in-page-bridge.ts'),
+              formats: ['iife'],
+              name: 'SynqtoInPageBridge',
+              fileName: () => 'content/in-page-bridge.js',
+            },
+            rollupOptions: {
+              output: { inlineDynamicImports: true },
+            },
+          },
+          resolve: {
+            alias: { '@': resolve(__dirname, 'src') },
+          },
+        });
       } finally {
         isBuilding = false;
       }

@@ -3,10 +3,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { TutorService } from './tutor.service';
 import { TutorStageState, HandRaiseRequest, BroadcastType, ActiveStreamInfo } from './tutor.types';
+import { CodeTogether } from '../code/CodeTogether';
 import {
   Mic,
   MicOff,
   Video,
+  VideoOff,
   Monitor,
   Hand,
   Radio,
@@ -25,6 +27,9 @@ import {
   Sparkles,
   Volume2,
   VolumeX,
+  Code2,
+  ExternalLink,
+  Camera,
 } from 'lucide-react';
 
 interface TutorStageProps {
@@ -44,6 +49,8 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
   const [showStartModal, setShowStartModal] = useState(false);
   const [streamTitleInput, setStreamTitleInput] = useState('');
   const [selectedBroadcastType, setSelectedBroadcastType] = useState<BroadcastType>('screen');
+  const [withMicInput, setWithMicInput] = useState(true);
+  const [showCodeTogether, setShowCodeTogether] = useState(false);
   const [selectedPeerId, setSelectedPeerId] = useState<string | null>(tutorService.getSelectedStreamPeerId());
   const [isAudienceAudioMuted, setIsAudienceAudioMuted] = useState(false);
 
@@ -120,10 +127,11 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
   // Track Native Video Dimensions for Auto Aspect Ratio Calculation
   const handleLoadedMetadata = () => {
     if (videoRef.current) {
-      const w = videoRef.current.videoWidth;
-      const h = videoRef.current.videoHeight;
-      if (w > 0 && h > 0) {
-        setNativeRatio(`${w} / ${h}`);
+      const vw = videoRef.current.videoWidth;
+      const vh = videoRef.current.videoHeight;
+      if (vw > 0 && vh > 0) {
+        const ratio = (vw / vh).toFixed(2);
+        setNativeRatio(`${vw}x${vh} (${ratio}:1)`);
       }
     }
   };
@@ -168,6 +176,21 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
     } catch (e) {}
   };
 
+  const handlePopoutWindow = () => {
+    try {
+      if (typeof chrome !== 'undefined' && chrome.windows) {
+        chrome.windows.create({
+          url: chrome.runtime.getURL('sidepanel.html?popout=stream'),
+          type: 'popup',
+          width: 960,
+          height: 640,
+        });
+      } else {
+        window.open('sidepanel.html?popout=stream', 'SynqtoStreamPopout', 'width=960,height=640,menubar=no,toolbar=no');
+      }
+    } catch (e) {}
+  };
+
   const togglePictureInPicture = async () => {
     try {
       if (videoRef.current) {
@@ -183,15 +206,20 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
   const handleOpenStartModal = (type: BroadcastType) => {
     setSelectedBroadcastType(type);
     setStreamTitleInput('');
+    setWithMicInput(true);
     setShowStartModal(true);
   };
 
   const handleConfirmStart = async () => {
     setIsStarting(true);
     setShowStartModal(false);
-    await tutorService.startTutorStage(selectedBroadcastType, currentRoomId, streamTitleInput);
+    await tutorService.startTutorStage(selectedBroadcastType, currentRoomId, streamTitleInput, withMicInput);
     setIsWatchingStream(true);
     setIsStarting(false);
+  };
+
+  const handleSwitchSource = async (newType: 'screen' | 'camera') => {
+    await tutorService.switchMediaSource(newType, currentRoomId);
   };
 
   const handleStopStage = () => {
@@ -214,14 +242,9 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
   };
 
   const toggleMute = () => {
-    const stream = tutorService.getLocalStream();
-    if (stream) {
-      const audioTrack = stream.getAudioTracks()[0];
-      if (audioTrack) {
-        audioTrack.enabled = !audioTrack.enabled;
-        setIsMuted(!audioTrack.enabled);
-      }
-    }
+    const nextMuted = !isMuted;
+    setIsMuted(nextMuted);
+    tutorService.toggleMic(nextMuted);
   };
 
   const isTutor = stageState.myRole === 'tutor';
@@ -279,14 +302,14 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
             style={{
               width: '100%',
               maxWidth: '360px',
-              background: 'rgba(15, 23, 42, 0.96)',
-              border: '1px solid rgba(99, 102, 241, 0.4)',
-              boxShadow: '0 20px 40px rgba(0,0,0,0.8)',
+              background: 'var(--bg-surface-elevated)',
+              border: '1px solid var(--border-focus)',
+              boxShadow: '0 20px 40px rgba(0,0,0,0.6)',
               padding: '16px',
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-              <div style={{ fontWeight: 700, fontSize: '14px', color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <div style={{ fontWeight: 700, fontSize: '14px', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <Radio size={16} color="#ef4444" />
                 <span>Start Live {selectedBroadcastType === 'screen' ? 'Screen Walkthrough' : 'Camera Stream'}</span>
               </div>
@@ -300,6 +323,93 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {/* Media Source Selection */}
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>
+                  Choose Broadcast Source
+                </label>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <label
+                    style={{
+                      flex: 1,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '8px',
+                      borderRadius: '8px',
+                      border: selectedBroadcastType === 'screen' ? '1px solid #3b82f6' : '1px solid rgba(255,255,255,0.1)',
+                      background: selectedBroadcastType === 'screen' ? 'rgba(59,130,246,0.15)' : 'rgba(255,255,255,0.03)',
+                      cursor: 'pointer',
+                      fontSize: '11px',
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="source"
+                      checked={selectedBroadcastType === 'screen'}
+                      onChange={() => setSelectedBroadcastType('screen')}
+                      style={{ display: 'none' }}
+                    />
+                    <Monitor size={14} color="#3b82f6" />
+                    <span style={{ fontWeight: 600, color: selectedBroadcastType === 'screen' ? '#fff' : '#94a3b8' }}>
+                      Screen Share
+                    </span>
+                  </label>
+
+                  <label
+                    style={{
+                      flex: 1,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '8px',
+                      borderRadius: '8px',
+                      border: selectedBroadcastType === 'camera' ? '1px solid #10b981' : '1px solid rgba(255,255,255,0.1)',
+                      background: selectedBroadcastType === 'camera' ? 'rgba(16,185,129,0.15)' : 'rgba(255,255,255,0.03)',
+                      cursor: 'pointer',
+                      fontSize: '11px',
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="source"
+                      checked={selectedBroadcastType === 'camera'}
+                      onChange={() => setSelectedBroadcastType('camera')}
+                      style={{ display: 'none' }}
+                    />
+                    <Camera size={14} color="#10b981" />
+                    <span style={{ fontWeight: 600, color: selectedBroadcastType === 'camera' ? '#fff' : '#94a3b8' }}>
+                      Webcam Camera
+                    </span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Mic Audio Toggle */}
+              <label
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '8px',
+                  borderRadius: '6px',
+                  background: 'rgba(255,255,255,0.03)',
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  cursor: 'pointer',
+                  fontSize: '11px',
+                  color: '#e2e8f0',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={withMicInput}
+                  onChange={(e) => setWithMicInput(e.target.checked)}
+                  style={{ accentColor: '#3b82f6' }}
+                />
+                <Mic size={13} color="#3b82f6" />
+                <span style={{ fontWeight: 500 }}>Include Microphone Audio</span>
+              </label>
+
               <div>
                 <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
                   Walkthrough / Stream Title (Optional)
@@ -511,6 +621,57 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                 }}
               />
 
+              {/* Broadcaster In-Stream Dynamic Control Bar */}
+              {isTutor && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '2px 0', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <button
+                      type="button"
+                      onClick={() => handleSwitchSource(stageState.broadcastType === 'screen' ? 'camera' : 'screen')}
+                      className="btn btn-ghost btn-sm"
+                      style={{ fontSize: '9px', padding: '2px 6px', background: 'rgba(255,255,255,0.06)' }}
+                      title="Switch Video Input Source"
+                    >
+                      {stageState.broadcastType === 'screen' ? <Camera size={10} color="#60a5fa" /> : <Monitor size={10} color="#34d399" />}
+                      <span>{stageState.broadcastType === 'screen' ? 'Switch to Webcam' : 'Switch to Screen'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={toggleMute}
+                      className="btn btn-ghost btn-sm"
+                      style={{ fontSize: '9px', padding: '2px 6px', background: isMuted ? 'rgba(239, 68, 68, 0.2)' : 'rgba(16, 185, 129, 0.2)', color: isMuted ? '#fca5a5' : '#6ee7b7' }}
+                      title={isMuted ? 'Unmute microphone' : 'Mute microphone'}
+                    >
+                      {isMuted ? <MicOff size={10} /> : <Mic size={10} />}
+                      <span>{isMuted ? 'Mic Muted' : 'Mic Live'}</span>
+                    </button>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setShowCodeTogether(!showCodeTogether)}
+                      className="btn btn-ghost btn-sm"
+                      style={{ fontSize: '9px', padding: '2px 6px', background: showCodeTogether ? 'rgba(99, 102, 241, 0.3)' : 'rgba(255,255,255,0.06)', color: showCodeTogether ? '#c7d2fe' : '#ffffff' }}
+                      title="Toggle collaborative code editor"
+                    >
+                      <Code2 size={10} />
+                      <span>Code Together</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleStopStage}
+                      className="btn btn-danger btn-sm"
+                      style={{ fontSize: '9px', padding: '2px 6px', background: '#ef4444' }}
+                    >
+                      End Stream
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Bottom Stream Status + Quick Action Overlay */}
               <div
                 style={{
@@ -529,9 +690,9 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '5px', overflow: 'hidden' }}>
-                  <span style={{ fontWeight: 600, color: '#f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '160px' }}>
+                  <span style={{ fontWeight: 600, color: '#f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '140px' }}>
                     {isTutor
-                      ? '🖥️ Broadcasting (You)'
+                      ? `🖥️ You (${stageState.broadcastType})`
                       : `${currentStreamInfo?.broadcasterIdentity?.nickname || 'Peer'}`}
                   </span>
                   {zoomLevel > 1 && (
@@ -541,8 +702,24 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                   )}
                 </div>
 
-                {/* Right controls: Volume, Aspect Ratio menu toggle, Zoom, PiP, Fullscreen */}
+                {/* Right controls: Code Together, Volume, Aspect Ratio menu toggle, Zoom, PiP, Popout, Fullscreen */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '3px', flexShrink: 0 }}>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-icon"
+                    style={{
+                      width: '22px',
+                      height: '22px',
+                      padding: 0,
+                      color: showCodeTogether ? '#60a5fa' : '#ffffff',
+                      background: showCodeTogether ? 'rgba(59, 130, 246, 0.3)' : 'rgba(0,0,0,0.4)',
+                    }}
+                    onClick={() => setShowCodeTogether(!showCodeTogether)}
+                    title="Toggle Code Together Editor"
+                  >
+                    <Code2 size={11} />
+                  </button>
+
                   {!isTutor && (
                     <button
                       type="button"
@@ -589,6 +766,16 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                     title="Pop out in Picture-in-Picture window"
                   >
                     <Tv size={11} />
+                  </button>
+
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-icon"
+                    style={{ width: '22px', height: '22px', padding: 0, background: 'rgba(0,0,0,0.4)' }}
+                    onClick={handlePopoutWindow}
+                    title="Pop out in standalone full window"
+                  >
+                    <ExternalLink size={11} />
                   </button>
 
                   <button
@@ -643,9 +830,9 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                     top: 0,
                     left: 0,
                     right: 0,
-                    background: 'rgba(15, 23, 42, 0.94)',
+                    background: 'var(--bg-surface-elevated)',
                     backdropFilter: 'blur(8px)',
-                    borderBottom: '1px solid rgba(255, 255, 255, 0.12)',
+                    borderBottom: '1px solid var(--border-subtle)',
                     padding: '8px 10px',
                     display: 'flex',
                     flexDirection: 'column',
@@ -655,7 +842,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span style={{ fontSize: '10px', fontWeight: 700, color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <span style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
                       <Settings2 size={11} color="var(--primary)" />
                       <span>Aspect Ratio &amp; Viewport Options</span>
                     </span>
@@ -853,7 +1040,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            background: 'rgba(15, 23, 42, 0.65)',
+            background: 'var(--bg-surface)',
             width: '100%',
           }}
         >
@@ -888,6 +1075,13 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
               <Video size={10} />
             </button>
           </div>
+        </div>
+      )}
+
+      {/* 4. Collaborative Code Together Editor Drawer */}
+      {showCodeTogether && (
+        <div style={{ width: '100%', height: '340px', marginTop: '4px' }}>
+          <CodeTogether currentRoomId={currentRoomId} isCompact={true} />
         </div>
       )}
     </div>

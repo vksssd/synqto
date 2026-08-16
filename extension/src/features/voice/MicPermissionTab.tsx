@@ -42,12 +42,12 @@ export const MicPermissionTab: React.FC = () => {
     <div
       style={{
         minHeight: '100vh',
-        background: 'linear-gradient(135deg, #090d16 0%, #0f172a 100%)',
-        color: '#f8fafc',
+        background: 'var(--bg-app)',
+        color: 'var(--text-primary)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        fontFamily: 'Inter, system-ui, sans-serif',
+        fontFamily: 'inherit',
         padding: '20px',
       }}
     >
@@ -55,13 +55,13 @@ export const MicPermissionTab: React.FC = () => {
         style={{
           maxWidth: '440px',
           width: '100%',
-          background: 'rgba(30, 41, 59, 0.7)',
+          background: 'var(--bg-surface-elevated)',
           backdropFilter: 'blur(16px)',
           borderRadius: '16px',
-          border: '1px solid rgba(255, 255, 255, 0.1)',
+          border: '1px solid var(--border-subtle)',
           padding: '32px 24px',
           textAlign: 'center',
-          boxShadow: '0 20px 50px rgba(0, 0, 0, 0.5)',
+          boxShadow: '0 20px 50px rgba(0, 0, 0, 0.4)',
         }}
       >
         <div
@@ -70,7 +70,7 @@ export const MicPermissionTab: React.FC = () => {
             height: '64px',
             borderRadius: '50%',
             background: status === 'granted' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(99, 102, 241, 0.2)',
-            border: `2px solid ${status === 'granted' ? '#10b981' : '#6366f1'}`,
+            border: `2px solid ${status === 'granted' ? 'var(--accent-emerald)' : 'var(--primary)'}`,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -78,15 +78,15 @@ export const MicPermissionTab: React.FC = () => {
           }}
         >
           {status === 'granted' ? (
-            <CheckCircle2 size={32} color="#10b981" />
+            <CheckCircle2 size={32} color="var(--accent-emerald)" />
           ) : status === 'denied' ? (
-            <AlertCircle size={32} color="#f43f5e" />
+            <AlertCircle size={32} color="var(--accent-rose)" />
           ) : (
-            <Mic size={32} color="#818cf8" />
+            <Mic size={32} color="var(--primary)" />
           )}
         </div>
 
-        <h2 style={{ fontSize: '20px', fontWeight: 700, margin: '0 0 8px', color: '#ffffff' }}>
+        <h2 style={{ fontSize: '20px', fontWeight: 700, margin: '0 0 8px', color: 'var(--text-primary)' }}>
           {status === 'granted'
             ? 'Microphone Access Granted! 🎉'
             : status === 'denied'
@@ -94,7 +94,7 @@ export const MicPermissionTab: React.FC = () => {
               : 'Allow Microphone for Voice Rooms'}
         </h2>
 
-        <p style={{ fontSize: '13px', color: '#94a3b8', lineHeight: 1.5, margin: '0 0 24px' }}>
+        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.5, margin: '0 0 24px' }}>
           {status === 'granted'
             ? 'Permission successfully granted for Synqto! This tab will close automatically and return to your study room.'
             : status === 'denied'

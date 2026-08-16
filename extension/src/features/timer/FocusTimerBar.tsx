@@ -169,25 +169,85 @@ export const FocusTimerBar: React.FC = () => {
         </div>
       </div>
 
-      {/* Progress Line */}
+      {/* 🚀 Rocket Racing Progress Track from Launchpad to Finish Flag 🏁 */}
       {state.mode !== 'stopwatch' && (
-        <div
-          style={{
-            height: '3px',
-            borderRadius: '2px',
-            background: 'rgba(255, 255, 255, 0.08)',
-            marginTop: '8px',
-            overflow: 'hidden',
-          }}
-        >
+        <div style={{ marginTop: '10px', position: 'relative' }}>
+          {/* Racing track background with distance markings */}
           <div
             style={{
-              height: '100%',
-              width: `${getProgressPct()}%`,
-              background: currentColor,
-              transition: 'width 0.5s ease',
+              height: '8px',
+              borderRadius: '6px',
+              background: 'rgba(0, 0, 0, 0.4)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              position: 'relative',
+              overflow: 'hidden',
+              display: 'flex',
+              alignItems: 'center',
             }}
-          />
+          >
+            {/* Track speed lines */}
+            <div
+              style={{
+                position: 'absolute',
+                inset: 0,
+                backgroundImage: 'repeating-linear-gradient(90deg, transparent, transparent 15px, rgba(255,255,255,0.06) 15px, rgba(255,255,255,0.06) 20px)',
+              }}
+            />
+
+            {/* Glowing Propulsion Fill */}
+            <div
+              style={{
+                height: '100%',
+                width: `${getProgressPct()}%`,
+                background: `linear-gradient(90deg, rgba(99, 102, 241, 0.6) 0%, ${currentColor} 100%)`,
+                boxShadow: state.isRunning ? `0 0 10px ${currentColor}` : 'none',
+                transition: 'width 0.5s cubic-bezier(0.4, 0, 0.2, 1)',
+              }}
+            />
+          </div>
+
+          {/* Launch & Destination Badges + Moving Rocket Icon */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px', fontSize: '9px', color: 'var(--text-muted)' }}>
+            <span>🛫 Launchpad</span>
+            <span style={{ fontWeight: 700, color: currentColor }}>{Math.round(getProgressPct())}% Completed</span>
+            <span>🏁 Goal</span>
+          </div>
+
+          {/* Animated Traveling Rocket 🚀 */}
+          <div
+            style={{
+              position: 'absolute',
+              top: '-6px',
+              left: `calc(${Math.min(95, Math.max(2, getProgressPct()))}% - 10px)`,
+              pointerEvents: 'none',
+              transition: 'left 0.5s cubic-bezier(0.4, 0, 0.2, 1)',
+              display: 'flex',
+              alignItems: 'center',
+              filter: state.isRunning ? 'drop-shadow(0 0 6px rgba(244, 63, 94, 0.9))' : 'none',
+            }}
+          >
+            <span
+              style={{
+                fontSize: '14px',
+                display: 'inline-block',
+                transform: 'rotate(45deg)',
+                animation: state.isRunning ? 'rocketThrust 0.8s ease-in-out infinite alternate' : 'none',
+              }}
+            >
+              🚀
+            </span>
+            {state.isRunning && (
+              <span
+                style={{
+                  fontSize: '10px',
+                  marginLeft: '-4px',
+                  animation: 'flameFlicker 0.3s ease-in-out infinite alternate',
+                }}
+              >
+                🔥
+              </span>
+            )}
+          </div>
         </div>
       )}
 

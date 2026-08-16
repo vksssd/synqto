@@ -34,7 +34,7 @@ export const PeerListModal: React.FC<PeerListModalProps> = ({
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ fontWeight: 600, fontSize: '14px', color: '#f8fafc' }}>
+          <div style={{ fontWeight: 600, fontSize: '14px', color: 'var(--text-primary)' }}>
             Room Members ({peers.length + 1})
           </div>
           <button className="btn btn-ghost btn-icon" onClick={onClose}>
@@ -49,7 +49,7 @@ export const PeerListModal: React.FC<PeerListModalProps> = ({
             style={{ flex: 1 }}
             onClick={() => discovery.sendWave()}
           >
-            <Hand size={13} color="#f59e0b" />
+            <Hand size={13} color="var(--accent-amber, #f59e0b)" />
             <span>Wave All 👋</span>
           </button>
           <button
@@ -57,7 +57,7 @@ export const PeerListModal: React.FC<PeerListModalProps> = ({
             style={{ flex: 1 }}
             onClick={() => discovery.sendPoke()}
           >
-            <Sparkles size={13} color="#8b5cf6" />
+            <Sparkles size={13} color="var(--primary)" />
             <span>Poke Room 👉</span>
           </button>
         </div>
@@ -71,8 +71,8 @@ export const PeerListModal: React.FC<PeerListModalProps> = ({
               alignItems: 'center',
               justifyContent: 'space-between',
               padding: '8px 10px',
-              background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(139, 92, 246, 0.12))',
-              border: '1px solid rgba(99, 102, 241, 0.45)',
+              background: 'rgba(99, 102, 241, 0.12)',
+              border: '1px solid var(--border-focus, rgba(99, 102, 241, 0.45))',
               borderRadius: 'var(--radius-md)',
             }}
           >
@@ -82,7 +82,7 @@ export const PeerListModal: React.FC<PeerListModalProps> = ({
                   width: '30px',
                   height: '30px',
                   borderRadius: '50%',
-                  background: myIdentity?.color || '#6366f1',
+                  background: myIdentity?.color || 'var(--primary)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -94,14 +94,14 @@ export const PeerListModal: React.FC<PeerListModalProps> = ({
 
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span style={{ fontWeight: 700, fontSize: '12px', color: '#ffffff' }}>
+                  <span style={{ fontWeight: 700, fontSize: '12px', color: 'var(--text-primary)' }}>
                     {myIdentity?.nickname || 'You'}
                   </span>
                   <span
                     style={{
                       background: 'rgba(16, 185, 129, 0.2)',
                       border: '1px solid rgba(16, 185, 129, 0.4)',
-                      color: '#34d399',
+                      color: 'var(--accent-emerald, #10b981)',
                       fontSize: '9px',
                       fontWeight: 700,
                       padding: '1px 5px',
@@ -111,7 +111,7 @@ export const PeerListModal: React.FC<PeerListModalProps> = ({
                     You
                   </span>
                   {isSelfLeader && (
-                    <span title="Cluster Leader" style={{ color: '#fbbf24' }}>
+                    <span title="Cluster Leader" style={{ color: 'var(--accent-amber, #fbbf24)' }}>
                       <Crown size={12} />
                     </span>
                   )}
@@ -122,7 +122,7 @@ export const PeerListModal: React.FC<PeerListModalProps> = ({
               </div>
             </div>
 
-            <span style={{ fontSize: '11px', color: '#a5b4fc', fontWeight: 600 }}>
+            <span style={{ fontSize: '11px', color: 'var(--primary)', fontWeight: 600 }}>
               (Self)
             </span>
           </div>
@@ -138,7 +138,7 @@ export const PeerListModal: React.FC<PeerListModalProps> = ({
                     alignItems: 'center',
                     justifyContent: 'space-between',
                     padding: '8px 10px',
-                    background: 'rgba(255, 255, 255, 0.03)',
+                    background: 'var(--bg-surface-elevated, rgba(255, 255, 255, 0.03))',
                     border: '1px solid var(--border-subtle)',
                     borderRadius: 'var(--radius-md)',
                   }}
@@ -149,7 +149,7 @@ export const PeerListModal: React.FC<PeerListModalProps> = ({
                         width: '30px',
                         height: '30px',
                         borderRadius: '50%',
-                        background: peer.identity.color || '#6366f1',
+                        background: peer.identity.color || 'var(--primary)',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
@@ -161,11 +161,11 @@ export const PeerListModal: React.FC<PeerListModalProps> = ({
 
                     <div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <span style={{ fontWeight: 600, fontSize: '12px', color: '#f8fafc' }}>
+                        <span style={{ fontWeight: 600, fontSize: '12px', color: 'var(--text-primary)' }}>
                           {peer.identity.nickname}
                         </span>
                         {isPeerLeader && (
-                          <span title="Cluster Leader" style={{ color: '#c4b5fd' }}>
+                          <span title="Cluster Leader" style={{ color: 'var(--primary)' }}>
                             <Crown size={12} />
                           </span>
                         )}

@@ -249,7 +249,8 @@ export class TutorService {
   public async startTutorStage(
     broadcastType: BroadcastType,
     currentRoomId: string,
-    customTitle?: string
+    customTitle?: string,
+    withMic = true
   ): Promise<boolean> {
     const myIdentity = await this.identityService.getOrCreateIdentity();
 
@@ -261,7 +262,7 @@ export class TutorService {
         });
 
         let finalStream = screenStream;
-        if (navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function') {
+        if (withMic && navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function') {
           try {
             const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
             const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
@@ -290,7 +291,7 @@ export class TutorService {
       } else if (broadcastType === 'camera') {
         this.localStream = await navigator.mediaDevices.getUserMedia({
           video: { width: { ideal: 1280 }, height: { ideal: 720 } },
-          audio: true,
+          audio: withMic,
         });
       } else {
         this.localStream = await navigator.mediaDevices.getUserMedia({
@@ -330,6 +331,8 @@ export class TutorService {
         broadcasterIdentity: myIdentity,
         title: streamTitle,
         broadcastType,
+        withMic,
+        isMicMuted: false,
         startedAt: Date.now(),
       };
 
@@ -341,8 +344,10 @@ export class TutorService {
         tutorPeerId: myIdentity.peerId,
         tutorIdentity: myIdentity,
         myRole: 'tutor',
-        isAudioLive: true,
+        isAudioLive: withMic,
         isVideoLive: broadcastType !== 'audio',
+        withMic,
+        isMicMuted: false,
         broadcastType,
         streamTitle,
         activeStreams: [...otherStreams, streamInfo],
@@ -359,6 +364,62 @@ export class TutorService {
       console.error('[TutorService] Failed to start stage stream:', err);
       return false;
     }
+  }
+
+  /**
+   * Switches media source on-the-fly (e.g. Screen to Webcam or Webcam to Screen)
+   */
+  public async switchMediaSource(newType: 'screen' | 'camera', currentRoomId: string): Promise<boolean> {
+    if (!this.localStream || this.state.myRole !== 'tutor') return false;
+
+    try {
+      let newStream: MediaStream;
+      if (newType === 'screen') {
+        newStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+      } else {
+        newStream = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: false,
+        });
+      }
+
+      const newVideoTrack = newStream.getVideoTracks()[0];
+      if (!newVideoTrack) return false;
+
+      // Stop old video track
+      const oldVideoTrack = this.localStream.getVideoTracks()[0];
+      if (oldVideoTrack) {
+        oldVideoTrack.stop();
+        this.localStream.removeTrack(oldVideoTrack);
+      }
+
+      this.localStream.addTrack(newVideoTrack);
+      this.webrtc.setLocalVideoTrack(newVideoTrack);
+
+      newVideoTrack.onended = () => {
+        this.stopTutorStage(currentRoomId);
+      };
+
+      this.state.broadcastType = newType;
+      this.broadcastStageState(currentRoomId);
+      this.emitState();
+      return true;
+    } catch (err) {
+      console.error('[TutorService] Error switching media source:', err);
+      return false;
+    }
+  }
+
+  /**
+   * Toggles microphone mute during live broadcast
+   */
+  public toggleMic(isMuted: boolean): void {
+    if (this.localStream) {
+      const audioTracks = this.localStream.getAudioTracks();
+      audioTracks.forEach((t) => (t.enabled = !isMuted));
+    }
+    this.state.isMicMuted = isMuted;
+    this.emitState();
   }
 
   public stopTutorStage(currentRoomId: string): void {

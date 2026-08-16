@@ -67,10 +67,14 @@ export class NetworkService {
     }
   }
 
-  public broadcast<T = unknown>(type: PacketType, payload: T): NetworkPacket | null {
+  public broadcast<T = unknown>(
+    type: PacketType,
+    payload: T,
+    options?: { channelPriority?: 'control' | 'bulk'; seq?: number; lamportTime?: number }
+  ): NetworkPacket | null {
     if (!this.myIdentity || !this.currentRoomId) return null;
 
-    const packet = createPacket(type, this.myIdentity, this.currentRoomId, payload);
+    const packet = createPacket(type, this.myIdentity, this.currentRoomId, payload, undefined, options);
 
     // Send across local tabs
     if (this.localBroadcastChannel) {
@@ -85,10 +89,15 @@ export class NetworkService {
     return packet;
   }
 
-  public send<T = unknown>(targetPeerId: string, type: PacketType, payload: T): NetworkPacket | null {
+  public send<T = unknown>(
+    targetPeerId: string,
+    type: PacketType,
+    payload: T,
+    options?: { channelPriority?: 'control' | 'bulk'; seq?: number; lamportTime?: number }
+  ): NetworkPacket | null {
     if (!this.myIdentity || !this.currentRoomId) return null;
 
-    const packet = createPacket(type, this.myIdentity, this.currentRoomId, payload, targetPeerId);
+    const packet = createPacket(type, this.myIdentity, this.currentRoomId, payload, targetPeerId, options);
 
     // Send across local tabs
     if (this.localBroadcastChannel) {

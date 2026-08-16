@@ -1,14 +1,14 @@
-# ⚡ Synqto
+# ⚡ Synqto v0.2.0
 
-> **Live P2P Collaborative Problem Solving Platform** with a High-Performance Go Signaling Server and Chrome Extension (Manifest V3).
+> **Live P2P Collaborative Problem Solving Platform** with Next-Gen Resilient Mesh Networking, High-Performance Go Signaling Server, and Chrome Extension (Manifest V3).
 
 When you open any coding problem (LeetCode, Codeforces, NeetCode, HackerRank, GeeksforGeeks), research paper (ArXiv), or educational lecture (YouTube), **Synqto automatically detects the context and connects you to a real-time study room** with peers studying the exact same material worldwide.
 
 ---
 
-## ⚡ Key Architectural Innovation: Hierarchical Leader Mesh
+## ⚡ Key Architectural Innovation: The Trinity (3-Leader Backbone Mesh)
 
-Unlike traditional full-mesh WebRTC topologies that suffer from $O(N^2)$ connection blowup and massive bandwidth requirements for every single peer, **Synqto uses a hierarchical cluster topology**:
+Unlike traditional full-mesh WebRTC topologies ($O(N^2)$ connection blowup) or 2-node leader setups vulnerable to split-brain network partitions, **Synqto v0.2.0 establishes a Trinity Backbone ($K_3$ Triangular Quorum Mesh)**:
 
 ```
                        ┌─────────────────────────┐
@@ -16,22 +16,33 @@ Unlike traditional full-mesh WebRTC topologies that suffer from $O(N^2)$ connect
                        │  (SDP / ICE broker only)│
                        └────────────┬────────────┘
                                     │ (Initial signaling)
-              ┌─────────────────────┴─────────────────────┐
-              ▼                                           ▼
-      ┌───────────────┐     Backbone Mesh        ┌───────────────┐
-      │   Leader A    │◄════════════════════════►│   Leader B    │
-      └───┬───────┬───┘   (Inter-cluster relay)  └───┬───────┬───┘
-          │       │                                  │       │
-       ┌──▼─┐   ┌─▼──┐   Intra-cluster            ┌──▼─┐   ┌─▼──┐
-       │ P1 │   │ P2 │   Relay                    │ P3 │   │ P4 │
-       └────┘   └────┘                            └────┘   └────┘
+              ┌─────────────────────┼─────────────────────┐
+              ▼                     ▼                     ▼
+       ┌─────────────┐        ┌─────────────┐       ┌─────────────┐
+       │  Leader A   │◄══════►│  Leader B   │◄═════►│  Leader C   │
+       └──────┬──────┘        └──────┬──────┘       └──────┬──────┘
+              ▲                      │                     ▲
+              └══════════════════════╧═════════════════════┘
+                        Triangular Backbone Mesh (K3)
+              │                      │                     │
+           Active                 Active                Active
+              ▼                      ▼                     ▼
+         ┌─────────┐            ┌─────────┐           ┌─────────┐
+         │ Cluster │            │ Cluster │           │ Cluster │
+         │ Peers 1 │            │ Peers 2 │           │ Peers 3 │
+         └─────────┘            └─────────┘           └─────────┘
 ```
 
-1. **Lightweight Go Server**: Handles ONLY initial WebSocket signaling (SDP offer/answer and ICE candidate exchange) and room/leader registry. **Zero message, chat, voice, or presence relaying.**
-2. **Auto-Promoted Leaders**: The most stable peer in each cluster is elected Leader (`score = 0.6 * uptime + 0.4 * stability`). Clusters split automatically at 8 peers.
-3. **Bandwidth Efficiency**: Regular peers maintain **exactly 1 WebRTC connection** to their assigned leader ($O(1)$ connections per peer, $O(N)$ system total).
-4. **Loop-Free TTL Routing**: Packets carry a hop TTL (default 3) and UUID deduplication sliding window to guarantee zero cycles across backbone leaders.
-5. **Instant Local IPC**: Multiple tabs on the same computer communicate with **0ms latency** over `BroadcastChannel` without touching the network.
+1. **Trinity Quorum Mesh ($K_3$ Graph)**: Whenever a room has $\ge 3$ peers, the server maintains at least **3 interconnected leaders**. With 3 leaders, a majority quorum ($2/3$) is always maintained even during a node crash, preventing split-brain partitions.
+2. **Multi-Path Bridging**: If direct communication between Leader A and Leader B experiences packet loss or ISP routing issues, Leader C acts as a live WebRTC bridge ($A \leftrightarrow C \leftrightarrow B$).
+3. **Dual-Leader Warm Standby Topology**: Every regular peer maintains an active DataChannel to their Primary Leader and a pre-warmed standby DataChannel to a Shadow Leader for **sub-300ms failover** with zero renegotiation delay.
+4. **W3C Perfect Negotiation**: Eliminates SDP offer/answer collisions and glare during concurrent reconnections.
+5. **Dual DataChannels per Connection**:
+   - `synqto_control` (`ordered: true, maxRetransmits: 5`): Latency-critical chat ACKs, laser pointers, voice signaling, and cursor coordinates.
+   - `synqto_bulk` (`ordered: false`): Unordered high throughput for screenshots, whiteboard state sync, and file attachments without Head-of-Line blocking.
+6. **Anti-Entropy Delta Sync & Vector Clocks**: Guarantees zero dropped messages across leader failovers and reconnections via monotonic sequence digests.
+7. **Lightweight Go Server**: Handles ONLY initial WebSocket signaling (SDP offer/answer and ICE candidate exchange) and room/leader registry. **Zero message, chat, voice, or presence relaying.**
+8. **Instant Local IPC**: Multiple tabs on the same computer communicate with **0ms latency** over `BroadcastChannel` without touching the network.
 
 ---
 
@@ -39,24 +50,25 @@ Unlike traditional full-mesh WebRTC topologies that suffer from $O(N^2)$ connect
 
 ### 1. Start the Go Signaling Server
 ```bash
-cd server
+cd synqto-server
 go run .
 # Server starts on http://localhost:8080 (WebSocket endpoint at ws://localhost:8080/ws/{roomId})
 ```
 
 ### 2. Build the Chrome Extension
 ```bash
-cd extension
+cd synqto/extension
 npm install
 npm run build
+npm run package
 ```
 
 ### 3. Load the Extension into Google Chrome
 1. Open Chrome and navigate to `chrome://extensions/`
 2. Enable **Developer mode** (toggle in the top-right corner)
 3. Click **Load unpacked**
-4. Select the `nerd-buddy/extension/dist` folder
-5. Pin **Nerd Buddy** to your toolbar and open any problem (e.g., [LeetCode Two Sum](https://leetcode.com/problems/two-sum/))!
+4. Select the `synqto/extension/dist` folder
+5. Pin **Synqto** to your toolbar and open any problem (e.g., [LeetCode Two Sum](https://leetcode.com/problems/two-sum/))!
 
 ---
 

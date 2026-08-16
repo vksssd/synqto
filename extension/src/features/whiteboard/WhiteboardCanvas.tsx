@@ -1,4 +1,4 @@
-// ─── Collaborative Whiteboard Canvas: Multi-Page Notebook, Independent Per-Tool Styles, Object Eraser & Undo-Enabled Clear ───
+// ─── Collaborative Whiteboard Canvas: Multi-Page Notebook, Presets, Object Eraser & Real-Time Sync ───
 
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import {
@@ -36,6 +36,16 @@ import {
   Globe,
   HelpCircle,
   StickyNote,
+  Triangle,
+  Star,
+  Code,
+  LayoutGrid,
+  ZoomIn,
+  ZoomOut,
+  Maximize2,
+  Hand,
+  Check,
+  Share2,
 } from 'lucide-react';
 import { WhiteboardService } from './whiteboard.service';
 import {
@@ -82,6 +92,7 @@ interface ToolStyle {
 }
 
 const DEFAULT_TOOL_STYLES: Record<string, ToolStyle> = {
+  select: { color: '#6366f1', width: 3 },
   pen: { color: '#6366f1', width: 3 },
   brush: { color: '#06b6d4', width: 6 },
   highlighter: { color: '#f59e0b', width: 16 },
@@ -90,11 +101,15 @@ const DEFAULT_TOOL_STYLES: Record<string, ToolStyle> = {
   torch: { color: '#facc15', width: 65 },
   eraser: { color: '#ffffff', width: 18 },
   text: { color: '#ffffff', width: 3 },
+  code_box: { color: '#38bdf8', width: 2 },
   line: { color: '#6366f1', width: 3 },
   arrow: { color: '#6366f1', width: 3 },
   arrow_bi: { color: '#6366f1', width: 3 },
   rect: { color: '#6366f1', width: 3 },
+  rounded_rect: { color: '#6366f1', width: 3 },
   circle: { color: '#6366f1', width: 3 },
+  triangle: { color: '#10b981', width: 3 },
+  star: { color: '#f59e0b', width: 3 },
   decision_diamond: { color: '#f59e0b', width: 3 },
   tree_node: { color: '#10b981', width: 3 },
   sticky_note: { color: '#fef3c7', width: 2 },
@@ -109,6 +124,20 @@ const DEFAULT_TOOL_STYLES: Record<string, ToolStyle> = {
   firewall: { color: '#f43f5e', width: 2.5 },
   user_client: { color: '#3b82f6', width: 2.5 },
   mobile_client: { color: '#06b6d4', width: 2.5 },
+  // DSA Data Structure Visualizers:
+  array_cells: { color: '#38bdf8', width: 2.5 },
+  stack_lifo: { color: '#f59e0b', width: 2.5 },
+  queue_fifo: { color: '#10b981', width: 2.5 },
+  hashmap_table: { color: '#a855f7', width: 2.5 },
+  two_pointers: { color: '#ec4899', width: 2 },
+  // Extended Architecture Nodes:
+  cdn_edge: { color: '#06b6d4', width: 2.5 },
+  object_storage: { color: '#f97316', width: 2.5 },
+  auth_jwt: { color: '#eab308', width: 2.5 },
+  websocket_gw: { color: '#6366f1', width: 2.5 },
+  elasticsearch: { color: '#14b8a6', width: 2.5 },
+  async_arrow: { color: '#a855f7', width: 2 },
+  tradeoff_note: { color: '#facc15', width: 2 },
 };
 
 // ── Geometric Collision Helpers for Precision Object Eraser ──
@@ -195,6 +224,12 @@ export const WhiteboardCanvas: React.FC = () => {
   const [privacyMode, setPrivacyMode] = useState<WhiteboardPrivacyMode>(whiteboardService.getPrivacyMode());
   const [customHeight, setCustomHeight] = useState<number>(420);
 
+  // Zoom & Pan Viewport State
+  const [zoom, setZoom] = useState<number>(1.0);
+  const [panOffset, setPanOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const [panStart, setPanStart] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+
   const [isDrawing, setIsDrawing] = useState(false);
   const [currentPoints, setCurrentPoints] = useState<Point[]>([]);
   const [startPoint, setStartPoint] = useState<Point | null>(null);
@@ -204,19 +239,23 @@ export const WhiteboardCanvas: React.FC = () => {
   const [torchPos, setTorchPos] = useState<{ x: number; y: number } | null>(null);
   const [eraserPos, setEraserPos] = useState<{ x: number; y: number } | null>(null);
 
-  // Toast / Notification for Undo on Clear
+  // Toast / Notification for Undo on Clear / Copy
   const [undoToast, setUndoToast] = useState<string | null>(null);
+  const [copiedToast, setCopiedToast] = useState(false);
 
   // Disappearing / Temporary Ink Strokes Pool
   const [tempStrokes, setTempStrokes] = useState<{ stroke: WhiteboardStroke; createdAt: number; durationMs: number }[]>([]);
 
-  // Text Tool State (Click-to-place on canvas)
+  // Text Tool State
   const [textModalPos, setTextModalPos] = useState<{ x: number; y: number } | null>(null);
   const [textInput, setTextInput] = useState('');
 
   // Collapsible drawers for toolbars
   const [showArchDrawer, setShowArchDrawer] = useState(false);
+  const [showDsaDrawer, setShowDsaDrawer] = useState(false);
   const [showGeomDrawer, setShowGeomDrawer] = useState(false);
+  const [showPresetsDrawer, setShowPresetsDrawer] = useState(false);
+  const [presetTab, setPresetTab] = useState<'dsa' | 'arch'>('dsa');
   const [showThemesDrawer, setShowThemesDrawer] = useState(false);
 
   // Update active tool's independent color
@@ -385,15 +424,39 @@ export const WhiteboardCanvas: React.FC = () => {
       ctx.moveTo(midX, 0);
       ctx.lineTo(midX, h);
       ctx.stroke();
+    } else if (bg === 'matrix') {
+      ctx.strokeStyle = isLight ? 'rgba(0, 0, 0, 0.15)' : 'rgba(255, 255, 255, 0.1)';
+      ctx.lineWidth = 1;
+      const cellSize = 40;
+      for (let x = 20; x < w; x += cellSize) {
+        for (let y = 20; y < h; y += cellSize) {
+          ctx.strokeRect(x, y, cellSize, cellSize);
+        }
+      }
+    } else if (bg === 'isometric') {
+      ctx.strokeStyle = isLight ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.08)';
+      ctx.lineWidth = 1;
+      const isoStep = 30;
+      const tan30 = Math.tan((30 * Math.PI) / 180);
+      for (let x = -w; x < w * 2; x += isoStep * 2) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x + h / tan30, h);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x - h / tan30, h);
+        ctx.stroke();
+      }
     }
 
     ctx.restore();
   }, [isLightColor]);
 
-  // 4. Vector Shape & Stroke Renderer (Clean - No forced text, Smooth Curves)
+  // 4. Vector Shape & Stroke Renderer (Clean Vector & Smooth Bezier Curves)
   const renderSingleStroke = useCallback(
     (ctx: CanvasRenderingContext2D, stroke: WhiteboardStroke, isLight: boolean, alphaOverride?: number) => {
-      // Ignore eraser tool in stroke rendering since object-eraser cleanly deletes items
       if (stroke.tool === 'eraser') return;
 
       ctx.save();
@@ -427,7 +490,7 @@ export const WhiteboardCanvas: React.FC = () => {
         const minX = Math.min(x1, x2);
         const minY = Math.min(y1, y2);
 
-        // ── Basic Geometric Shapes ──
+        // ── Geometric Shapes ──
         if (stroke.tool === 'line') {
           ctx.beginPath();
           ctx.moveTo(x1, y1);
@@ -455,13 +518,11 @@ export const WhiteboardCanvas: React.FC = () => {
 
           const angle = Math.atan2(y2 - y1, x2 - x1);
           const headLen = Math.max(10, stroke.width * 3);
-          // End arrow
           ctx.beginPath();
           ctx.moveTo(x2, y2);
           ctx.lineTo(x2 - headLen * Math.cos(angle - Math.PI / 6), y2 - headLen * Math.sin(angle - Math.PI / 6));
           ctx.moveTo(x2, y2);
           ctx.lineTo(x2 - headLen * Math.cos(angle + Math.PI / 6), y2 - headLen * Math.sin(angle + Math.PI / 6));
-          // Start arrow
           ctx.moveTo(x1, y1);
           ctx.lineTo(x1 + headLen * Math.cos(angle - Math.PI / 6), y1 + headLen * Math.sin(angle - Math.PI / 6));
           ctx.moveTo(x1, y1);
@@ -469,11 +530,49 @@ export const WhiteboardCanvas: React.FC = () => {
           ctx.stroke();
         } else if (stroke.tool === 'rect') {
           ctx.strokeRect(minX, minY, width, height);
+        } else if (stroke.tool === 'rounded_rect') {
+          ctx.beginPath();
+          ctx.roundRect(minX, minY, width, height, 10);
+          ctx.stroke();
         } else if (stroke.tool === 'circle') {
           const rx = width / 2;
           const ry = height / 2;
           ctx.beginPath();
           ctx.ellipse(minX + rx, minY + ry, rx, ry, 0, 0, Math.PI * 2);
+          ctx.stroke();
+        } else if (stroke.tool === 'triangle') {
+          ctx.beginPath();
+          ctx.moveTo(minX + width / 2, minY);
+          ctx.lineTo(minX + width, minY + height);
+          ctx.lineTo(minX, minY + height);
+          ctx.closePath();
+          ctx.stroke();
+        } else if (stroke.tool === 'star') {
+          const cx = minX + width / 2;
+          const cy = minY + height / 2;
+          const spikes = 5;
+          const outerRadius = Math.min(width, height) / 2;
+          const innerRadius = outerRadius / 2;
+          let rot = (Math.PI / 2) * 3;
+          let x = cx;
+          let y = cy;
+          const step = Math.PI / spikes;
+
+          ctx.beginPath();
+          ctx.moveTo(cx, cy - outerRadius);
+          for (let i = 0; i < spikes; i++) {
+            x = cx + Math.cos(rot) * outerRadius;
+            y = cy + Math.sin(rot) * outerRadius;
+            ctx.lineTo(x, y);
+            rot += step;
+
+            x = cx + Math.cos(rot) * innerRadius;
+            y = cy + Math.sin(rot) * innerRadius;
+            ctx.lineTo(x, y);
+            rot += step;
+          }
+          ctx.lineTo(cx, cy - outerRadius);
+          ctx.closePath();
           ctx.stroke();
         } else if (stroke.tool === 'decision_diamond') {
           const midX = minX + width / 2;
@@ -497,7 +596,7 @@ export const WhiteboardCanvas: React.FC = () => {
           const h = Math.max(60, height);
           ctx.fillStyle = isLight ? '#fef3c7' : 'rgba(254, 243, 199, 0.9)';
           ctx.beginPath();
-          ctx.roundRect(minX, minY, w, h, 4);
+          ctx.roundRect(minX, minY, w, h, 6);
           ctx.fill();
           ctx.stroke();
           ctx.fillStyle = 'rgba(0,0,0,0.15)';
@@ -507,9 +606,31 @@ export const WhiteboardCanvas: React.FC = () => {
           ctx.lineTo(minX + w - 14, minY + 14);
           ctx.closePath();
           ctx.fill();
+        } else if (stroke.tool === 'code_box') {
+          const w = Math.max(90, width);
+          const h = Math.max(50, height);
+          ctx.fillStyle = isLight ? '#1e293b' : 'rgba(15, 23, 42, 0.95)';
+          ctx.beginPath();
+          ctx.roundRect(minX, minY, w, h, 6);
+          ctx.fill();
+          ctx.strokeStyle = '#38bdf8';
+          ctx.stroke();
+
+          ctx.fillStyle = '#ef4444';
+          ctx.beginPath();
+          ctx.arc(minX + 8, minY + 8, 2.5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#f59e0b';
+          ctx.beginPath();
+          ctx.arc(minX + 16, minY + 8, 2.5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#10b981';
+          ctx.beginPath();
+          ctx.arc(minX + 24, minY + 8, 2.5, 0, Math.PI * 2);
+          ctx.fill();
         }
 
-        // ── 🏛️ System Design Architecture Shapes (Clean Vector) ──
+        // ── System Design Architecture Shapes ──
         else if (stroke.tool === 'db_cylinder') {
           const w = Math.max(50, width);
           const h = Math.max(60, height);
@@ -679,7 +800,6 @@ export const WhiteboardCanvas: React.FC = () => {
           ctx.stroke();
         } else if (stroke.tool === 'user_client') {
           const w = Math.max(45, width);
-          const h = Math.max(45, height);
           const midX = minX + w / 2;
 
           ctx.beginPath();
@@ -706,6 +826,275 @@ export const WhiteboardCanvas: React.FC = () => {
           ctx.beginPath();
           ctx.arc(minX + w / 2, minY + h - 5, 2, 0, Math.PI * 2);
           ctx.fill();
+        } else if (stroke.tool === 'array_cells') {
+          const w = Math.max(140, width);
+          const h = Math.max(34, height);
+          const cells = 5;
+          const cellW = w / cells;
+
+          ctx.fillStyle = isLight ? '#ffffff' : 'rgba(15, 23, 42, 0.95)';
+          ctx.beginPath();
+          ctx.roundRect(minX, minY, w, h, 4);
+          ctx.fill();
+          ctx.stroke();
+
+          for (let i = 1; i < cells; i++) {
+            ctx.beginPath();
+            ctx.moveTo(minX + i * cellW, minY);
+            ctx.lineTo(minX + i * cellW, minY + h);
+            ctx.stroke();
+          }
+
+          ctx.fillStyle = isLight ? '#64748b' : '#94a3b8';
+          ctx.font = 'bold 9px monospace';
+          ctx.textAlign = 'center';
+          for (let i = 0; i < cells; i++) {
+            ctx.fillText(`[${i}]`, minX + i * cellW + cellW / 2, minY - 4);
+          }
+        } else if (stroke.tool === 'stack_lifo') {
+          const w = Math.max(55, width);
+          const h = Math.max(80, height);
+
+          ctx.fillStyle = isLight ? '#ffffff' : 'rgba(15, 23, 42, 0.95)';
+          ctx.beginPath();
+          ctx.moveTo(minX, minY);
+          ctx.lineTo(minX, minY + h);
+          ctx.lineTo(minX + w, minY + h);
+          ctx.lineTo(minX + w, minY);
+          ctx.stroke();
+
+          const items = 3;
+          for (let i = 1; i <= items; i++) {
+            const sy = minY + h - (h / 4) * i;
+            ctx.beginPath();
+            ctx.moveTo(minX + 3, sy);
+            ctx.lineTo(minX + w - 3, sy);
+            ctx.stroke();
+          }
+
+          ctx.fillStyle = '#f59e0b';
+          ctx.font = 'bold 8px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('TOP (LIFO)', minX + w / 2, minY - 4);
+        } else if (stroke.tool === 'queue_fifo') {
+          const w = Math.max(90, width);
+          const h = Math.max(34, height);
+
+          ctx.fillStyle = isLight ? '#ffffff' : 'rgba(15, 23, 42, 0.95)';
+          ctx.beginPath();
+          ctx.moveTo(minX, minY);
+          ctx.lineTo(minX + w, minY);
+          ctx.moveTo(minX, minY + h);
+          ctx.lineTo(minX + w, minY + h);
+          ctx.stroke();
+
+          for (let i = 1; i <= 3; i++) {
+            const sx = minX + (w / 4) * i;
+            ctx.beginPath();
+            ctx.moveTo(sx, minY + 3);
+            ctx.lineTo(sx, minY + h - 3);
+            ctx.stroke();
+          }
+
+          ctx.fillStyle = '#10b981';
+          ctx.font = 'bold 8px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('OUT ⬅️', minX - 14, minY + h / 2 + 3);
+          ctx.fillText('⬅️ IN', minX + w + 14, minY + h / 2 + 3);
+        } else if (stroke.tool === 'hashmap_table') {
+          const w = Math.max(100, width);
+          const h = Math.max(65, height);
+
+          ctx.fillStyle = isLight ? '#ffffff' : 'rgba(15, 23, 42, 0.95)';
+          ctx.beginPath();
+          ctx.roundRect(minX, minY, w, h, 4);
+          ctx.fill();
+          ctx.stroke();
+
+          ctx.beginPath();
+          ctx.moveTo(minX, minY + 16);
+          ctx.lineTo(minX + w, minY + 16);
+          ctx.moveTo(minX + w * 0.45, minY);
+          ctx.lineTo(minX + w * 0.45, minY + h);
+          ctx.stroke();
+
+          ctx.fillStyle = '#a855f7';
+          ctx.font = 'bold 8.5px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('Key', minX + w * 0.22, minY + 11);
+          ctx.fillText('Value', minX + w * 0.72, minY + 11);
+        } else if (stroke.tool === 'two_pointers') {
+          const ptrW = 16;
+          const ptrH = 20;
+          const cx = minX + width / 2;
+
+          ctx.fillStyle = drawColor;
+          ctx.beginPath();
+          ctx.moveTo(cx, minY);
+          ctx.lineTo(cx - ptrW / 2, minY + ptrH);
+          ctx.lineTo(cx + ptrW / 2, minY + ptrH);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+
+          if (label) {
+            ctx.fillStyle = isLight ? '#0f172a' : '#ffffff';
+            ctx.font = 'bold 10px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(label, cx, minY + ptrH + 12);
+          }
+        } else if (stroke.tool === 'cdn_edge') {
+          const w = Math.max(60, width);
+          const h = Math.max(50, height);
+          const cx = minX + w / 2;
+          const cy = minY + h / 2;
+
+          ctx.fillStyle = isLight ? '#ffffff' : 'rgba(15, 23, 42, 0.95)';
+          ctx.beginPath();
+          ctx.ellipse(cx, cy, w / 2, h / 2, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+
+          ctx.strokeStyle = '#06b6d4';
+          ctx.beginPath();
+          ctx.arc(cx, cy, Math.min(w, h) * 0.25, -Math.PI * 0.4, Math.PI * 0.4);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(cx, cy, Math.min(w, h) * 0.4, -Math.PI * 0.4, Math.PI * 0.4);
+          ctx.stroke();
+        } else if (stroke.tool === 'object_storage') {
+          const w = Math.max(50, width);
+          const h = Math.max(55, height);
+          const cx = minX + w / 2;
+
+          ctx.fillStyle = isLight ? '#ffffff' : 'rgba(15, 23, 42, 0.95)';
+          ctx.beginPath();
+          ctx.moveTo(minX + 6, minY + 14);
+          ctx.lineTo(minX + 10, minY + h);
+          ctx.lineTo(minX + w - 10, minY + h);
+          ctx.lineTo(minX + w - 6, minY + 14);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+
+          ctx.beginPath();
+          ctx.ellipse(cx, minY + 14, (w - 12) / 2, 7, 0, 0, Math.PI * 2);
+          ctx.stroke();
+
+          ctx.beginPath();
+          ctx.arc(cx, minY + 12, (w - 16) / 2, Math.PI, 0);
+          ctx.stroke();
+        } else if (stroke.tool === 'auth_jwt') {
+          const w = Math.max(46, width);
+          const h = Math.max(54, height);
+          const midX = minX + w / 2;
+
+          ctx.fillStyle = isLight ? '#ffffff' : 'rgba(15, 23, 42, 0.95)';
+          ctx.beginPath();
+          ctx.moveTo(minX + 4, minY + 4);
+          ctx.lineTo(minX + w - 4, minY + 4);
+          ctx.lineTo(minX + w - 4, minY + h * 0.5);
+          ctx.bezierCurveTo(minX + w - 4, minY + h * 0.85, midX, minY + h, midX, minY + h);
+          ctx.bezierCurveTo(midX, minY + h, minX + 4, minY + h * 0.85, minX + 4, minY + h * 0.5);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+
+          ctx.fillStyle = '#eab308';
+          ctx.beginPath();
+          ctx.arc(midX, minY + 18, 4, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.beginPath();
+          ctx.moveTo(midX - 2, minY + 20);
+          ctx.lineTo(midX - 3, minY + 28);
+          ctx.lineTo(midX + 3, minY + 28);
+          ctx.lineTo(midX + 2, minY + 20);
+          ctx.closePath();
+          ctx.fill();
+        } else if (stroke.tool === 'websocket_gw') {
+          const w = Math.max(60, width);
+          const h = Math.max(45, height);
+
+          ctx.fillStyle = isLight ? '#ffffff' : 'rgba(15, 23, 42, 0.95)';
+          ctx.beginPath();
+          ctx.roundRect(minX, minY, w, h, 6);
+          ctx.fill();
+          ctx.stroke();
+
+          ctx.fillStyle = '#6366f1';
+          const cx = minX + w / 2;
+          const cy = minY + h / 2;
+          ctx.beginPath();
+          ctx.moveTo(cx - 6, cy - 10);
+          ctx.lineTo(cx - 12, cy + 1);
+          ctx.lineTo(cx - 7, cy + 1);
+          ctx.lineTo(cx - 9, cy + 10);
+          ctx.lineTo(cx - 3, cy - 1);
+          ctx.lineTo(cx - 8, cy - 1);
+          ctx.closePath();
+          ctx.fill();
+          ctx.beginPath();
+          ctx.moveTo(cx + 6, cy - 10);
+          ctx.lineTo(cx, cy + 1);
+          ctx.lineTo(cx + 5, cy + 1);
+          ctx.lineTo(cx + 3, cy + 10);
+          ctx.lineTo(cx + 9, cy - 1);
+          ctx.lineTo(cx + 4, cy - 1);
+          ctx.closePath();
+          ctx.fill();
+        } else if (stroke.tool === 'elasticsearch') {
+          const w = Math.max(60, width);
+          const h = Math.max(45, height);
+          const cx = minX + w / 2;
+          const cy = minY + h / 2;
+
+          ctx.fillStyle = isLight ? '#ffffff' : 'rgba(15, 23, 42, 0.95)';
+          ctx.beginPath();
+          ctx.roundRect(minX, minY, w, h, 6);
+          ctx.fill();
+          ctx.stroke();
+
+          ctx.strokeStyle = '#14b8a6';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(cx - 3, cy - 3, 7, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(cx + 2, cy + 2);
+          ctx.lineTo(cx + 8, cy + 8);
+          ctx.stroke();
+        } else if (stroke.tool === 'async_arrow') {
+          ctx.save();
+          ctx.setLineDash([5, 4]);
+          ctx.beginPath();
+          ctx.moveTo(x1, y1);
+          ctx.lineTo(x2, y2);
+          ctx.stroke();
+          ctx.restore();
+
+          const angle = Math.atan2(y2 - y1, x2 - x1);
+          const headLen = Math.max(10, stroke.width * 3);
+          ctx.beginPath();
+          ctx.moveTo(x2, y2);
+          ctx.lineTo(x2 - headLen * Math.cos(angle - Math.PI / 6), y2 - headLen * Math.sin(angle - Math.PI / 6));
+          ctx.moveTo(x2, y2);
+          ctx.lineTo(x2 - headLen * Math.cos(angle + Math.PI / 6), y2 - headLen * Math.sin(angle + Math.PI / 6));
+          ctx.stroke();
+        } else if (stroke.tool === 'tradeoff_note') {
+          const w = Math.max(110, width);
+          const h = Math.max(55, height);
+
+          ctx.fillStyle = isLight ? '#fef9c3' : 'rgba(254, 240, 138, 0.15)';
+          ctx.beginPath();
+          ctx.roundRect(minX, minY, w, h, 6);
+          ctx.fill();
+          ctx.strokeStyle = '#facc15';
+          ctx.stroke();
+
+          ctx.fillStyle = '#ca8a04';
+          ctx.font = 'bold 9px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('⚖️ Trade-off / CAP', minX + w / 2, minY + 12);
         }
 
         if (label && label.trim()) {
@@ -716,7 +1105,6 @@ export const WhiteboardCanvas: React.FC = () => {
           ctx.fillText(label, minX + width / 2, minY + height / 2);
         }
       } else if (stroke.points && stroke.points.length > 0) {
-        // Smooth freehand stroke with midpoint bezier curves
         if (stroke.points.length === 1) {
           ctx.beginPath();
           ctx.arc(stroke.points[0].x, stroke.points[0].y, stroke.width / 2, 0, Math.PI * 2);
@@ -739,7 +1127,7 @@ export const WhiteboardCanvas: React.FC = () => {
     []
   );
 
-  // 5. Master Canvas Redraw
+  // 5. Master Canvas Redraw (with Zoom and Pan support)
   const redrawCanvas = useCallback(
     (strokes: WhiteboardStroke[], previewPoints?: Point[], previewGeometry?: any) => {
       const canvas = canvasRef.current;
@@ -752,7 +1140,15 @@ export const WhiteboardCanvas: React.FC = () => {
       const h = canvas.height / dpr;
       const isLight = isLightColor(bgColor);
 
-      drawBackground(ctx, w, h, backgroundType, bgColor);
+      ctx.save();
+      // Clear entire canvas frame
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Apply Zoom & Pan Transform
+      ctx.translate(panOffset.x, panOffset.y);
+      ctx.scale(zoom, zoom);
+
+      drawBackground(ctx, w / zoom + Math.abs(panOffset.x) * 2, h / zoom + Math.abs(panOffset.y) * 2, backgroundType, bgColor);
       strokes.forEach((s) => renderSingleStroke(ctx, s, isLight));
 
       const now = Date.now();
@@ -801,7 +1197,7 @@ export const WhiteboardCanvas: React.FC = () => {
       if (activeTool === 'torch' && torchPos) {
         ctx.save();
         ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
-        ctx.fillRect(0, 0, w, h);
+        ctx.fillRect(0, 0, w / zoom, h / zoom);
 
         ctx.globalCompositeOperation = 'destination-out';
         ctx.beginPath();
@@ -842,8 +1238,10 @@ export const WhiteboardCanvas: React.FC = () => {
         ctx.fill();
         ctx.restore();
       });
+
+      ctx.restore();
     },
-    [activeTool, activeColor, activeWidth, backgroundType, bgColor, drawBackground, isLightColor, laserTrails, renderSingleStroke, tempStrokes, torchPos, eraserPos]
+    [activeTool, activeColor, activeWidth, backgroundType, bgColor, drawBackground, isLightColor, laserTrails, renderSingleStroke, tempStrokes, torchPos, eraserPos, zoom, panOffset]
   );
 
   // Resize listener
@@ -894,9 +1292,10 @@ export const WhiteboardCanvas: React.FC = () => {
       clientY = (e as React.MouseEvent).clientY;
     }
 
+    // Convert to un-zoomed, un-panned canvas coordinate space
     return {
-      x: clientX - rect.left,
-      y: clientY - rect.top,
+      x: (clientX - rect.left - panOffset.x) / zoom,
+      y: (clientY - rect.top - panOffset.y) / zoom,
     };
   };
 
@@ -905,10 +1304,14 @@ export const WhiteboardCanvas: React.FC = () => {
     'arrow',
     'arrow_bi',
     'rect',
+    'rounded_rect',
     'circle',
+    'triangle',
+    'star',
     'decision_diamond',
     'tree_node',
     'sticky_note',
+    'code_box',
     'db_cylinder',
     'db_nosql',
     'cloud',
@@ -923,6 +1326,14 @@ export const WhiteboardCanvas: React.FC = () => {
   ].includes(activeTool);
 
   const handlePointerDown = (e: React.MouseEvent | React.TouchEvent) => {
+    if (activeTool === 'select') {
+      setIsPanning(true);
+      const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
+      const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
+      setPanStart({ x: clientX - panOffset.x, y: clientY - panOffset.y });
+      return;
+    }
+
     const pt = getCanvasCoords(e);
 
     if (activeTool === 'text') {
@@ -961,6 +1372,13 @@ export const WhiteboardCanvas: React.FC = () => {
   };
 
   const handlePointerMove = (e: React.MouseEvent | React.TouchEvent) => {
+    if (activeTool === 'select' && isPanning) {
+      const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
+      const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
+      setPanOffset({ x: clientX - panStart.x, y: clientY - panStart.y });
+      return;
+    }
+
     const pt = getCanvasCoords(e);
 
     if (activeTool === 'eraser') {
@@ -1005,6 +1423,11 @@ export const WhiteboardCanvas: React.FC = () => {
   };
 
   const handlePointerUp = (e: React.MouseEvent | React.TouchEvent) => {
+    if (activeTool === 'select') {
+      setIsPanning(false);
+      return;
+    }
+
     if (activeTool === 'eraser') {
       setIsDrawing(false);
       setEraserPos(null);
@@ -1065,6 +1488,182 @@ export const WhiteboardCanvas: React.FC = () => {
     setTextInput('');
   };
 
+  // Quick Architecture & Algorithm Presets Stamping
+  const handleStampPreset = (type: string) => {
+    const cx = (containerRef.current?.clientWidth || 400) / 2 / zoom - panOffset.x / zoom;
+    const cy = 180 / zoom - panOffset.y / zoom;
+
+    // ─── DSA & Algorithm Presets ───
+    if (type === 'two_pointers') {
+      whiteboardService.addStroke('array_cells', '#38bdf8', 2.5, [], { x1: cx - 110, y1: cy, x2: cx + 110, y2: cy + 34 });
+      whiteboardService.addStroke('two_pointers', '#ec4899', 2, [], { x1: cx - 90, y1: cy + 38, x2: cx - 90, y2: cy + 58, label: 'L (left=0)' });
+      whiteboardService.addStroke('two_pointers', '#10b981', 2, [], { x1: cx + 70, y1: cy + 38, x2: cx + 70, y2: cy + 58, label: 'R (right=4)' });
+      whiteboardService.addStroke('text', '#f59e0b', 3, [], { x1: cx - 100, y1: cy - 25, x2: cx - 100, y2: cy - 25 }, 'Target = nums[L] + nums[R]');
+    } else if (type === 'bst') {
+      whiteboardService.addStroke('tree_node', '#10b981', 3, [], { x1: cx, y1: cy, x2: cx, y2: cy, label: '50' });
+      whiteboardService.addStroke('tree_node', '#06b6d4', 3, [], { x1: cx - 70, y1: cy + 65, x2: cx - 70, y2: cy + 65, label: '30' });
+      whiteboardService.addStroke('tree_node', '#06b6d4', 3, [], { x1: cx + 70, y1: cy + 65, x2: cx + 70, y2: cy + 65, label: '70' });
+      whiteboardService.addStroke('tree_node', '#818cf8', 2.5, [], { x1: cx - 105, y1: cy + 130, x2: cx - 105, y2: cy + 130, label: '20' });
+      whiteboardService.addStroke('tree_node', '#818cf8', 2.5, [], { x1: cx - 35, y1: cy + 130, x2: cx - 35, y2: cy + 130, label: '40' });
+      whiteboardService.addStroke('tree_node', '#818cf8', 2.5, [], { x1: cx + 35, y1: cy + 130, x2: cx + 35, y2: cy + 130, label: '60' });
+      whiteboardService.addStroke('tree_node', '#818cf8', 2.5, [], { x1: cx + 105, y1: cy + 130, x2: cx + 105, y2: cy + 130, label: '80' });
+      // Edges
+      whiteboardService.addStroke('arrow', '#6366f1', 2, [], { x1: cx - 12, y1: cy + 12, x2: cx - 55, y2: cy + 52 });
+      whiteboardService.addStroke('arrow', '#6366f1', 2, [], { x1: cx + 12, y1: cy + 12, x2: cx + 55, y2: cy + 52 });
+      whiteboardService.addStroke('arrow', '#6366f1', 1.5, [], { x1: cx - 75, y1: cy + 78, x2: cx - 95, y2: cy + 118 });
+      whiteboardService.addStroke('arrow', '#6366f1', 1.5, [], { x1: cx - 65, y1: cy + 78, x2: cx - 45, y2: cy + 118 });
+      whiteboardService.addStroke('arrow', '#6366f1', 1.5, [], { x1: cx + 65, y1: cy + 78, x2: cx + 45, y2: cy + 118 });
+      whiteboardService.addStroke('arrow', '#6366f1', 1.5, [], { x1: cx + 75, y1: cy + 78, x2: cx + 95, y2: cy + 118 });
+      whiteboardService.addStroke('text', '#34d399', 2.5, [], { x1: cx - 100, y1: cy - 25, x2: cx - 100, y2: cy - 25 }, 'BST Property: Left < Root < Right');
+    } else if (type === 'floyd_cycle') {
+      const startX = cx - 140;
+      for (let i = 0; i < 4; i++) {
+        const nx = startX + i * 65;
+        whiteboardService.addStroke('rounded_rect', '#38bdf8', 2.5, [], { x1: nx, y1: cy, x2: nx + 45, y2: cy + 28, label: `Node ${i + 1}` });
+        whiteboardService.addStroke('arrow', '#f59e0b', 2, [], { x1: nx + 45, y1: cy + 14, x2: nx + 65, y2: cy + 14 });
+      }
+      // Loop cycle nodes
+      whiteboardService.addStroke('rounded_rect', '#ec4899', 2.5, [], { x1: startX + 260, y1: cy + 45, x2: startX + 305, y2: cy + 73, label: 'Node 5' });
+      whiteboardService.addStroke('rounded_rect', '#ec4899', 2.5, [], { x1: startX + 195, y1: cy + 60, x2: startX + 240, y2: cy + 88, label: 'Node 6' });
+      whiteboardService.addStroke('arrow', '#ec4899', 2, [], { x1: startX + 240, y1: cy + 28, x2: startX + 260, y2: cy + 45 });
+      whiteboardService.addStroke('arrow', '#ec4899', 2, [], { x1: startX + 260, y1: cy + 65, x2: startX + 240, y2: cy + 75 });
+      whiteboardService.addStroke('arrow', '#ec4899', 2, [], { x1: startX + 195, y1: cy + 70, x2: startX + 195, y2: cy + 28 });
+      // Pointers
+      whiteboardService.addStroke('two_pointers', '#10b981', 2, [], { x1: startX + 85, y1: cy - 25, x2: startX + 85, y2: cy - 5, label: '🐢 Slow' });
+      whiteboardService.addStroke('two_pointers', '#f59e0b', 2, [], { x1: startX + 215, y1: cy - 25, x2: startX + 215, y2: cy - 5, label: '🐇 Fast' });
+      whiteboardService.addStroke('text', '#38bdf8', 2.5, [], { x1: cx - 120, y1: cy - 40, x2: cx - 120, y2: cy - 40 }, "Floyd's Cycle Detection (Fast & Slow Pointers)");
+    } else if (type === 'mono_stack') {
+      whiteboardService.addStroke('array_cells', '#38bdf8', 2.5, [], { x1: cx - 140, y1: cy + 20, x2: cx - 20, y2: cy + 54 });
+      whiteboardService.addStroke('stack_lifo', '#f59e0b', 2.5, [], { x1: cx + 30, y1: cy, x2: cx + 90, y2: cy + 90 });
+      whiteboardService.addStroke('arrow', '#ec4899', 2, [], { x1: cx - 30, y1: cy + 25, x2: cx + 25, y2: cy + 35 });
+      whiteboardService.addStroke('text', '#f59e0b', 2.5, [], { x1: cx - 120, y1: cy - 25, x2: cx - 120, y2: cy - 25 }, 'Monotonic Stack: Push if cur < top, else Pop & evaluate');
+    } else if (type === 'dp_table') {
+      whiteboardService.setBackground('matrix');
+      whiteboardService.addStroke('text', '#38bdf8', 3, [], { x1: cx - 110, y1: cy - 30, x2: cx - 110, y2: cy - 30 }, 'DP[i][j] = DP[i-1][j] + DP[i][j-1]');
+      whiteboardService.addStroke('tradeoff_note', '#facc15', 2, [], { x1: cx - 100, y1: cy + 30, x2: cx + 100, y2: cy + 90, label: 'Base Case: DP[0][j]=1, DP[i][0]=1' });
+    } else if (type === 'trie') {
+      whiteboardService.addStroke('tree_node', '#10b981', 3, [], { x1: cx, y1: cy, x2: cx, y2: cy, label: '*' });
+      whiteboardService.addStroke('tree_node', '#38bdf8', 2.5, [], { x1: cx - 70, y1: cy + 60, x2: cx - 70, y2: cy + 60, label: 'c' });
+      whiteboardService.addStroke('tree_node', '#38bdf8', 2.5, [], { x1: cx - 70, y1: cy + 120, x2: cx - 70, y2: cy + 120, label: 'a' });
+      whiteboardService.addStroke('tree_node', '#ec4899', 2.5, [], { x1: cx - 105, y1: cy + 180, x2: cx - 105, y2: cy + 180, label: 't (end)' });
+      whiteboardService.addStroke('tree_node', '#ec4899', 2.5, [], { x1: cx - 35, y1: cy + 180, x2: cx - 35, y2: cy + 180, label: 'r (end)' });
+      whiteboardService.addStroke('arrow', '#6366f1', 2, [], { x1: cx - 10, y1: cy + 10, x2: cx - 60, y2: cy + 48 });
+      whiteboardService.addStroke('arrow', '#6366f1', 2, [], { x1: cx - 70, y1: cy + 75, x2: cx - 70, y2: cy + 105 });
+      whiteboardService.addStroke('arrow', '#6366f1', 2, [], { x1: cx - 75, y1: cy + 135, x2: cx - 95, y2: cy + 165 });
+      whiteboardService.addStroke('arrow', '#6366f1', 2, [], { x1: cx - 65, y1: cy + 135, x2: cx - 45, y2: cy + 165 });
+      whiteboardService.addStroke('text', '#38bdf8', 2.5, [], { x1: cx - 100, y1: cy - 25, x2: cx - 100, y2: cy - 25 }, 'Prefix Trie (Insert / Search / StartsWith)');
+    } else if (type === 'graph_bfs') {
+      whiteboardService.addStroke('tree_node', '#10b981', 3, [], { x1: cx - 90, y1: cy, x2: cx - 90, y2: cy, label: '1' });
+      whiteboardService.addStroke('tree_node', '#38bdf8', 3, [], { x1: cx - 40, y1: cy + 50, x2: cx - 40, y2: cy + 50, label: '2' });
+      whiteboardService.addStroke('tree_node', '#38bdf8', 3, [], { x1: cx - 40, y1: cy - 50, x2: cx - 40, y2: cy - 50, label: '3' });
+      whiteboardService.addStroke('tree_node', '#818cf8', 3, [], { x1: cx + 20, y1: cy + 50, x2: cx + 20, y2: cy + 50, label: '4' });
+      whiteboardService.addStroke('tree_node', '#818cf8', 3, [], { x1: cx + 20, y1: cy - 50, x2: cx + 20, y2: cy - 50, label: '5' });
+      whiteboardService.addStroke('arrow', '#6366f1', 2, [], { x1: cx - 75, y1: cy + 10, x2: cx - 50, y2: cy + 38 });
+      whiteboardService.addStroke('arrow', '#6366f1', 2, [], { x1: cx - 75, y1: cy - 10, x2: cx - 50, y2: cy - 38 });
+      whiteboardService.addStroke('arrow', '#6366f1', 2, [], { x1: cx - 25, y1: cy + 50, x2: cx + 5, y2: cy + 50 });
+      whiteboardService.addStroke('arrow', '#6366f1', 2, [], { x1: cx - 25, y1: cy - 50, x2: cx + 5, y2: cy - 50 });
+      whiteboardService.addStroke('queue_fifo', '#10b981', 2, [], { x1: cx + 70, y1: cy - 20, x2: cx + 160, y2: cy + 15, label: 'Queue' });
+      whiteboardService.addStroke('text', '#34d399', 2.5, [], { x1: cx - 110, y1: cy - 75, x2: cx - 110, y2: cy - 75 }, 'BFS Traversal (Visited Set + FIFO Queue)');
+    } else if (type === 'min_heap') {
+      whiteboardService.addStroke('tree_node', '#10b981', 3, [], { x1: cx, y1: cy, x2: cx, y2: cy, label: '10' });
+      whiteboardService.addStroke('tree_node', '#38bdf8', 2.5, [], { x1: cx - 50, y1: cy + 50, x2: cx - 50, y2: cy + 50, label: '15' });
+      whiteboardService.addStroke('tree_node', '#38bdf8', 2.5, [], { x1: cx + 50, y1: cy + 50, x2: cx + 50, y2: cy + 50, label: '20' });
+      whiteboardService.addStroke('arrow', '#6366f1', 2, [], { x1: cx - 10, y1: cy + 10, x2: cx - 40, y2: cy + 40 });
+      whiteboardService.addStroke('arrow', '#6366f1', 2, [], { x1: cx + 10, y1: cy + 10, x2: cx + 40, y2: cy + 40 });
+      whiteboardService.addStroke('array_cells', '#f59e0b', 2.5, [], { x1: cx - 80, y1: cy + 90, x2: cx + 80, y2: cy + 120 });
+      whiteboardService.addStroke('text', '#f59e0b', 2.5, [], { x1: cx - 100, y1: cy - 25, x2: cx - 100, y2: cy - 25 }, 'Min-Heap: Parent(i) <= Left(2i+1) & Right(2i+2)');
+    } else if (type === 'intervals') {
+      whiteboardService.addStroke('line', '#38bdf8', 4, [], { x1: cx - 120, y1: cy, x2: cx - 40, y2: cy, label: '[1, 4]' });
+      whiteboardService.addStroke('line', '#ec4899', 4, [], { x1: cx - 70, y1: cy + 25, x2: cx + 20, y2: cy + 25, label: '[2, 6]' });
+      whiteboardService.addStroke('line', '#10b981', 4, [], { x1: cx + 40, y1: cy, x2: cx + 110, y2: cy, label: '[8, 10]' });
+      whiteboardService.addStroke('arrow', '#f59e0b', 2, [], { x1: cx - 30, y1: cy + 45, x2: cx - 30, y2: cy + 70 });
+      whiteboardService.addStroke('line', '#10b981', 6, [], { x1: cx - 120, y1: cy + 85, x2: cx + 20, y2: cy + 85, label: 'Merged: [1, 6]' });
+      whiteboardService.addStroke('text', '#38bdf8', 2.5, [], { x1: cx - 110, y1: cy - 25, x2: cx - 110, y2: cy - 25 }, 'Merge Overlapping Intervals (Sort by Start)');
+    } else if (type === 'recursion_tree') {
+      whiteboardService.addStroke('code_box', '#818cf8', 2, [], { x1: cx - 40, y1: cy, x2: cx + 40, y2: cy + 30, label: 'solve(N)' });
+      whiteboardService.addStroke('code_box', '#38bdf8', 2, [], { x1: cx - 100, y1: cy + 60, x2: cx - 30, y2: cy + 90, label: 'solve(N/2)' });
+      whiteboardService.addStroke('code_box', '#38bdf8', 2, [], { x1: cx + 30, y1: cy + 60, x2: cx + 100, y2: cy + 90, label: 'solve(N/2)' });
+      whiteboardService.addStroke('arrow', '#6366f1', 2, [], { x1: cx - 20, y1: cy + 30, x2: cx - 60, y2: cy + 60 });
+      whiteboardService.addStroke('arrow', '#6366f1', 2, [], { x1: cx + 20, y1: cy + 30, x2: cx + 60, y2: cy + 60 });
+      whiteboardService.addStroke('text', '#34d399', 2.5, [], { x1: cx - 100, y1: cy - 25, x2: cx - 100, y2: cy - 25 }, 'Divide & Conquer: T(N) = 2T(N/2) + O(N)');
+    }
+
+    // ─── System Design Architecture Presets ───
+    else if (type === 'url_shortener') {
+      whiteboardService.addStroke('user_client', '#3b82f6', 2.5, [], { x1: cx - 140, y1: cy, x2: cx - 100, y2: cy + 40, label: 'Client' });
+      whiteboardService.addStroke('arrow', '#6366f1', 2, [], { x1: cx - 100, y1: cy + 20, x2: cx - 70, y2: cy + 20 });
+      whiteboardService.addStroke('load_balancer', '#f59e0b', 2.5, [], { x1: cx - 70, y1: cy - 5, x2: cx - 20, y2: cy + 45, label: 'LB' });
+      whiteboardService.addStroke('arrow', '#6366f1', 2, [], { x1: cx - 20, y1: cy + 20, x2: cx + 10, y2: cy + 20 });
+      whiteboardService.addStroke('server_box', '#818cf8', 2.5, [], { x1: cx + 10, y1: cy - 5, x2: cx + 80, y2: cy + 40, label: 'App Servers' });
+      whiteboardService.addStroke('arrow', '#10b981', 2, [], { x1: cx + 80, y1: cy + 10, x2: cx + 115, y2: cy - 20 });
+      whiteboardService.addStroke('cache_mem', '#f43f5e', 2.5, [], { x1: cx + 115, y1: cy - 45, x2: cx + 180, y2: cy - 5, label: 'Redis Cache' });
+      whiteboardService.addStroke('arrow', '#10b981', 2, [], { x1: cx + 80, y1: cy + 30, x2: cx + 115, y2: cy + 50 });
+      whiteboardService.addStroke('db_cylinder', '#10b981', 2.5, [], { x1: cx + 115, y1: cy + 30, x2: cx + 180, y2: cy + 85, label: 'SQL Shards' });
+      whiteboardService.addStroke('tradeoff_note', '#facc15', 2, [], { x1: cx - 130, y1: cy + 70, x2: cx - 10, y2: cy + 120, label: 'Base62 (7 chars) | 100:1 Read Heavy' });
+    } else if (type === 'rate_limiter') {
+      whiteboardService.addStroke('user_client', '#3b82f6', 2.5, [], { x1: cx - 140, y1: cy, x2: cx - 100, y2: cy + 40, label: 'Client' });
+      whiteboardService.addStroke('arrow', '#6366f1', 2, [], { x1: cx - 100, y1: cy + 20, x2: cx - 60, y2: cy + 20 });
+      whiteboardService.addStroke('cloud', '#38bdf8', 2.5, [], { x1: cx - 60, y1: cy - 10, x2: cx + 10, y2: cy + 50, label: 'API Gateway' });
+      whiteboardService.addStroke('arrow', '#f59e0b', 2, [], { x1: cx - 25, y1: cy + 50, x2: cx - 25, y2: cy + 85 });
+      whiteboardService.addStroke('cache_mem', '#f43f5e', 2.5, [], { x1: cx - 60, y1: cy + 85, x2: cx + 10, y2: cy + 125, label: 'Redis Tokens' });
+      whiteboardService.addStroke('arrow', '#10b981', 2, [], { x1: cx + 10, y1: cy + 20, x2: cx + 55, y2: cy + 20 });
+      whiteboardService.addStroke('server_box', '#818cf8', 2.5, [], { x1: cx + 55, y1: cy - 5, x2: cx + 130, y2: cy + 40, label: 'Microservices' });
+      whiteboardService.addStroke('tradeoff_note', '#facc15', 2, [], { x1: cx - 140, y1: cy + 70, x2: cx - 75, y2: cy + 120, label: 'Token Bucket | 429 Too Many Requests' });
+    } else if (type === 'chat_system') {
+      whiteboardService.addStroke('user_client', '#3b82f6', 2.5, [], { x1: cx - 140, y1: cy - 30, x2: cx - 100, y2: cy + 10, label: 'User A' });
+      whiteboardService.addStroke('user_client', '#3b82f6', 2.5, [], { x1: cx - 140, y1: cy + 40, x2: cx - 100, y2: cy + 80, label: 'User B' });
+      whiteboardService.addStroke('arrow_bi', '#6366f1', 2, [], { x1: cx - 100, y1: cy - 10, x2: cx - 50, y2: cy + 10 });
+      whiteboardService.addStroke('arrow_bi', '#6366f1', 2, [], { x1: cx - 100, y1: cy + 50, x2: cx - 50, y2: cy + 30 });
+      whiteboardService.addStroke('websocket_gw', '#6366f1', 2.5, [], { x1: cx - 50, y1: cy, x2: cx + 20, y2: cy + 50, label: 'WS Gateway' });
+      whiteboardService.addStroke('arrow', '#a855f7', 2, [], { x1: cx + 20, y1: cy + 25, x2: cx + 60, y2: cy + 25 });
+      whiteboardService.addStroke('message_queue', '#a855f7', 2.5, [], { x1: cx + 60, y1: cy + 5, x2: cx + 140, y2: cy + 45, label: 'Redis PubSub' });
+      whiteboardService.addStroke('arrow', '#10b981', 2, [], { x1: cx + 100, y1: cy + 45, x2: cx + 100, y2: cy + 75 });
+      whiteboardService.addStroke('db_nosql', '#34d399', 2.5, [], { x1: cx + 70, y1: cy + 75, x2: cx + 130, y2: cy + 135, label: 'Cassandra' });
+      whiteboardService.addStroke('tradeoff_note', '#facc15', 2, [], { x1: cx - 140, y1: cy + 95, x2: cx - 40, y2: cy + 140, label: 'Persistent WebSocket + Heartbeat' });
+    } else if (type === 'distributed_cache') {
+      whiteboardService.addStroke('server_box', '#818cf8', 2.5, [], { x1: cx - 110, y1: cy, x2: cx - 40, y2: cy + 45, label: 'App Server' });
+      whiteboardService.addStroke('arrow', '#f43f5e', 2, [], { x1: cx - 40, y1: cy + 20, x2: cx + 10, y2: cy + 20 });
+      whiteboardService.addStroke('cache_mem', '#f43f5e', 2.5, [], { x1: cx + 10, y1: cy, x2: cx + 80, y2: cy + 45, label: 'Redis Cluster' });
+      whiteboardService.addStroke('async_arrow', '#10b981', 2, [], { x1: cx + 80, y1: cy + 20, x2: cx + 120, y2: cy + 20 });
+      whiteboardService.addStroke('db_cylinder', '#10b981', 2.5, [], { x1: cx + 120, y1: cy - 10, x2: cx + 180, y2: cy + 50, label: 'Postgres DB' });
+      whiteboardService.addStroke('tradeoff_note', '#facc15', 2, [], { x1: cx - 100, y1: cy + 65, x2: cx + 60, y2: cy + 115, label: 'Cache-Aside (Read-Through) | LRU Eviction' });
+    } else if (type === 'ecommerce_saga') {
+      whiteboardService.addStroke('server_box', '#818cf8', 2.5, [], { x1: cx - 130, y1: cy, x2: cx - 60, y2: cy + 40, label: 'Order API' });
+      whiteboardService.addStroke('arrow', '#a855f7', 2, [], { x1: cx - 60, y1: cy + 20, x2: cx - 15, y2: cy + 20 });
+      whiteboardService.addStroke('message_queue', '#a855f7', 2.5, [], { x1: cx - 15, y1: cy, x2: cx + 65, y2: cy + 40, label: 'Kafka Bus' });
+      whiteboardService.addStroke('arrow', '#10b981', 2, [], { x1: cx + 65, y1: cy + 10, x2: cx + 100, y2: cy - 20 });
+      whiteboardService.addStroke('server_box', '#10b981', 2, [], { x1: cx + 100, y1: cy - 40, x2: cx + 165, y2: cy - 5, label: 'Payment' });
+      whiteboardService.addStroke('arrow', '#10b981', 2, [], { x1: cx + 65, y1: cy + 30, x2: cx + 100, y2: cy + 55 });
+      whiteboardService.addStroke('server_box', '#10b981', 2, [], { x1: cx + 100, y1: cy + 40, x2: cx + 165, y2: cy + 75, label: 'Inventory' });
+      whiteboardService.addStroke('tradeoff_note', '#facc15', 2, [], { x1: cx - 120, y1: cy + 60, x2: cx + 20, y2: cy + 110, label: 'Choreographed Saga | Compensating Tx' });
+    } else if (type === 'web_crawler') {
+      whiteboardService.addStroke('message_queue', '#a855f7', 2.5, [], { x1: cx - 130, y1: cy, x2: cx - 50, y2: cy + 40, label: 'URL Frontier' });
+      whiteboardService.addStroke('arrow', '#6366f1', 2, [], { x1: cx - 50, y1: cy + 20, x2: cx - 10, y2: cy + 20 });
+      whiteboardService.addStroke('server_box', '#818cf8', 2.5, [], { x1: cx - 10, y1: cy, x2: cx + 55, y2: cy + 40, label: 'Fetcher Pool' });
+      whiteboardService.addStroke('arrow', '#f59e0b', 2, [], { x1: cx + 55, y1: cy + 20, x2: cx + 90, y2: cy + 20 });
+      whiteboardService.addStroke('object_storage', '#f97316', 2.5, [], { x1: cx + 90, y1: cy - 10, x2: cx + 150, y2: cy + 50, label: 'S3 Raw Docs' });
+      whiteboardService.addStroke('tradeoff_note', '#facc15', 2, [], { x1: cx - 110, y1: cy + 60, x2: cx + 30, y2: cy + 110, label: 'Bloom Filter Dedup | Politeness Delay' });
+    } else if (type === 'microservices_3tier') {
+      whiteboardService.addStroke('cdn_edge', '#06b6d4', 2.5, [], { x1: cx - 140, y1: cy - 10, x2: cx - 85, y2: cy + 40, label: 'Cloudflare' });
+      whiteboardService.addStroke('arrow', '#6366f1', 2, [], { x1: cx - 85, y1: cy + 15, x2: cx - 50, y2: cy + 15 });
+      whiteboardService.addStroke('load_balancer', '#f59e0b', 2.5, [], { x1: cx - 50, y1: cy - 10, x2: cx + 5, y2: cy + 40, label: 'ALB Gateway' });
+      whiteboardService.addStroke('arrow', '#6366f1', 2, [], { x1: cx + 5, y1: cy + 15, x2: cx + 40, y2: cy + 15 });
+      whiteboardService.addStroke('server_box', '#818cf8', 2.5, [], { x1: cx + 40, y1: cy - 10, x2: cx + 110, y2: cy + 35, label: 'Microservices' });
+      whiteboardService.addStroke('arrow', '#10b981', 2, [], { x1: cx + 110, y1: cy + 15, x2: cx + 135, y2: cy + 15 });
+      whiteboardService.addStroke('db_cylinder', '#10b981', 2.5, [], { x1: cx + 135, y1: cy - 20, x2: cx + 190, y2: cy + 45, label: 'Primary DB' });
+      whiteboardService.addStroke('tradeoff_note', '#facc15', 2, [], { x1: cx - 110, y1: cy + 65, x2: cx + 40, y2: cy + 115, label: 'Stateless Web Tier + Read Replicas + Redis' });
+    } else if (type === 'search_analytics') {
+      whiteboardService.addStroke('server_box', '#818cf8', 2.5, [], { x1: cx - 140, y1: cy, x2: cx - 75, y2: cy + 40, label: 'App Logs' });
+      whiteboardService.addStroke('arrow', '#a855f7', 2, [], { x1: cx - 75, y1: cy + 20, x2: cx - 35, y2: cy + 20 });
+      whiteboardService.addStroke('message_queue', '#a855f7', 2.5, [], { x1: cx - 35, y1: cy, x2: cx + 40, y2: cy + 40, label: 'Kafka Ingest' });
+      whiteboardService.addStroke('arrow', '#14b8a6', 2, [], { x1: cx + 40, y1: cy + 20, x2: cx + 80, y2: cy + 20 });
+      whiteboardService.addStroke('elasticsearch', '#14b8a6', 2.5, [], { x1: cx + 80, y1: cy - 5, x2: cx + 150, y2: cy + 45, label: 'Elasticsearch' });
+      whiteboardService.addStroke('tradeoff_note', '#facc15', 2, [], { x1: cx - 100, y1: cy + 60, x2: cx + 60, y2: cy + 110, label: 'Inverted Index | Kibana Dashboards' });
+    }
+
+    setShowPresetsDrawer(false);
+  };
+
   // Background Pattern Selector
   const handleSelectBackground = (bg: WhiteboardBackgroundType) => {
     setBackgroundType(bg);
@@ -1111,6 +1710,23 @@ export const WhiteboardCanvas: React.FC = () => {
     link.download = `synqto-notebook-${backgroundType}-${Date.now()}.png`;
     link.href = dataUrl;
     link.click();
+  };
+
+  // Copy Canvas Image to Clipboard
+  const handleCopyClipboard = async () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    try {
+      canvas.toBlob(async (blob) => {
+        if (blob && navigator.clipboard?.write) {
+          await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+          setCopiedToast(true);
+          setTimeout(() => setCopiedToast(false), 2500);
+        }
+      });
+    } catch (e) {
+      console.warn('Clipboard copy not supported in this context', e);
+    }
   };
 
   return (
@@ -1246,8 +1862,27 @@ export const WhiteboardCanvas: React.FC = () => {
           </button>
         </div>
 
-        {/* Action Right: Duplicate Page & Popout */}
+        {/* Action Right: Presets, Copy, Popout & Sync Status */}
         <div style={{ display: 'flex', gap: '3px', alignItems: 'center' }}>
+          <span
+            style={{
+              fontSize: '8.5px',
+              fontWeight: 700,
+              padding: '1px 5px',
+              borderRadius: '4px',
+              background: privacyMode === 'collaborative' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(245, 158, 11, 0.15)',
+              border: `1px solid ${privacyMode === 'collaborative' ? 'rgba(16, 185, 129, 0.4)' : 'rgba(245, 158, 11, 0.4)'}`,
+              color: privacyMode === 'collaborative' ? '#34d399' : '#fbbf24',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '3px',
+            }}
+            title={privacyMode === 'collaborative' ? 'Real-time Synced across Draw Tab, Popups, Content Widgets & Mesh' : 'Private Offline Scratchpad'}
+          >
+            <span style={{ width: '4px', height: '4px', borderRadius: '50%', background: privacyMode === 'collaborative' ? '#10b981' : '#f59e0b' }} />
+            {privacyMode === 'collaborative' ? 'Synced ⚡' : 'Private 🔒'}
+          </span>
+
           <button
             type="button"
             className="btn btn-ghost btn-sm"
@@ -1256,14 +1891,14 @@ export const WhiteboardCanvas: React.FC = () => {
             style={{ fontSize: '9px', padding: '2px 5px', color: 'var(--text-muted)' }}
           >
             <Copy size={9} style={{ marginRight: '2px' }} />
-            <span>Copy</span>
+            <span>Duplicate</span>
           </button>
 
           <button
             type="button"
             className="btn btn-ghost btn-sm"
             onClick={handleOpenPopupStandaloneWindow}
-            title="Popout Window"
+            title="Popout to Standalone Window"
             style={{ fontSize: '9px', padding: '2px 5px', color: 'var(--text-muted)' }}
           >
             <ExternalLink size={9} style={{ marginRight: '2px' }} />
@@ -1272,7 +1907,7 @@ export const WhiteboardCanvas: React.FC = () => {
         </div>
       </div>
 
-      {/* ─── 2. Main Drawing Toolbar (Per-Tool Color & Size, Object Eraser) ─── */}
+      {/* ─── 2. Main Drawing Toolbar (Tools, Shapes, Presets, Eraser & Sync) ─── */}
       <div
         style={{
           display: 'flex',
@@ -1286,17 +1921,19 @@ export const WhiteboardCanvas: React.FC = () => {
           flexShrink: 0,
         }}
       >
-        {/* Left Tools: Primary Pens with Independent Color Dots */}
+        {/* Left Tools: Freehand, Presenter & Essential Tools */}
         <div style={{ display: 'flex', gap: '3px', alignItems: 'center', flexWrap: 'wrap' }}>
           {[
-            { id: 'pen', icon: Pencil, label: 'Fine Pen', defaultColor: '#6366f1' },
+            { id: 'select', icon: Hand, label: '🖐️ Pan Hand', defaultColor: '#6366f1' },
+            { id: 'pen', icon: Pencil, label: 'Fine Pen (Smooth)', defaultColor: '#6366f1' },
             { id: 'brush', icon: PenTool, label: 'Brush Pen', defaultColor: '#06b6d4' },
             { id: 'highlighter', icon: Highlighter, label: 'Highlighter', defaultColor: '#f59e0b' },
             { id: 'temp_pen', icon: Clock, label: '⏳ Temp Ink (3s)', defaultColor: '#38bdf8' },
-            { id: 'laser', icon: Flame, label: '🔴 Laser', defaultColor: '#ef4444' },
-            { id: 'torch', icon: Lightbulb, label: '🔦 Torch', defaultColor: '#facc15' },
+            { id: 'laser', icon: Flame, label: '🔴 Laser Presenter', defaultColor: '#ef4444' },
+            { id: 'torch', icon: Lightbulb, label: '🔦 Spotlight Torch', defaultColor: '#facc15' },
             { id: 'eraser', icon: Eraser, label: '🧹 Precision Object Eraser', defaultColor: '#ffffff' },
-            { id: 'text', icon: Type, label: '🔤 Text Tool', defaultColor: '#ffffff' },
+            { id: 'text', icon: Type, label: '🔤 Text Note', defaultColor: '#ffffff' },
+            { id: 'code_box', icon: Code, label: '💻 Code Box', defaultColor: '#38bdf8' },
           ].map((t) => {
             const Icon = t.icon;
             const isActive = activeTool === t.id;
@@ -1308,7 +1945,7 @@ export const WhiteboardCanvas: React.FC = () => {
                 type="button"
                 className={`btn-icon ${isActive ? 'active' : ''}`}
                 onClick={() => setActiveTool(t.id as any)}
-                title={`${t.label} (Remembers its own style)`}
+                title={`${t.label}`}
                 style={{
                   padding: '2px 5px',
                   borderRadius: '4px',
@@ -1322,7 +1959,7 @@ export const WhiteboardCanvas: React.FC = () => {
                 }}
               >
                 <Icon size={11} color={isActive ? toolColor : 'var(--text-muted)'} />
-                {t.id !== 'eraser' && t.id !== 'torch' && (
+                {t.id !== 'eraser' && t.id !== 'torch' && t.id !== 'select' && (
                   <span
                     style={{
                       width: '6px',
@@ -1344,21 +1981,46 @@ export const WhiteboardCanvas: React.FC = () => {
             type="button"
             onClick={() => {
               setShowGeomDrawer(!showGeomDrawer);
+              setShowDsaDrawer(false);
               setShowArchDrawer(false);
+              setShowPresetsDrawer(false);
               setShowThemesDrawer(false);
             }}
             style={{
-              fontSize: '9px',
-              fontWeight: 600,
               padding: '2px 6px',
+              fontSize: '9.5px',
+              fontWeight: 600,
               borderRadius: '4px',
-              background: showGeomDrawer ? 'rgba(99, 102, 241, 0.35)' : 'rgba(255,255,255,0.05)',
-              border: showGeomDrawer ? '1px solid var(--primary)' : '1px solid rgba(255,255,255,0.08)',
+              border: '1px solid var(--border-subtle)',
+              background: showGeomDrawer ? 'rgba(99, 102, 241, 0.2)' : 'transparent',
               color: showGeomDrawer ? '#ffffff' : 'var(--text-muted)',
               cursor: 'pointer',
             }}
           >
-            📐 Shapes {showGeomDrawer ? '▲' : '▼'}
+            🔷 Shapes {showGeomDrawer ? '▲' : '▼'}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setShowDsaDrawer(!showDsaDrawer);
+              setShowGeomDrawer(false);
+              setShowArchDrawer(false);
+              setShowPresetsDrawer(false);
+              setShowThemesDrawer(false);
+            }}
+            style={{
+              padding: '2px 6px',
+              fontSize: '9.5px',
+              fontWeight: 600,
+              borderRadius: '4px',
+              border: '1px solid var(--border-subtle)',
+              background: showDsaDrawer ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
+              color: showDsaDrawer ? '#38bdf8' : 'var(--text-muted)',
+              cursor: 'pointer',
+            }}
+          >
+            🔲 DSA Tools {showDsaDrawer ? '▲' : '▼'}
           </button>
 
           <button
@@ -1366,45 +2028,72 @@ export const WhiteboardCanvas: React.FC = () => {
             onClick={() => {
               setShowArchDrawer(!showArchDrawer);
               setShowGeomDrawer(false);
+              setShowDsaDrawer(false);
+              setShowPresetsDrawer(false);
               setShowThemesDrawer(false);
             }}
             style={{
-              fontSize: '9px',
-              fontWeight: 600,
               padding: '2px 6px',
+              fontSize: '9.5px',
+              fontWeight: 600,
               borderRadius: '4px',
-              background: showArchDrawer ? 'rgba(99, 102, 241, 0.35)' : 'rgba(255,255,255,0.05)',
-              border: showArchDrawer ? '1px solid var(--primary)' : '1px solid rgba(255,255,255,0.08)',
+              border: '1px solid var(--border-subtle)',
+              background: showArchDrawer ? 'rgba(99, 102, 241, 0.2)' : 'transparent',
               color: showArchDrawer ? '#ffffff' : 'var(--text-muted)',
               cursor: 'pointer',
             }}
           >
-            🏛️ Arch {showArchDrawer ? '▲' : '▼'}
+            🏛️ Architecture {showArchDrawer ? '▲' : '▼'}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setShowPresetsDrawer(!showPresetsDrawer);
+              setShowGeomDrawer(false);
+              setShowDsaDrawer(false);
+              setShowArchDrawer(false);
+              setShowThemesDrawer(false);
+            }}
+            style={{
+              padding: '2px 6px',
+              fontSize: '9.5px',
+              fontWeight: 600,
+              borderRadius: '4px',
+              border: '1px solid var(--border-subtle)',
+              background: showPresetsDrawer ? 'rgba(16, 185, 129, 0.2)' : 'transparent',
+              color: showPresetsDrawer ? '#34d399' : 'var(--text-muted)',
+              cursor: 'pointer',
+            }}
+          >
+            ⚡ Presets {showPresetsDrawer ? '▲' : '▼'}
           </button>
 
           <button
             type="button"
             onClick={() => {
               setShowThemesDrawer(!showThemesDrawer);
-              setShowArchDrawer(false);
               setShowGeomDrawer(false);
+              setShowDsaDrawer(false);
+              setShowArchDrawer(false);
+              setShowPresetsDrawer(false);
             }}
             style={{
-              fontSize: '9px',
-              fontWeight: 600,
               padding: '2px 6px',
+              fontSize: '9.5px',
+              fontWeight: 600,
               borderRadius: '4px',
-              background: showThemesDrawer ? 'rgba(99, 102, 241, 0.35)' : 'rgba(255,255,255,0.05)',
-              border: showThemesDrawer ? '1px solid var(--primary)' : '1px solid rgba(255,255,255,0.08)',
+              border: '1px solid var(--border-subtle)',
+              background: showThemesDrawer ? 'rgba(99, 102, 241, 0.2)' : 'transparent',
               color: showThemesDrawer ? '#ffffff' : 'var(--text-muted)',
               cursor: 'pointer',
             }}
           >
-            🎨 Themes {showThemesDrawer ? '▲' : '▼'}
+            🎨 Style & Grid {showThemesDrawer ? '▲' : '▼'}
           </button>
         </div>
 
-        {/* Right Actions: Collab / Personal Mode, Undo/Redo, Clear with Undo, Save */}
+        {/* Right Actions: Collab Mode, Undo/Redo, Clear, Copy, Save */}
         <div style={{ display: 'flex', gap: '3px', alignItems: 'center' }}>
           <div style={{ display: 'flex', gap: '1px', background: 'rgba(0,0,0,0.4)', padding: '2px', borderRadius: '4px', border: '1px solid var(--border-subtle)' }}>
             <button
@@ -1413,7 +2102,7 @@ export const WhiteboardCanvas: React.FC = () => {
                 setPrivacyMode('collaborative');
                 whiteboardService.setPrivacyMode('collaborative');
               }}
-              title="👥 Collaborative Room Board"
+              title="👥 Collaborative Room Board (Synced across all peers and windows)"
               style={{
                 fontSize: '8.5px',
                 fontWeight: 700,
@@ -1480,8 +2169,17 @@ export const WhiteboardCanvas: React.FC = () => {
 
           <button
             type="button"
+            onClick={handleCopyClipboard}
+            title="Copy Canvas Image to Clipboard"
+            style={{ background: 'none', border: 'none', color: copiedToast ? '#10b981' : 'var(--text-muted)', cursor: 'pointer', padding: '2px' }}
+          >
+            {copiedToast ? <Check size={11} /> : <Share2 size={11} />}
+          </button>
+
+          <button
+            type="button"
             onClick={handleExportPNG}
-            title="Save PNG"
+            title="Save PNG Image"
             style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '2px' }}
           >
             <Download size={11} />
@@ -1489,7 +2187,7 @@ export const WhiteboardCanvas: React.FC = () => {
         </div>
       </div>
 
-      {/* ─── 3. Drawer: Geometric & Flowchart Shapes ─── */}
+      {/* ─── 3. Drawer: Geometric Shapes ─── */}
       {showGeomDrawer && (
         <div
           style={{
@@ -1509,10 +2207,14 @@ export const WhiteboardCanvas: React.FC = () => {
             { id: 'arrow', icon: MoveRight, label: 'Arrow (➡️)' },
             { id: 'arrow_bi', icon: MoveRight, label: 'Bi-Arrow (↔️)' },
             { id: 'rect', icon: Square, label: 'Rectangle' },
+            { id: 'rounded_rect', icon: Square, label: 'Rounded Rect' },
             { id: 'circle', icon: Circle, label: 'Circle' },
-            { id: 'decision_diamond', icon: HelpCircle, label: 'Diamond' },
-            { id: 'tree_node', icon: GitBranch, label: 'Tree Node' },
-            { id: 'sticky_note', icon: StickyNote, label: 'Sticky Card' },
+            { id: 'triangle', icon: Triangle, label: 'Triangle (▲)' },
+            { id: 'star', icon: Star, label: 'Star (⭐)' },
+            { id: 'decision_diamond', icon: HelpCircle, label: 'Diamond (💎)' },
+            { id: 'sticky_note', icon: StickyNote, label: 'Sticky Note' },
+            { id: 'text', icon: Type, label: 'Text Label' },
+            { id: 'code_box', icon: Code, label: 'Code Snippet' },
           ].map((t) => {
             const Icon = t.icon;
             const isActive = activeTool === t.id;
@@ -1545,7 +2247,64 @@ export const WhiteboardCanvas: React.FC = () => {
         </div>
       )}
 
-      {/* ─── 4. Drawer: Architecture & Cloud Shapes ─── */}
+      {/* ─── 4. Drawer: DSA Data Structure Visualizers ─── */}
+      {showDsaDrawer && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            padding: '3px 8px',
+            background: 'rgba(8, 28, 44, 0.95)',
+            borderBottom: '1px solid rgba(56, 189, 248, 0.3)',
+            overflowX: 'auto',
+            flexShrink: 0,
+          }}
+        >
+          <span style={{ fontSize: '8.5px', color: '#7dd3fc', fontWeight: 700 }}>🔲 DSA:</span>
+          {[
+            { id: 'array_cells', icon: LayoutGrid, label: 'Array Cells [0..N]', color: '#38bdf8' },
+            { id: 'two_pointers', icon: MoveRight, label: 'Two Pointers (L/R)', color: '#ec4899' },
+            { id: 'stack_lifo', icon: Layers, label: 'Stack (LIFO)', color: '#f59e0b' },
+            { id: 'queue_fifo', icon: MoveRight, label: 'Queue (FIFO)', color: '#10b981' },
+            { id: 'tree_node', icon: GitBranch, label: 'Tree/BST Node', color: '#34d399' },
+            { id: 'hashmap_table', icon: Database, label: 'HashMap Bucket', color: '#a855f7' },
+            { id: 'decision_diamond', icon: HelpCircle, label: 'Condition/Branch', color: '#f59e0b' },
+            { id: 'code_box', icon: Code, label: 'Pseudocode Box', color: '#38bdf8' },
+          ].map((t) => {
+            const Icon = t.icon;
+            const isActive = activeTool === t.id;
+            const toolColor = toolStyles[t.id]?.color || t.color;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                className={`btn-icon ${isActive ? 'active' : ''}`}
+                onClick={() => setActiveTool(t.id as any)}
+                title={t.label}
+                style={{
+                  padding: '2px 5px',
+                  borderRadius: '4px',
+                  border: isActive ? `1px solid ${toolColor}` : '1px solid transparent',
+                  background: isActive ? `${toolColor}33` : 'transparent',
+                  color: isActive ? '#ffffff' : '#7dd3fc',
+                  cursor: 'pointer',
+                  fontSize: '9px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '3px',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                <Icon size={10} color={toolColor} />
+                <span>{t.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ─── 5. Drawer: Architecture & System Design Shapes ─── */}
       {showArchDrawer && (
         <div
           style={{
@@ -1553,7 +2312,7 @@ export const WhiteboardCanvas: React.FC = () => {
             alignItems: 'center',
             gap: '4px',
             padding: '3px 8px',
-            background: 'rgba(0, 0, 0, 0.85)',
+            background: 'rgba(0, 0, 0, 0.9)',
             borderBottom: '1px solid var(--border-subtle)',
             overflowX: 'auto',
             flexShrink: 0,
@@ -1567,11 +2326,18 @@ export const WhiteboardCanvas: React.FC = () => {
             { id: 'message_queue', icon: Layers, label: 'Kafka Queue', color: '#a855f7' },
             { id: 'load_balancer', icon: Scale, label: 'Load Balancer', color: '#f59e0b' },
             { id: 'server_box', icon: Server, label: 'App Server', color: '#818cf8' },
-            { id: 'cloud', icon: Cloud, label: 'Cloud Gateway', color: '#38bdf8' },
+            { id: 'cloud', icon: Cloud, label: 'API Gateway', color: '#38bdf8' },
+            { id: 'cdn_edge', icon: Globe, label: 'CDN Edge', color: '#06b6d4' },
+            { id: 'object_storage', icon: Database, label: 'S3 Storage', color: '#f97316' },
+            { id: 'auth_jwt', icon: Shield, label: 'Auth Service', color: '#eab308' },
+            { id: 'websocket_gw', icon: Zap, label: 'WebSocket GW', color: '#6366f1' },
+            { id: 'elasticsearch', icon: Database, label: 'Elasticsearch', color: '#14b8a6' },
             { id: 'dns_router', icon: Globe, label: 'DNS Router', color: '#38bdf8' },
             { id: 'firewall', icon: Shield, label: 'Firewall', color: '#f43f5e' },
             { id: 'user_client', icon: User, label: 'Client', color: '#3b82f6' },
-            { id: 'mobile_client', icon: Smartphone, label: 'Mobile Device', color: '#06b6d4' },
+            { id: 'mobile_client', icon: Smartphone, label: 'Mobile App', color: '#06b6d4' },
+            { id: 'async_arrow', icon: MoveRight, label: 'Async Event ⇢', color: '#a855f7' },
+            { id: 'tradeoff_note', icon: StickyNote, label: '⚖️ CAP Trade-off', color: '#facc15' },
           ].map((t) => {
             const Icon = t.icon;
             const isActive = activeTool === t.id;
@@ -1594,6 +2360,7 @@ export const WhiteboardCanvas: React.FC = () => {
                   display: 'flex',
                   alignItems: 'center',
                   gap: '3px',
+                  whiteSpace: 'nowrap',
                 }}
               >
                 <Icon size={10} color={toolColor} />
@@ -1604,7 +2371,130 @@ export const WhiteboardCanvas: React.FC = () => {
         </div>
       )}
 
-      {/* ─── 5. Drawer: Independent Tool Color/Size Customizer & Themes ─── */}
+      {/* ─── 6. Drawer: Categorized DSA & System Design Presets (18 High-Yield Blueprints) ─── */}
+      {showPresetsDrawer && (
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '4px',
+            padding: '4px 8px',
+            background: 'rgba(6, 44, 36, 0.96)',
+            borderBottom: '1px solid rgba(16, 185, 129, 0.35)',
+            flexShrink: 0,
+          }}
+        >
+          {/* Preset Category Switcher */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', gap: '3px' }}>
+              <button
+                type="button"
+                onClick={() => setPresetTab('dsa')}
+                style={{
+                  fontSize: '9px',
+                  fontWeight: 700,
+                  padding: '2px 8px',
+                  borderRadius: '4px',
+                  border: 'none',
+                  background: presetTab === 'dsa' ? '#10b981' : 'rgba(255,255,255,0.08)',
+                  color: presetTab === 'dsa' ? '#ffffff' : '#a7f3d0',
+                  cursor: 'pointer',
+                }}
+              >
+                🔲 DSA &amp; Algorithms (10)
+              </button>
+              <button
+                type="button"
+                onClick={() => setPresetTab('arch')}
+                style={{
+                  fontSize: '9px',
+                  fontWeight: 700,
+                  padding: '2px 8px',
+                  borderRadius: '4px',
+                  border: 'none',
+                  background: presetTab === 'arch' ? '#10b981' : 'rgba(255,255,255,0.08)',
+                  color: presetTab === 'arch' ? '#ffffff' : '#a7f3d0',
+                  cursor: 'pointer',
+                }}
+              >
+                🏛️ System Design (8)
+              </button>
+            </div>
+            <span style={{ fontSize: '8.5px', color: '#6ee7b7' }}>1-Click Blueprint Stamp</span>
+          </div>
+
+          {/* Preset Buttons Grid */}
+          <div style={{ display: 'flex', gap: '4px', overflowX: 'auto', paddingBottom: '2px' }}>
+            {presetTab === 'dsa' &&
+              [
+                { id: 'two_pointers', label: '👆 Two Pointers', desc: 'Array [2,7,11,15] with Left/Right pointers & Target check' },
+                { id: 'bst', label: '🌲 BST Balanced Tree', desc: '3-level binary search tree with property validation' },
+                { id: 'floyd_cycle', label: '🐢 Floyd Cycle (Fast/Slow)', desc: 'Linked list cycle with Slow (1x) & Fast (2x) pointers' },
+                { id: 'mono_stack', label: '📥 Monotonic Stack', desc: 'Stack LIFO evaluation for Next Greater Element' },
+                { id: 'dp_table', label: '📊 2D DP Recurrence', desc: '4x4 DP matrix with base cases and recurrence formulas' },
+                { id: 'trie', label: '🌳 Prefix Trie', desc: 'Multi-branch prefix tree for insert/search/startsWith' },
+                { id: 'graph_bfs', label: '🔵 Graph BFS + Queue', desc: '5-node graph with Visited hashset and FIFO queue' },
+                { id: 'min_heap', label: '🏔️ Min-Heap / Priority Queue', desc: 'Heap tree with array indices (2i+1, 2i+2)' },
+                { id: 'intervals', label: '📏 Overlapping Intervals', desc: 'Interval timeline sorting & merge strategy' },
+                { id: 'recursion_tree', label: '🌿 Recursion Tree (D&C)', desc: 'Merge sort / Divide & Conquer recursion tree' },
+              ].map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => handleStampPreset(p.id)}
+                  title={p.desc}
+                  style={{
+                    fontSize: '9px',
+                    fontWeight: 600,
+                    padding: '3px 7px',
+                    borderRadius: '4px',
+                    border: '1px solid rgba(16, 185, 129, 0.4)',
+                    background: 'rgba(16, 185, 129, 0.25)',
+                    color: '#ffffff',
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {p.label}
+                </button>
+              ))}
+
+            {presetTab === 'arch' &&
+              [
+                { id: 'url_shortener', label: '🔗 URL Shortener (TinyURL)', desc: 'Client -> LB -> App Servers -> Base62 KGS + Redis + SQL DB' },
+                { id: 'rate_limiter', label: '🚦 API Rate Limiter', desc: 'API Gateway -> Token Bucket Redis -> Backend (429 Too Many Requests)' },
+                { id: 'chat_system', label: '💬 Real-Time Chat (WhatsApp)', desc: 'WebSocket Gateway -> Redis PubSub -> Cassandra Messages' },
+                { id: 'distributed_cache', label: '⚡ Distributed Cache', desc: 'App Server -> Redis Cluster -> Invalidation Worker -> PostgreSQL' },
+                { id: 'ecommerce_saga', label: '🛒 E-Commerce Saga', desc: 'Order API -> Kafka Stream -> Payment + Inventory Workers' },
+                { id: 'web_crawler', label: '🕷️ Distributed Web Crawler', desc: 'URL Frontier Queue -> Fetcher Workers -> DNS -> S3 Storage' },
+                { id: 'microservices_3tier', label: '🏛️ 3-Tier Microservices', desc: 'CDN -> ALB -> Auth + User Services -> Master DB + Read Replicas' },
+                { id: 'search_analytics', label: '🔍 Log & Search Cluster', desc: 'App Logs -> Kafka Ingest -> Elasticsearch -> Kibana' },
+              ].map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => handleStampPreset(p.id)}
+                  title={p.desc}
+                  style={{
+                    fontSize: '9px',
+                    fontWeight: 600,
+                    padding: '3px 7px',
+                    borderRadius: '4px',
+                    border: '1px solid rgba(16, 185, 129, 0.4)',
+                    background: 'rgba(16, 185, 129, 0.25)',
+                    color: '#ffffff',
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {p.label}
+                </button>
+              ))}
+          </div>
+        </div>
+      )}
+
+      {/* ─── 7. Drawer: Independent Tool Styling & Background Themes ─── */}
       {showThemesDrawer && (
         <div
           style={{
@@ -1671,8 +2561,10 @@ export const WhiteboardCanvas: React.FC = () => {
             <span style={{ fontSize: '8.5px', color: 'var(--text-muted)' }}>Texture:</span>
             {[
               { id: 'grid', label: 'Grid' },
+              { id: 'isometric', label: '3D Iso' },
               { id: 'ruled', label: 'Ruled' },
               { id: 'plot', label: 'Plot' },
+              { id: 'matrix', label: 'DP Table' },
               { id: 'dotted', label: 'Dots' },
               { id: 'blank', label: 'Blank' },
             ].map((bg) => (
@@ -1718,7 +2610,7 @@ export const WhiteboardCanvas: React.FC = () => {
         </div>
       )}
 
-      {/* ─── Undo Toast Notification ─── */}
+      {/* ─── Undo / Copy Toast Notification ─── */}
       {undoToast && (
         <div
           style={{
@@ -1761,7 +2653,7 @@ export const WhiteboardCanvas: React.FC = () => {
         </div>
       )}
 
-      {/* ─── 6. Master Canvas Drawing Workspace ─── */}
+      {/* ─── 7. Master Canvas Drawing Workspace ─── */}
       <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
         <canvas
           ref={canvasRef}
@@ -1775,17 +2667,67 @@ export const WhiteboardCanvas: React.FC = () => {
             width: '100%',
             height: '100%',
             display: 'block',
-            cursor: activeTool === 'text' ? 'text' : activeTool === 'eraser' ? 'cell' : 'crosshair',
+            cursor: activeTool === 'select' ? (isPanning ? 'grabbing' : 'grab') : activeTool === 'text' ? 'text' : activeTool === 'eraser' ? 'cell' : 'crosshair',
           }}
         />
+
+        {/* Floating Zoom & Pan Mini-Controls Bar */}
+        <div
+          style={{
+            position: 'absolute',
+            bottom: '12px',
+            right: '12px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '3px',
+            background: 'rgba(15, 23, 42, 0.85)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: '6px',
+            padding: '2px 4px',
+            backdropFilter: 'blur(8px)',
+            boxShadow: '0 4px 15px rgba(0,0,0,0.5)',
+            zIndex: 40,
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setZoom((z) => Math.min(3.0, z + 0.15))}
+            title="Zoom In"
+            style={{ background: 'none', border: 'none', color: '#c7d2fe', cursor: 'pointer', padding: '2px' }}
+          >
+            <ZoomIn size={12} />
+          </button>
+          <span style={{ fontSize: '9px', fontWeight: 700, color: '#ffffff', minWidth: '28px', textAlign: 'center' }}>
+            {Math.round(zoom * 100)}%
+          </span>
+          <button
+            type="button"
+            onClick={() => setZoom((z) => Math.max(0.4, z - 0.15))}
+            title="Zoom Out"
+            style={{ background: 'none', border: 'none', color: '#c7d2fe', cursor: 'pointer', padding: '2px' }}
+          >
+            <ZoomOut size={12} />
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setZoom(1.0);
+              setPanOffset({ x: 0, y: 0 });
+            }}
+            title="Reset Zoom & Pan (100%)"
+            style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '2px' }}
+          >
+            <Maximize2 size={10} />
+          </button>
+        </div>
 
         {/* Inline On-Canvas Text Input Tool Popover */}
         {textModalPos && (
           <div
             style={{
               position: 'absolute',
-              left: `${Math.min(textModalPos.x, (containerRef.current?.clientWidth || 300) - 220)}px`,
-              top: `${Math.max(10, textModalPos.y - 38)}px`,
+              left: `${Math.min(textModalPos.x * zoom + panOffset.x, (containerRef.current?.clientWidth || 300) - 220)}px`,
+              top: `${Math.max(10, textModalPos.y * zoom + panOffset.y - 38)}px`,
               zIndex: 50,
               background: 'rgba(15, 23, 42, 0.95)',
               border: '1px solid var(--border-subtle)',

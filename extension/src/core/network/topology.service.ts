@@ -4,6 +4,9 @@ import { NetworkPacket, PeerIdentity, createPacket } from './packet';
 import { SignalingService, RosterData, PromoteData, DemoteData } from './signaling.service';
 import { WebRTCService } from './webrtc.service';
 import { TopologyEpoch } from '../types/identifiers';
+import { TierCoordinator } from '../topology/tier-coordinator';
+import { LeaderMesh } from '../topology/leader-mesh';
+import { LeaderDigest, TopologyTier, TopologyLifecycleState } from '../topology/topology.types';
 
 export interface TopologyState {
   isLeader: boolean;
@@ -14,12 +17,16 @@ export interface TopologyState {
   backboneLeaders: string[];
   allPeers: string[];
   epoch: TopologyEpoch;
+  tier: TopologyTier;
+  lifecycleState: TopologyLifecycleState;
 }
 
 export class TopologyService {
   private static instance: TopologyService | null = null;
   private signaling: SignalingService;
   private webrtc: WebRTCService;
+  private tierCoordinator: TierCoordinator;
+  private leaderMesh: LeaderMesh | null = null;
 
   private myIdentity: PeerIdentity | null = null;
   private currentRoomId = '';
@@ -49,6 +56,18 @@ export class TopologyService {
   private constructor() {
     this.signaling = SignalingService.getInstance();
     this.webrtc = WebRTCService.getInstance();
+    this.tierCoordinator = new TierCoordinator();
+
+    this.tierCoordinator.onTierChanged((newTier, oldTier) => {
+      this.topologyEpoch++;
+      console.info(`[TopologyService] Tier transition: ${oldTier} -> ${newTier} (epoch ${this.topologyEpoch})`);
+      this.reconcileConnections();
+      this.emitState();
+    });
+
+    this.tierCoordinator.onStateChanged(() => {
+      this.emitState();
+    });
 
     this.setupSignalingListeners();
     this.setupWebRTCListeners();
@@ -68,6 +87,26 @@ export class TopologyService {
     this.packetIdOrder = [];
     this.retryAttempts.clear();
     this.clearAllRetryTimers();
+    this.tierCoordinator.reset();
+
+    this.leaderMesh = new LeaderMesh(
+      identity.peerId,
+      roomId,
+      () => ({ [identity.peerId]: this.topologyEpoch }),
+      () => Date.now()
+    );
+
+    this.leaderMesh.bindDigestBroadcast((digest: LeaderDigest) => {
+      this.broadcastPacket(
+        createPacket('topology:digest' as any, this.myIdentity!, this.currentRoomId, digest)
+      );
+    });
+
+    this.leaderMesh.onLeaderFailed((failedPeerId) => {
+      this.topologyEpoch++;
+      console.warn(`[TopologyService] Leader ${failedPeerId} failed. Advancing epoch to ${this.topologyEpoch}`);
+      this.reconcileConnections();
+    });
 
     this.webrtc.setMyPeerId(identity.peerId);
 
@@ -81,6 +120,11 @@ export class TopologyService {
   public leave() {
     this.stopReconciliationLoop();
     this.clearAllRetryTimers();
+    if (this.leaderMesh) {
+      this.leaderMesh.stop();
+      this.leaderMesh = null;
+    }
+    this.tierCoordinator.reset();
     this.signaling.disconnect();
     this.webrtc.closeAll();
     this.isLeader = false;
@@ -119,16 +163,35 @@ export class TopologyService {
   private reconcileConnections() {
     if (!this.myIdentity || !this.currentRoomId) return;
 
+    const currentTier = this.tierCoordinator.getCurrentTier();
+
+    if (currentTier === 'TIER1_FULL_MESH') {
+      // Tier 1 (Full Mesh): Connect directly to all known room peers
+      this.allPeers.forEach((peerId) => {
+        if (peerId === this.myIdentity?.peerId) return;
+        const isConnected = this.webrtc.isConnected(peerId);
+        const isConnecting = this.webrtc.isConnecting(peerId);
+
+        if (!isConnected && !isConnecting) {
+          if ((this.myIdentity?.peerId || '') < peerId) {
+            this.webrtc.initiateConnection(peerId);
+          }
+        }
+      });
+      return;
+    }
+
     if (this.isLeader) {
-      // Leaders must maintain connections to all backbone leaders
+      // Tier 2 Leaders must maintain connections to all other backbone leaders
       this.backboneLeaders.forEach((leaderId) => {
         if (leaderId === this.myIdentity?.peerId) return;
         const isConnected = this.webrtc.isConnected(leaderId);
         const isConnecting = this.webrtc.isConnecting(leaderId);
 
         if (!isConnected && !isConnecting) {
-          // If disconnected and not already negotiating, trigger connection or ICE restart
-          this.webrtc.initiateConnection(leaderId);
+          if ((this.myIdentity?.peerId || '') < leaderId) {
+            this.webrtc.initiateConnection(leaderId);
+          }
         }
       });
     } else {
@@ -178,6 +241,8 @@ export class TopologyService {
     // 1. Roster updates from server (Dual-Leader aware)
     this.signaling.on('roster', (roster: RosterData) => {
       this.allPeers = new Set(roster.peers.map((p) => p.peerId));
+      this.tierCoordinator.updatePeerCount(roster.peers.length);
+
       const me = roster.peers.find((p) => p.peerId === this.myIdentity?.peerId);
       this.isLeader = me ? me.isLeader : false;
 
@@ -189,6 +254,11 @@ export class TopologyService {
           roster.leaders.filter((lid) => lid !== this.myIdentity?.peerId)
         );
 
+        if (this.leaderMesh) {
+          this.leaderMesh.setLeaders(roster.leaders, this.topologyEpoch);
+          this.leaderMesh.start(this.topologyEpoch);
+        }
+
         // Ensure we connect to other leaders for backbone mesh
         this.backboneLeaders.forEach((leaderId) => {
           if (!this.webrtc.isConnected(leaderId) && !this.webrtc.isConnecting(leaderId)) {
@@ -199,6 +269,9 @@ export class TopologyService {
           }
         });
       } else {
+        if (this.leaderMesh) {
+          this.leaderMesh.stop();
+        }
         this.assignedLeader = roster.yourLeader || null;
         this.assignedStandbyLeader = roster.yourStandbyLeader || null;
         this.clusterPeers.clear();
@@ -364,10 +437,15 @@ export class TopologyService {
     }
     this.markPacketSeen(packet.id);
 
-    // 2. Deliver packet to local listeners
+    // 2. Intercept leader digests
+    if (packet.type === ('topology:digest' as any) && this.leaderMesh) {
+      this.leaderMesh.recordDigest(packet.payload as LeaderDigest);
+    }
+
+    // 3. Deliver packet to local listeners
     this.deliverLocally(packet);
 
-    // 3. Decrement TTL and check if relaying is allowed
+    // 4. Decrement TTL and check if relaying is allowed
     const remainingTtl = packet.ttl - 1;
     if (remainingTtl <= 0) {
       return;
@@ -378,8 +456,8 @@ export class TopologyService {
       ttl: remainingTtl,
     };
 
-    // 4. Relay logic (Only Leaders relay packets!)
-    if (this.isLeader) {
+    // 5. Relay logic (Only Leaders relay packets in Tier 2!)
+    if (this.tierCoordinator.getCurrentTier() === 'TIER2_MULTI_LEADER' && this.isLeader) {
       const isFromBackbone = this.backboneLeaders.has(fromPeerId);
 
       if (isFromBackbone) {
@@ -414,6 +492,18 @@ export class TopologyService {
   public broadcastPacket(packet: NetworkPacket) {
     this.markPacketSeen(packet.id);
     this.deliverLocally(packet);
+
+    const currentTier = this.tierCoordinator.getCurrentTier();
+
+    if (currentTier === 'TIER1_FULL_MESH') {
+      // Tier 1 (Full Mesh): Direct broadcast to all connected peers
+      this.allPeers.forEach((peerId) => {
+        if (peerId !== this.myIdentity?.peerId && this.webrtc.isConnected(peerId)) {
+          this.webrtc.sendPacket(peerId, packet);
+        }
+      });
+      return;
+    }
 
     if (this.isLeader) {
       // Leader sends to all cluster members + all backbone leaders
@@ -513,6 +603,8 @@ export class TopologyService {
       backboneLeaders: Array.from(this.backboneLeaders),
       allPeers: Array.from(this.allPeers),
       epoch: this.topologyEpoch,
+      tier: this.tierCoordinator.getCurrentTier(),
+      lifecycleState: this.tierCoordinator.getLifecycleState(),
     };
   }
 

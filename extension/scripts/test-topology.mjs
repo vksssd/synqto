@@ -204,6 +204,114 @@ test('TierCoordinator starts evaluating on 5 peers and cancels on drop', () => {
   assert.strictEqual(coordinator.getCurrentTier(), 'TIER1_FULL_MESH');
 });
 
+// ─── 6. TopologyView & Monotonic Ordering ───
+console.log('\n📦 Section 6: TopologyView & Monotonic Ordering Engine');
+
+import { TopologyViewEngine } from '../src/core/topology/topology-view.ts';
+
+test('TopologyView monotonic comparison recognizes higher epoch', () => {
+  const v1 = {
+    roomId: 'room-1',
+    tier: 'TIER1_FULL_MESH',
+    epoch: 1,
+    generation: 1,
+    membershipVersion: 1,
+    leaders: [],
+    relayAvailable: false,
+    timestamp: Date.now(),
+  };
+
+  const v2 = { ...v1, epoch: 2 };
+  assert.strictEqual(TopologyViewEngine.compare(v1, v2), 'NEWER');
+  assert.strictEqual(TopologyViewEngine.compare(v2, v1), 'OLDER');
+  assert.strictEqual(TopologyViewEngine.compare(v1, v1), 'EQUAL');
+});
+
+test('TopologyView recognizes higher leader generation within same epoch', () => {
+  const v1 = {
+    roomId: 'room-1',
+    tier: 'TIER2_MULTI_LEADER',
+    epoch: 2,
+    generation: 1,
+    membershipVersion: 5,
+    leaders: ['L1', 'L2', 'L3'],
+    relayAvailable: false,
+    timestamp: Date.now(),
+  };
+
+  const v2 = { ...v1, generation: 2 };
+  assert.strictEqual(TopologyViewEngine.compare(v1, v2), 'NEWER');
+  assert.strictEqual(TopologyViewEngine.compare(v2, v1), 'OLDER');
+});
+
+// ─── 7. Leader Quorum & Split-Brain Prevention ───
+console.log('\n📦 Section 7: Quorum Calculation & Partition Fencing');
+
+test('LeaderMesh calculates floor(N/2) + 1 quorum', () => {
+  const mesh3 = new LeaderMesh('L1', 'room-1', () => ({}), () => 0);
+  mesh3.setLeaders(['L1', 'L2', 'L3'], 1);
+  assert.strictEqual(mesh3.getQuorum(), 2); // 3 leaders -> quorum 2
+  assert.strictEqual(mesh3.hasQuorum(), true);
+
+  const mesh5 = new LeaderMesh('L1', 'room-1', () => ({}), () => 0);
+  mesh5.setLeaders(['L1', 'L2', 'L3', 'L4', 'L5'], 1);
+  assert.strictEqual(mesh5.getQuorum(), 3); // 5 leaders -> quorum 3
+});
+
+// ─── 8. Headless Cluster Simulator Tests ───
+console.log('\n📦 Section 8: Headless TopologySimulator & Invariant Verifications');
+
+import { TopologySimulator } from '../src/core/topology/topology-simulator.ts';
+
+test('TopologySimulator broadcasts packets across cluster without duplicates', () => {
+  const sim = new TopologySimulator('cluster-room-1');
+
+  // Add 10 virtual peer nodes
+  for (let i = 1; i <= 10; i++) {
+    sim.addPeer(`peer-${i}`);
+  }
+
+  // Broadcast 3 chat messages from different peers
+  sim.broadcast('peer-1', 'chat:msg', { text: 'Hello from peer-1' });
+  sim.broadcast('peer-2', 'chat:msg', { text: 'Hello from peer-2' });
+  sim.broadcast('peer-3', 'chat:msg', { text: 'Hello from peer-3' });
+
+  // Invariant verification: zero duplicate delivery
+  sim.assertNoDuplicatePackets();
+
+  // Every other peer received exactly 3 packets
+  const peer4 = sim.getPeer('peer-4');
+  assert.strictEqual(peer4.deliveredHistory.length, 3);
+});
+
+test('TopologySimulator handles network partition and healing', () => {
+  const sim = new TopologySimulator('partition-room-1');
+
+  for (let i = 1; i <= 6; i++) {
+    sim.addPeer(`node-${i}`);
+  }
+
+  // Partition cluster: Group A (1, 2, 3) and Group B (4, 5, 6)
+  sim.partition(['node-1', 'node-2', 'node-3'], ['node-4', 'node-5', 'node-6']);
+
+  // Node 1 broadcasts inside partition
+  sim.broadcast('node-1', 'code:delta', { change: 'A' });
+
+  // Node 2 (same partition) receives packet
+  assert.strictEqual(sim.getPeer('node-2').deliveredHistory.length, 1);
+
+  // Node 4 (isolated partition) does NOT receive packet
+  assert.strictEqual(sim.getPeer('node-4').deliveredHistory.length, 0);
+
+  // Heal partition
+  sim.healPartition();
+  sim.broadcast('node-4', 'code:delta', { change: 'B' });
+
+  // Node 1 now receives message from Node 4
+  assert.strictEqual(sim.getPeer('node-1').deliveredHistory.length, 1);
+  sim.assertNoDuplicatePackets();
+});
+
 console.log(`\n========================================`);
 console.log(`🏁 Test Summary: ${passed}/${total} tests passed (${Math.round((passed / total) * 100)}%)`);
 console.log(`========================================\n`);

@@ -66,6 +66,26 @@ export class LeaderMesh {
   }
 
   /**
+   * Calculates the required majority quorum for leader consensus
+   */
+  public getQuorum(): number {
+    return Math.floor(this.leaders.size / 2) + 1;
+  }
+
+  /**
+   * Checks if current node is part of the majority leader partition
+   */
+  public hasQuorum(): boolean {
+    let healthyCount = 0;
+    this.leaders.forEach((node) => {
+      if (node.health !== 'FAILED') {
+        healthyCount++;
+      }
+    });
+    return healthyCount >= this.getQuorum();
+  }
+
+  /**
    * Starts periodic control digest heartbeats and leader health checks
    */
   public start(epoch: TopologyEpoch): void {
@@ -125,8 +145,14 @@ export class LeaderMesh {
         if (node.health !== 'FAILED') {
           node.health = 'FAILED';
           console.warn(`[LeaderMesh] Leader ${pid} declared FAILED (no heartbeat for ${elapsed}ms)`);
-          if (this.onLeaderFailureCallback) {
-            this.onLeaderFailureCallback(pid);
+
+          // Only proceed with leader election if quorum majority is present
+          if (this.hasQuorum()) {
+            if (this.onLeaderFailureCallback) {
+              this.onLeaderFailureCallback(pid);
+            }
+          } else {
+            console.warn('[LeaderMesh] Insufficient leader quorum to elect replacement. Fencing state.');
           }
         }
       } else if (elapsed > TOPOLOGY_TIMERS.LEADER_SUSPECT_TIMEOUT_MS) {

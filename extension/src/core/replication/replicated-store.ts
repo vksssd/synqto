@@ -128,6 +128,9 @@ export class ReplicatedStore<TState = unknown, TOp = unknown> {
       op: event.op,
       timestamp: event.timestamp,
       topologyEpoch: event.topologyEpoch,
+      // Piggyback our contiguous frontier so peers can compute a real stable cut
+      // without waiting for an explicit anti-entropy round.
+      senderVector: this.journal.getContiguousVectorClock(),
     };
 
     const packet = createPacket(
@@ -181,6 +184,9 @@ export class ReplicatedStore<TState = unknown, TOp = unknown> {
       op: event.op,
       timestamp: event.timestamp,
       topologyEpoch: event.topologyEpoch,
+      // Piggyback our contiguous frontier so peers can compute a real stable cut
+      // without waiting for an explicit anti-entropy round.
+      senderVector: this.journal.getContiguousVectorClock(),
     };
 
     const packet = createPacket(
@@ -209,6 +215,12 @@ export class ReplicatedStore<TState = unknown, TOp = unknown> {
         if (payload.storeId !== this.storeId) return false;
 
         this.activeParticipants.add(packet.from.peerId);
+        // Learn the broadcaster's frontier from ordinary traffic. This is what makes
+        // the stable-cut consensus in BoundedMemoryManager actually reachable during
+        // normal operation rather than only after an explicit sync exchange.
+        if (payload.senderVector) {
+          this.syncEngine.recordPeerVector(packet.from.peerId, payload.senderVector);
+        }
         const event: ReplicatedEvent<TOp> = {
           storeId: payload.storeId,
           opId: payload.opId,
@@ -258,6 +270,9 @@ export class ReplicatedStore<TState = unknown, TOp = unknown> {
         if (payload.storeId !== this.storeId) return false;
 
         this.activeParticipants.add(packet.from.peerId);
+        if (payload.vectorClock) {
+          this.syncEngine.recordPeerVector(packet.from.peerId, payload.vectorClock);
+        }
         if (payload.requiresSnapshot) {
           // NOTE: must compare using the CONTIGUOUS vector clock, not the raw merged one.
           // The raw vector clock advances to the max seq seen per author on ANY accepted

@@ -156,23 +156,40 @@ export class CausalSyncEngine<TState = unknown, TOp = unknown> {
 
     const snapshot = this.journal.getLatestSnapshot();
 
-    // A requester needs the snapshot (not just live deltas) whenever ANY portion of what it's
-    // missing is already baked into OUR snapshot rather than present as a live journal event.
-    // getDeltasSince() only scans the LIVE journal — if we already compacted the requester's gap
-    // away into our snapshot, a plain delta response would silently omit it with no error and no
-    // way for the requester to detect the omission, causing permanent non-convergence for that
-    // data. This check is a direct, provably-correct test of that condition (unlike the
-    // `isBehindStableCut` heuristic below, which tracks a separately-maintained cut vector that
-    // can drift out of sync with what's actually still live vs. snapshot-only).
-    const requiresSnapshotForBakedData = snapshot
-      ? Object.entries(snapshot.vector).some(
-          ([author, seq]) => (request.vectorClock[author] || 0) < seq
-        )
+    // Decide whether the requester can be caught up with live deltas, or genuinely needs a
+    // full snapshot.
+    //
+    // The test is NOT "does our snapshot cover something they lack" — the snapshot and the
+    // live journal deliberately overlap, so that test fires for almost every request once any
+    // compaction has happened, forcing peers down the snapshot path when a cheap delta would
+    // have worked. (And because a snapshot concurrent with the requester's own baseline is
+    // correctly refused by SnapshotTransferManager, that misclassification left the requester
+    // with no path at all: the delta it needed was never sent and the snapshot it was offered
+    // was rejected — permanent non-convergence despite both sides holding the data.)
+    //
+    // The correct test is whether a REPLAY GAP exists: the requester needs author A's ops
+    // starting at seq+1, so a snapshot is required only if our live journal no longer holds
+    // that sequence, i.e. it was compacted away and survives solely inside the snapshot.
+    const earliestLive = this.journal.getEarliestLiveSeqPerAuthor();
+    const requiresSnapshotForCompactedGap = snapshot
+      ? Object.entries(snapshot.vector).some(([author, snapSeq]) => {
+          const theirSeq = request.vectorClock[author] || 0;
+          if (theirSeq >= snapSeq) return false; // nothing of ours to give for this author
+          const floor = earliestLive[author];
+          // No live events for this author at all: only the snapshot can serve them.
+          if (floor === undefined) return true;
+          // A hole between what they have and the oldest thing we can still replay.
+          return theirSeq + 1 < floor;
+        })
       : false;
 
-    // Also respect the stable-cut heuristic (e.g. hard memory-bound tail cuts not yet reflected
-    // in a snapshot vector comparison) as an additional trigger.
-    const requiresSnapshot = requiresSnapshotForBakedData || isBehindStableCut(request.vectorClock);
+    // The `isBehindStableCut` heuristic is deliberately NOT consulted here. It tracks a
+    // separately-maintained cut vector that can drift out of sync with what is actually
+    // still replayable, and consulting it caused the same misclassification described
+    // above. The replay-gap test is exact, so it fully subsumes the heuristic.
+    // The parameter is retained for interface compatibility with existing callers.
+    void isBehindStableCut;
+    const requiresSnapshot = requiresSnapshotForCompactedGap;
 
     if (requiresSnapshot) {
       return {

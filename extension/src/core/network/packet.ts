@@ -126,6 +126,19 @@ export interface StateOpPayload<TOp = unknown> {
   op: TOp;
   timestamp: number;
   topologyEpoch?: number;
+  /**
+   * The BROADCASTER's contiguous vector clock at send time (not the author's).
+   *
+   * This piggybacks anti-entropy state onto ordinary traffic so every peer keeps a
+   * live view of what its neighbours have durably received. Without it, peer vectors
+   * were only ever learned from explicit sync requests, so during normal mutation
+   * traffic BoundedMemoryManager never had a vector for every active participant and
+   * always fell back to a purely local tail cut — compacting away operations that
+   * other peers had not yet seen, which is unrecoverable once truncated.
+   *
+   * Contiguous (not raw) because only a gap-free prefix is safe to treat as "received".
+   */
+  senderVector?: Record<string, number>;
 }
 
 export interface StateSyncRequestPayload {

@@ -278,19 +278,25 @@ export class NetworkSimulator {
       await this.virtualNetwork.step(15);
     }
 
-    // Trigger anti-entropy sync across all peers to reconcile any stragglers
-    peerList.forEach((p) => {
-      const store = p.getStore<DocState, DocOp>(storeId);
-      if (store) {
-        peerList.forEach((other) => {
-          if (other.peerId !== p.peerId) {
-            store.syncWith(other.peerId);
-          }
-        });
-      }
-    });
-
-    await this.flushAll(peerList);
+    // Trigger anti-entropy sync across all peers to reconcile any stragglers.
+    // Multiple rounds are required and this is not a weakness of the harness: a sync
+    // request produces a response that may itself reveal a further gap, so convergence
+    // is iterative. Every other replication scenario (G/H/I/J/K) already does this;
+    // Scenario E was the lone single-round outlier and under-tested the substrate.
+    for (let round = 0; round < 4; round++) {
+      peerList.forEach((p) => {
+        const store = p.getStore<DocState, DocOp>(storeId);
+        if (store) {
+          peerList.forEach((other) => {
+            if (other.peerId !== p.peerId) {
+              store.syncWith(other.peerId);
+            }
+          });
+        }
+      });
+      await this.virtualNetwork.step(50);
+      await this.flushAll(peerList);
+    }
 
     console.log(
       'Peer item counts:',

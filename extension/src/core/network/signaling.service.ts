@@ -32,12 +32,28 @@ export interface ServerMessage {
   to?: string;
   roomId: string;
   payload?: any;
+  /** Signaling wire-protocol version. Present on join; echoed by the server on roster. */
+  v?: number;
 }
 
 interface QueuedSignalingMessage {
   raw: string;
   timestamp: number;
 }
+
+/** Reconnect backoff bounds (true full jitter — see scheduleReconnect). */
+const RECONNECT_BASE_DELAY_MS = 500;
+const RECONNECT_MAX_DELAY_MS = 10_000;
+const RECONNECT_MIN_DELAY_MS = 250;
+
+/**
+ * Signaling wire-protocol version advertised on join.
+ *
+ * The extension auto-updates independently of the server, so at any moment a deployed
+ * server faces a spread of installed client versions. Without a version on the wire there
+ * is no negotiation path and a payload-shape change silently breaks older clients.
+ */
+export const SIGNALING_PROTOCOL_VERSION = 1;
 
 export class SignalingService {
   private static instance: SignalingService | null = null;
@@ -210,9 +226,11 @@ export class SignalingService {
           type: 'room:join',
           from: this.peerId,
           roomId: this.currentRoomId,
+          v: SIGNALING_PROTOCOL_VERSION,
           payload: {
             peerId: this.peerId,
             nickname: this.nickname,
+            protocolVersion: SIGNALING_PROTOCOL_VERSION,
           },
         });
 
@@ -420,12 +438,19 @@ export class SignalingService {
     if (!this.currentRoomId) return;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
 
-    // Full Jitter Exponential Backoff: spreads reconnection spikes during Render redeploys
-    // to prevent thundering herd CPU saturation.
+    // TRUE full-jitter exponential backoff (AWS "Full Jitter"): sleep = random(0, window),
+    // where window grows exponentially and is capped.
+    //
+    // The previous formula was `exponential + random(0..1500)`, which is NOT full jitter:
+    // once the exponential term saturated at its 10s cap, every client reconnected inside
+    // the same 1.5s window. That is precisely the thundering herd the comment claimed to
+    // prevent, and it is at its worst exactly when it matters — a mass reconnect after a
+    // redeploy, when every tab of every user has been retrying long enough to saturate.
+    // Drawing uniformly across the whole window spreads the same load over 10s instead.
     const cappedAttempt = Math.min(this.reconnectAttempts, 6);
-    const exponential = Math.min(10000, 500 * Math.pow(1.8, cappedAttempt));
-    const jitter = Math.floor(Math.random() * 1500);
-    const delay = Math.floor(exponential + jitter);
+    const window = Math.min(RECONNECT_MAX_DELAY_MS, RECONNECT_BASE_DELAY_MS * Math.pow(2, cappedAttempt));
+    // Keep a small floor so the first retry is not effectively instantaneous.
+    const delay = Math.floor(RECONNECT_MIN_DELAY_MS + Math.random() * Math.max(0, window - RECONNECT_MIN_DELAY_MS));
 
     this.reconnectAttempts++;
 

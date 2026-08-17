@@ -221,6 +221,26 @@ export class OperationJournal<TState = unknown, TOp = unknown> {
   }
 
   /**
+   * Returns the lowest sequence number still held in the LIVE journal for each author.
+   *
+   * This is the replay floor: anything at or below (earliest - 1) for an author has been
+   * compacted out of the journal and can only be served via a snapshot. Callers use this
+   * to decide whether a lagging peer can be caught up with deltas or genuinely needs a
+   * full snapshot transfer — a distinction that cannot be made from the snapshot vector
+   * alone, because the snapshot and the live journal deliberately overlap.
+   */
+  public getEarliestLiveSeqPerAuthor(): VectorClock {
+    const earliest: VectorClock = {};
+    for (const evt of this.events) {
+      const current = earliest[evt.author];
+      if (current === undefined || evt.seq < current) {
+        earliest[evt.author] = evt.seq;
+      }
+    }
+    return earliest;
+  }
+
+  /**
    * Extracts missing delta events that a remote peer has not yet seen based on their vector clock.
    */
   public getDeltasSince(remoteVector: VectorClock): ReplicatedEvent<TOp>[] {

@@ -387,110 +387,387 @@ export class ChatService {
   /**
    * Send standard text message or rich item
    */
-  public sendMessage(
-    text: string,
-    fromIdentity: PeerIdentity,
-    optionsOrReplyTo?:
-      | {
-          replyTo?: { id: string; preview: string };
-          messageId?: string;
-          messageType?: ChatMessageType;
-          imageUrl?: string;
-          imageCaption?: string;
-          codeSnippet?: CodeSnippetData;
-          poll?: PollData;
-          quiz?: QuizData;
-          fileAttachment?: FileAttachmentData;
-          mentions?: string[];
-        }
-      | { id: string; preview: string },
-    existingMessageId?: string
-  ): ChatMessageItem {
-    const rawText = text.trim();
-    const isOptionsObject =
-      optionsOrReplyTo &&
-      ('messageType' in optionsOrReplyTo ||
-        'imageUrl' in optionsOrReplyTo ||
-        'codeSnippet' in optionsOrReplyTo ||
-        'poll' in optionsOrReplyTo ||
-        'quiz' in optionsOrReplyTo ||
-        'fileAttachment' in optionsOrReplyTo ||
-        'mentions' in optionsOrReplyTo);
+  // public sendMessage(
+  //   text: string,
+  //   fromIdentity: PeerIdentity,
+  //   optionsOrReplyTo?:
+  //     | {
+  //         replyTo?: { id: string; preview: string };
+  //         messageId?: string;
+  //         messageType?: ChatMessageType;
+  //         imageUrl?: string;
+  //         imageCaption?: string;
+  //         codeSnippet?: CodeSnippetData;
+  //         poll?: PollData;
+  //         quiz?: QuizData;
+  //         fileAttachment?: FileAttachmentData;
+  //         mentions?: string[];
+  //       }
+  //     | { id: string; preview: string },
+  //   existingMessageId?: string
+  // ): ChatMessageItem {
+  //   const rawText = text.trim();
+  //   const isOptionsObject =
+  //     optionsOrReplyTo &&
+  //     ('messageType' in optionsOrReplyTo ||
+  //       'imageUrl' in optionsOrReplyTo ||
+  //       'codeSnippet' in optionsOrReplyTo ||
+  //       'poll' in optionsOrReplyTo ||
+  //       'quiz' in optionsOrReplyTo ||
+  //       'fileAttachment' in optionsOrReplyTo ||
+  //       'mentions' in optionsOrReplyTo);
 
-    const options = isOptionsObject ? (optionsOrReplyTo as any) : undefined;
-    const replyTo = !isOptionsObject && optionsOrReplyTo ? (optionsOrReplyTo as { id: string; preview: string }) : options?.replyTo;
-    const customMessageId = options?.messageId || existingMessageId;
-    const messageId = customMessageId || this.generateMessageId(rawText.length);
+  //   const options = isOptionsObject ? (optionsOrReplyTo as any) : undefined;
+  //   const replyTo = !isOptionsObject && optionsOrReplyTo ? (optionsOrReplyTo as { id: string; preview: string }) : options?.replyTo;
+  //   const customMessageId = options?.messageId || existingMessageId;
+  //   const messageId = customMessageId || this.generateMessageId(rawText.length);
 
-    // Extract @mentions if not explicitly provided
-    let mentions = options?.mentions || [];
-    if (mentions.length === 0 && rawText.includes('@')) {
-      if (rawText.includes('@everyone') || rawText.includes('@all')) {
-        mentions.push('everyone');
+  //   // Extract @mentions if not explicitly provided
+  //   let mentions = options?.mentions || [];
+  //   if (mentions.length === 0 && rawText.includes('@')) {
+  //     if (rawText.includes('@everyone') || rawText.includes('@all')) {
+  //       mentions.push('everyone');
+  //     }
+  //   }
+
+  //   this.mySeq++;
+  //   this.lamportClock++;
+
+  //   const msg: ChatMessageItem = {
+  //     id: messageId,
+  //     from: fromIdentity,
+  //     text: rawText,
+  //     timestamp: Date.now(),
+  //     seq: this.mySeq,
+  //     lamportTime: this.lamportClock,
+  //     messageType: options?.messageType || 'text',
+  //     replyTo: replyTo?.id,
+  //     replyPreview: replyTo?.preview,
+  //     imageUrl: options?.imageUrl,
+  //     imageCaption: options?.imageCaption,
+  //     codeSnippet: options?.codeSnippet,
+  //     poll: options?.poll,
+  //     quiz: options?.quiz,
+  //     fileAttachment: options?.fileAttachment,
+  //     mentions,
+  //     reactions: {},
+  //     status: 'sent',
+  //     isSelf: true,
+  //     receivedAcks: new Set(),
+  //   };
+
+  //   this.messages.push(msg);
+  //   this.saveMessagesDebounced();
+  //   this.emitMessages();
+
+  //   // Determine channel priority (Bulk for screenshots/files/large images, Control for fast chat)
+  //   const isBulk = msg.messageType === 'image' || msg.messageType === 'screenshot' || msg.messageType === 'file';
+  //   const channelPriority = isBulk ? 'bulk' : 'control';
+
+  //   // Broadcast to room with sequence tracking & clocking
+  //   const payload: ChatMessagePayload = {
+  //     messageId,
+  //     text: msg.text,
+  //     messageType: msg.messageType,
+  //     replyTo: msg.replyTo,
+  //     replyPreview: msg.replyPreview,
+  //     imageUrl: msg.imageUrl,
+  //     imageCaption: msg.imageCaption,
+  //     codeSnippet: msg.codeSnippet,
+  //     poll: msg.poll,
+  //     quiz: msg.quiz,
+  //     fileAttachment: msg.fileAttachment,
+  //     mentions: msg.mentions,
+  //     reactions: msg.reactions,
+  //   };
+  //   this.network.broadcast('chat:message', payload, {
+  //     channelPriority,
+  //     seq: this.mySeq,
+  //     lamportTime: this.lamportClock,
+  //   });
+
+  //   // Queue for reliable ACK retry with exponential backoff
+  //   this.queueUnacked(msg, payload);
+
+  //   return msg;
+  // }
+
+  /**
+ * Send standard text message or rich item.
+ *
+ * The preferred API is:
+ *
+ * sendMessage(text, identity, {
+ *   replyTo: { id, preview },
+ *   messageType: ...,
+ *   ...
+ * })
+ *
+ * The legacy direct reply form
+ *
+ * sendMessage(text, identity, { id, preview })
+ *
+ * is also supported for compatibility.
+ */
+public sendMessage(
+  text: string,
+  fromIdentity: PeerIdentity,
+  optionsOrReplyTo?:
+    | {
+        replyTo?: {
+          id: string;
+          preview: string;
+        };
+        messageId?: string;
+        messageType?: ChatMessageType;
+        imageUrl?: string;
+        imageCaption?: string;
+        codeSnippet?: CodeSnippetData;
+        poll?: PollData;
+        quiz?: QuizData;
+        fileAttachment?: FileAttachmentData;
+        mentions?: string[];
       }
+    | {
+        id: string;
+        preview: string;
+      },
+  existingMessageId?: string
+): ChatMessageItem {
+  const rawText = text.trim();
+
+  /*
+   * Normalize the overloaded input.
+   *
+   * IMPORTANT:
+   * The old implementation only detected an options object
+   * when messageType/image/etc. existed. That caused:
+   *
+   * { replyTo: { id, preview } }
+   *
+   * to be incorrectly interpreted as the reply itself.
+   */
+  const isOptionsObject =
+    !!optionsOrReplyTo &&
+    (
+      'replyTo' in optionsOrReplyTo ||
+      'messageId' in optionsOrReplyTo ||
+      'messageType' in optionsOrReplyTo ||
+      'imageUrl' in optionsOrReplyTo ||
+      'imageCaption' in optionsOrReplyTo ||
+      'codeSnippet' in optionsOrReplyTo ||
+      'poll' in optionsOrReplyTo ||
+      'quiz' in optionsOrReplyTo ||
+      'fileAttachment' in optionsOrReplyTo ||
+      'mentions' in optionsOrReplyTo
+    );
+
+  const options = isOptionsObject
+    ? (optionsOrReplyTo as {
+        replyTo?: {
+          id: string;
+          preview: string;
+        };
+        messageId?: string;
+        messageType?: ChatMessageType;
+        imageUrl?: string;
+        imageCaption?: string;
+        codeSnippet?: CodeSnippetData;
+        poll?: PollData;
+        quiz?: QuizData;
+        fileAttachment?: FileAttachmentData;
+        mentions?: string[];
+      })
+    : undefined;
+
+  /*
+   * Support both APIs:
+   *
+   * Preferred:
+   *   { replyTo: { id, preview } }
+   *
+   * Legacy:
+   *   { id, preview }
+   */
+  const replyTo = options
+    ? options.replyTo
+    : optionsOrReplyTo as
+        | {
+            id: string;
+            preview: string;
+          }
+        | undefined;
+
+  const customMessageId =
+    options?.messageId || existingMessageId;
+
+  const messageId =
+    customMessageId ||
+    this.generateMessageId(
+      rawText.length
+    );
+
+  // ─────────────────────────────────────────────
+  // Mentions
+  // ─────────────────────────────────────────────
+
+  const mentions = [
+    ...(options?.mentions || []),
+  ];
+
+  if (
+    mentions.length === 0 &&
+    rawText.includes('@')
+  ) {
+    if (
+      rawText.includes('@everyone') ||
+      rawText.includes('@all')
+    ) {
+      mentions.push('everyone');
     }
+  }
 
-    this.mySeq++;
-    this.lamportClock++;
+  // ─────────────────────────────────────────────
+  // Logical clocks
+  // ─────────────────────────────────────────────
 
-    const msg: ChatMessageItem = {
-      id: messageId,
-      from: fromIdentity,
-      text: rawText,
-      timestamp: Date.now(),
-      seq: this.mySeq,
-      lamportTime: this.lamportClock,
-      messageType: options?.messageType || 'text',
-      replyTo: replyTo?.id,
-      replyPreview: replyTo?.preview,
-      imageUrl: options?.imageUrl,
-      imageCaption: options?.imageCaption,
-      codeSnippet: options?.codeSnippet,
-      poll: options?.poll,
-      quiz: options?.quiz,
-      fileAttachment: options?.fileAttachment,
-      mentions,
-      reactions: {},
-      status: 'sent',
-      isSelf: true,
-      receivedAcks: new Set(),
-    };
+  this.mySeq++;
+  this.lamportClock++;
 
-    this.messages.push(msg);
-    this.saveMessagesDebounced();
-    this.emitMessages();
+  // ─────────────────────────────────────────────
+  // Local message
+  // ─────────────────────────────────────────────
 
-    // Determine channel priority (Bulk for screenshots/files/large images, Control for fast chat)
-    const isBulk = msg.messageType === 'image' || msg.messageType === 'screenshot' || msg.messageType === 'file';
-    const channelPriority = isBulk ? 'bulk' : 'control';
+  const msg: ChatMessageItem = {
+    id: messageId,
+    from: fromIdentity,
+    text: rawText,
+    timestamp: Date.now(),
 
-    // Broadcast to room with sequence tracking & clocking
-    const payload: ChatMessagePayload = {
-      messageId,
-      text: msg.text,
-      messageType: msg.messageType,
-      replyTo: msg.replyTo,
-      replyPreview: msg.replyPreview,
-      imageUrl: msg.imageUrl,
-      imageCaption: msg.imageCaption,
-      codeSnippet: msg.codeSnippet,
-      poll: msg.poll,
-      quiz: msg.quiz,
-      fileAttachment: msg.fileAttachment,
-      mentions: msg.mentions,
-      reactions: msg.reactions,
-    };
-    this.network.broadcast('chat:message', payload, {
+    seq: this.mySeq,
+    lamportTime: this.lamportClock,
+
+    messageType:
+      options?.messageType || 'text',
+
+    /*
+     * THIS IS THE IMPORTANT FIX.
+     */
+    replyTo: replyTo?.id,
+    replyPreview: replyTo?.preview,
+
+    imageUrl: options?.imageUrl,
+    imageCaption: options?.imageCaption,
+
+    codeSnippet:
+      options?.codeSnippet,
+
+    poll:
+      options?.poll,
+
+    quiz:
+      options?.quiz,
+
+    fileAttachment:
+      options?.fileAttachment,
+
+    mentions,
+
+    reactions: {},
+
+    status: 'sent',
+    isSelf: true,
+
+    receivedAcks: new Set(),
+  };
+
+  // Add locally immediately so the sender sees it instantly.
+  this.messages.push(msg);
+
+  this.saveMessagesDebounced();
+  this.emitMessages();
+
+  // ─────────────────────────────────────────────
+  // Channel priority
+  // ─────────────────────────────────────────────
+
+  const isBulk =
+    msg.messageType === 'image' ||
+    msg.messageType === 'screenshot' ||
+    msg.messageType === 'file';
+
+  const channelPriority = isBulk
+    ? 'bulk'
+    : 'control';
+
+  // ─────────────────────────────────────────────
+  // Network payload
+  // ─────────────────────────────────────────────
+
+  const payload: ChatMessagePayload = {
+    messageId,
+
+    text: msg.text,
+
+    messageType:
+      msg.messageType,
+
+    /*
+     * Reply data now travels correctly.
+     */
+    replyTo:
+      msg.replyTo,
+
+    replyPreview:
+      msg.replyPreview,
+
+    imageUrl:
+      msg.imageUrl,
+
+    imageCaption:
+      msg.imageCaption,
+
+    codeSnippet:
+      msg.codeSnippet,
+
+    poll:
+      msg.poll,
+
+    quiz:
+      msg.quiz,
+
+    fileAttachment:
+      msg.fileAttachment,
+
+    mentions:
+      msg.mentions,
+
+    reactions:
+      msg.reactions,
+  };
+
+  this.network.broadcast(
+    'chat:message',
+    payload,
+    {
       channelPriority,
       seq: this.mySeq,
-      lamportTime: this.lamportClock,
-    });
+      lamportTime:
+        this.lamportClock,
+    }
+  );
 
-    // Queue for reliable ACK retry with exponential backoff
-    this.queueUnacked(msg, payload);
+  // ─────────────────────────────────────────────
+  // Reliable retry
+  // ─────────────────────────────────────────────
 
-    return msg;
-  }
+  this.queueUnacked(
+    msg,
+    payload
+  );
+
+  return msg;
+}
 
   /**
    * Broadcasts an anti-entropy sync digest to discover missing messages after failover
@@ -731,6 +1008,16 @@ export class ChatService {
       quizId,
       selectedOptionIndex,
     });
+  }
+
+  /**
+   * Delete a message locally from the room history
+   */
+  public deleteMessage(messageId: string) {
+    this.messages = this.messages.filter((m) => m.id !== messageId);
+    this.removeUnacked(messageId);
+    this.emitMessages();
+    this.saveMessagesDebounced();
   }
 
   /**

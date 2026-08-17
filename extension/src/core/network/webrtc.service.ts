@@ -41,9 +41,13 @@ export class WebRTCService {
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
-    // 2. Cloudflare STUN
+    { urls: 'stun:stun3.l.google.com:19302' },
+    { urls: 'stun:stun4.l.google.com:19302' },
+    // 2. Cloudflare Public STUN
     { urls: 'stun:stun.cloudflare.com:3478' },
-    // 3. OpenRelay Free Public TURN Relay (UDP + TCP + TLS Port 443 Strict Firewall Bypass)
+    // 3. Matrix Public STUN
+    { urls: 'stun:turn.matrix.org:3478' },
+    // 4. OpenRelay Free Public TURN Relay (UDP + TCP + TLS Port 443 Strict Firewall Bypass)
     {
       urls: [
         'turn:openrelay.metered.ca:80',
@@ -68,6 +72,17 @@ export class WebRTCService {
         }
       });
     }
+  }
+
+  public setIceServers(servers: RTCIceServer[]) {
+    this.iceServers = servers;
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      chrome.storage.local.set({ synqto_custom_ice_servers: servers });
+    }
+  }
+
+  public getIceServers(): RTCIceServer[] {
+    return this.iceServers;
   }
 
   public static getInstance(): WebRTCService {
@@ -208,6 +223,31 @@ export class WebRTCService {
       this.signalNeededListeners.forEach((fn) => fn(remotePeerId, 'offer', offer));
     } catch (err) {
       console.warn(`[WebRTCService] Renegotiation offer error for ${remotePeerId}:`, err);
+    } finally {
+      if (wrapper) wrapper.makingOffer = false;
+    }
+  }
+
+  /**
+   * Triggers an ICE restart to recover from stale network/NAT states
+   */
+  public async restartIce(remotePeerId: string): Promise<void> {
+    const wrapper = this.connections.get(remotePeerId);
+    if (!wrapper || !wrapper.pc || (wrapper.pc.signalingState as string) === 'closed') {
+      return this.initiateConnection(remotePeerId);
+    }
+
+    try {
+      wrapper.makingOffer = true;
+      const offer = await wrapper.pc.createOffer({ iceRestart: true });
+      if ((wrapper.pc.signalingState as string) === 'closed') return;
+      await wrapper.pc.setLocalDescription(offer);
+
+      this.signalNeededListeners.forEach((fn) => fn(remotePeerId, 'offer', offer));
+    } catch (err) {
+      console.warn(`[WebRTCService] ICE restart offer error for ${remotePeerId}, re-initiating:`, err);
+      this.closeConnection(remotePeerId);
+      await this.initiateConnection(remotePeerId);
     } finally {
       if (wrapper) wrapper.makingOffer = false;
     }
@@ -441,6 +481,17 @@ export class WebRTCService {
       }
     };
 
+    pc.oniceconnectionstatechange = () => {
+      const iceState = pc.iceConnectionState;
+      if (iceState === 'failed' || iceState === 'disconnected') {
+        const wrapper = this.connections.get(remotePeerId);
+        if (wrapper && wrapper.status === 'connected') {
+          wrapper.status = 'disconnected';
+          this.connectionStateListeners.forEach((fn) => fn(remotePeerId, 'disconnected'));
+        }
+      }
+    };
+
     pc.ondatachannel = (event) => {
       const dc = event.channel;
       const label = dc.label || '';
@@ -562,6 +613,20 @@ export class WebRTCService {
       (wrapper.controlChannel && wrapper.controlChannel.readyState === 'open') ||
       (wrapper.bulkChannel && wrapper.bulkChannel.readyState === 'open')
     );
+  }
+
+  public isConnecting(remotePeerId: string): boolean {
+    const wrapper = this.connections.get(remotePeerId);
+    if (!wrapper) return false;
+    return wrapper.status === 'connecting' || wrapper.makingOffer;
+  }
+
+  public getConnectionStatus(
+    remotePeerId: string
+  ): 'connecting' | 'connected' | 'disconnected' | 'failed' | 'idle' {
+    const wrapper = this.connections.get(remotePeerId);
+    if (!wrapper) return 'idle';
+    return wrapper.status;
   }
 
   public getConnectedPeers(): string[] {

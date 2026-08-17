@@ -30,6 +30,14 @@ import {
   Triangle,
   Star,
   LayoutGrid,
+  MousePointer,
+  Hand,
+  Copy,
+  Plus,
+  X,
+  Clipboard,
+  PenTool,
+  Highlighter,
 } from 'lucide-react';
 import { DiaryWhiteboardData } from './diary.types';
 
@@ -70,55 +78,107 @@ const BG_PRESETS = [
 ];
 
 const DEFAULT_TOOL_STYLES: Record<string, { color: string; width: number }> = {
-  pen: { color: '#6366f1', width: 3 },
-  brush: { color: '#06b6d4', width: 6 },
-  highlighter: { color: '#f59e0b', width: 16 },
-  temp_pen: { color: '#38bdf8', width: 3 },
-  eraser: { color: '#ffffff', width: 18 },
-  text: { color: '#ffffff', width: 3 },
-  code_box: { color: '#38bdf8', width: 2 },
-  line: { color: '#6366f1', width: 3 },
-  arrow: { color: '#6366f1', width: 3 },
-  arrow_bi: { color: '#6366f1', width: 3 },
-  rect: { color: '#6366f1', width: 3 },
-  rounded_rect: { color: '#6366f1', width: 3 },
-  circle: { color: '#6366f1', width: 3 },
-  triangle: { color: '#10b981', width: 3 },
-  star: { color: '#f59e0b', width: 3 },
-  decision_diamond: { color: '#f59e0b', width: 3 },
-  tree_node: { color: '#10b981', width: 3 },
-  sticky_note: { color: '#fef3c7', width: 2 },
-  db_cylinder: { color: '#10b981', width: 2.5 },
-  db_nosql: { color: '#34d399', width: 2.5 },
-  cloud: { color: '#38bdf8', width: 2.5 },
-  load_balancer: { color: '#f59e0b', width: 2.5 },
-  message_queue: { color: '#a855f7', width: 2.5 },
-  server_box: { color: '#818cf8', width: 2.5 },
-  cache_mem: { color: '#f43f5e', width: 2.5 },
-  dns_router: { color: '#38bdf8', width: 2.5 },
-  firewall: { color: '#f43f5e', width: 2.5 },
-  user_client: { color: '#3b82f6', width: 2.5 },
-  mobile_client: { color: '#06b6d4', width: 2.5 },
-  array_cells: { color: '#38bdf8', width: 2.5 },
-  stack_lifo: { color: '#f59e0b', width: 2.5 },
-  queue_fifo: { color: '#10b981', width: 2.5 },
-  hashmap_table: { color: '#a855f7', width: 2.5 },
-  two_pointers: { color: '#ec4899', width: 2 },
-  cdn_edge: { color: '#06b6d4', width: 2.5 },
-  object_storage: { color: '#f97316', width: 2.5 },
-  auth_jwt: { color: '#eab308', width: 2.5 },
-  websocket_gw: { color: '#6366f1', width: 2.5 },
-  elasticsearch: { color: '#14b8a6', width: 2.5 },
-  async_arrow: { color: '#a855f7', width: 2 },
-  tradeoff_note: { color: '#facc15', width: 2 },
+  select: { color: '#6366f1', width: 3 },
+  hand: { color: '#6366f1', width: 3 },
+  pen: { color: '#6366f1', width: 4 },
+  brush: { color: '#06b6d4', width: 8 },
+  highlighter: { color: '#f59e0b', width: 22 },
+  temp_pen: { color: '#38bdf8', width: 4 },
+  eraser: { color: '#ffffff', width: 24 },
+  text: { color: '#ffffff', width: 4 },
+  code_box: { color: '#38bdf8', width: 3 },
+  line: { color: '#6366f1', width: 3.5 },
+  arrow: { color: '#6366f1', width: 3.5 },
+  arrow_bi: { color: '#6366f1', width: 3.5 },
+  rect: { color: '#6366f1', width: 3.5 },
+  rounded_rect: { color: '#6366f1', width: 3.5 },
+  circle: { color: '#6366f1', width: 3.5 },
+  triangle: { color: '#10b981', width: 3.5 },
+  star: { color: '#f59e0b', width: 3.5 },
+  decision_diamond: { color: '#f59e0b', width: 3.5 },
+  tree_node: { color: '#10b981', width: 3.5 },
+  sticky_note: { color: '#fef3c7', width: 2.5 },
+  db_cylinder: { color: '#10b981', width: 3 },
+  db_nosql: { color: '#34d399', width: 3 },
+  cloud: { color: '#38bdf8', width: 3 },
+  load_balancer: { color: '#f59e0b', width: 3 },
+  message_queue: { color: '#a855f7', width: 3 },
+  server_box: { color: '#818cf8', width: 3 },
+  cache_mem: { color: '#f43f5e', width: 3 },
+  dns_router: { color: '#38bdf8', width: 3 },
+  firewall: { color: '#f43f5e', width: 3 },
+  user_client: { color: '#3b82f6', width: 3 },
+  mobile_client: { color: '#06b6d4', width: 3 },
+  array_cells: { color: '#38bdf8', width: 3 },
+  stack_lifo: { color: '#f59e0b', width: 3 },
+  queue_fifo: { color: '#10b981', width: 3 },
+  hashmap_table: { color: '#a855f7', width: 3 },
+  two_pointers: { color: '#ec4899', width: 2.5 },
+  cdn_edge: { color: '#06b6d4', width: 3 },
+  object_storage: { color: '#f97316', width: 3 },
+  auth_jwt: { color: '#eab308', width: 3 },
+  websocket_gw: { color: '#6366f1', width: 3 },
+  elasticsearch: { color: '#14b8a6', width: 3 },
+  async_arrow: { color: '#a855f7', width: 2.5 },
+  tradeoff_note: { color: '#facc15', width: 2.5 },
 };
 
 function distanceToLineSegment(px: number, py: number, x1: number, y1: number, x2: number, y2: number): number {
-  const l2 = (x2 - x1) * (x2 - x1) + (py - y1) * (y2 - y1);
+  const l2 = (x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1);
   if (l2 === 0) return Math.hypot(px - x1, py - y1);
   let t = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2;
   t = Math.max(0, Math.min(1, t));
   return Math.hypot(px - (x1 + t * (x2 - x1)), py - (y1 + t * (y2 - y1)));
+}
+
+function getStrokeBounds(stroke: Stroke): { minX: number; minY: number; maxX: number; maxY: number } {
+  if (stroke.geometry) {
+    const minX = Math.min(stroke.geometry.x1, stroke.geometry.x2);
+    const maxX = Math.max(stroke.geometry.x1, stroke.geometry.x2);
+    const minY = Math.min(stroke.geometry.y1, stroke.geometry.y2);
+    const maxY = Math.max(stroke.geometry.y1, stroke.geometry.y2);
+    return { minX, minY, maxX, maxY };
+  }
+  if (stroke.text && stroke.geometry) {
+    return { minX: stroke.geometry.x1, minY: stroke.geometry.y1 - 20, maxX: stroke.geometry.x1 + 100, maxY: stroke.geometry.y1 + 10 };
+  }
+  if (stroke.points && stroke.points.length > 0) {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const p of stroke.points) {
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+    }
+    return { minX, minY, maxX, maxY };
+  }
+  return { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+}
+
+function isStrokeInRect(stroke: Stroke, rect: { x1: number; y1: number; x2: number; y2: number }): boolean {
+  const rMinX = Math.min(rect.x1, rect.x2);
+  const rMaxX = Math.max(rect.x1, rect.x2);
+  const rMinY = Math.min(rect.y1, rect.y2);
+  const rMaxY = Math.max(rect.y1, rect.y2);
+  const b = getStrokeBounds(stroke);
+  return !(b.maxX < rMinX || b.minX > rMaxX || b.maxY < rMinY || b.minY > rMaxY);
+}
+
+function moveStroke(stroke: Stroke, dx: number, dy: number): Stroke {
+  const updated = { ...stroke };
+  if (updated.geometry) {
+    updated.geometry = {
+      ...updated.geometry,
+      x1: updated.geometry.x1 + dx,
+      y1: updated.geometry.y1 + dy,
+      x2: updated.geometry.x2 + dx,
+      y2: updated.geometry.y2 + dy,
+    };
+  }
+  if (updated.points && updated.points.length > 0) {
+    updated.points = updated.points.map((p) => ({ x: p.x + dx, y: p.y + dy }));
+  }
+  return updated;
 }
 
 function isStrokeIntersectingEraser(stroke: Stroke, eraserPt: Point, radius: number): boolean {
@@ -137,7 +197,7 @@ function isStrokeIntersectingEraser(stroke: Stroke, eraserPt: Point, radius: num
       return false;
     }
 
-    if (stroke.tool === 'line' || stroke.tool === 'arrow' || stroke.tool === 'arrow_bi' || stroke.tool === 'two_pointers') {
+    if (stroke.tool === 'line' || stroke.tool === 'arrow' || stroke.tool === 'arrow_bi' || stroke.tool === 'async_arrow' || stroke.tool === 'two_pointers') {
       return distanceToLineSegment(eraserPt.x, eraserPt.y, x1, y1, x2, y2) <= radius + stroke.width;
     }
 
@@ -174,9 +234,7 @@ export const DiaryWhiteboardCanvas: React.FC<{
   const [showShapesDrawer, setShowShapesDrawer] = useState(false);
   const [showDsaDrawer, setShowDsaDrawer] = useState(false);
   const [showArchDrawer, setShowArchDrawer] = useState(false);
-  const [showPresetsDrawer, setShowPresetsDrawer] = useState(false);
   const [showBgDrawer, setShowBgDrawer] = useState(false);
-  const [presetTab, setPresetTab] = useState<'dsa' | 'arch'>('dsa');
 
   // Independent per-tool style dictionary
   const [toolStyles, setToolStyles] = useState<Record<string, { color: string; width: number }>>(() => {
@@ -188,7 +246,7 @@ export const DiaryWhiteboardCanvas: React.FC<{
   });
 
   const activeColor = toolStyles[activeTool]?.color || DEFAULT_TOOL_STYLES[activeTool]?.color || '#6366f1';
-  const activeWidth = toolStyles[activeTool]?.width || DEFAULT_TOOL_STYLES[activeTool]?.width || 3;
+  const activeWidth = toolStyles[activeTool]?.width || DEFAULT_TOOL_STYLES[activeTool]?.width || 4;
 
   const [bgColor, setBgColor] = useState<string>(whiteboardData?.bgColor || '#090d16');
   const [bgPattern, setBgPattern] = useState<string>(whiteboardData?.bgPattern || 'grid');
@@ -196,6 +254,14 @@ export const DiaryWhiteboardCanvas: React.FC<{
   const [strokes, setStrokes] = useState<Stroke[]>(whiteboardData?.strokes || []);
   const [undoStack, setUndoStack] = useState<Stroke[][]>([]);
   const [tempStrokes, setTempStrokes] = useState<{ stroke: Stroke; createdAt: number }[]>([]);
+
+  // Selection & Transform State
+  const [selectedStrokeIds, setSelectedStrokeIds] = useState<string[]>([]);
+  const [selectionBox, setSelectionBox] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
+  const [isMovingSelection, setIsMovingSelection] = useState(false);
+  const [moveStartPoint, setMoveStartPoint] = useState<Point | null>(null);
+  const [clipboardStrokes, setClipboardStrokes] = useState<Stroke[]>([]);
+  const initialSelectedStrokesRef = useRef<Stroke[]>([]);
 
   const [isDrawing, setIsDrawing] = useState(false);
   const [startPoint, setStartPoint] = useState<Point | null>(null);
@@ -206,13 +272,127 @@ export const DiaryWhiteboardCanvas: React.FC<{
   const [textModalPos, setTextModalPos] = useState<Point | null>(null);
   const [textInput, setTextInput] = useState('');
 
+  // Calculate overall bounding box of currently selected strokes
+  const getSelectedBounds = useCallback(() => {
+    const selected = strokes.filter((s) => selectedStrokeIds.includes(s.id));
+    if (selected.length === 0) return null;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    selected.forEach((s) => {
+      const b = getStrokeBounds(s);
+      if (b.minX < minX) minX = b.minX;
+      if (b.maxX > maxX) maxX = b.maxX;
+      if (b.minY < minY) minY = b.minY;
+      if (b.maxY > maxY) maxY = b.maxY;
+    });
+    return { minX: minX - 8, minY: minY - 8, maxX: maxX + 8, maxY: maxY + 8 };
+  }, [selectedStrokeIds, strokes]);
+
+  // Copy selected strokes
+  const handleCopySelected = useCallback(() => {
+    const selected = strokes.filter((s) => selectedStrokeIds.includes(s.id));
+    if (selected.length === 0) return;
+    setClipboardStrokes(selected);
+  }, [selectedStrokeIds, strokes]);
+
+  // Paste copied strokes
+  const handlePasteSelected = useCallback(() => {
+    if (clipboardStrokes.length === 0) return;
+    const newStrokes = clipboardStrokes.map((s) => ({
+      ...moveStroke(s, 24, 24),
+      id: `stroke-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      timestamp: Date.now(),
+    }));
+    setUndoStack((prev) => [...prev, strokes]);
+    const updated = [...strokes, ...newStrokes];
+    setStrokes(updated);
+    setSelectedStrokeIds(newStrokes.map((s) => s.id));
+    setClipboardStrokes(newStrokes);
+    onChange({ strokes: updated, bgColor, bgPattern });
+  }, [clipboardStrokes, strokes, bgColor, bgPattern, onChange]);
+
+  // Duplicate selected strokes
+  const handleDuplicateSelected = useCallback(() => {
+    const selected = strokes.filter((s) => selectedStrokeIds.includes(s.id));
+    if (selected.length === 0) return;
+    const newStrokes = selected.map((s) => ({
+      ...moveStroke(s, 24, 24),
+      id: `stroke-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      timestamp: Date.now(),
+    }));
+    setUndoStack((prev) => [...prev, strokes]);
+    const updated = [...strokes, ...newStrokes];
+    setStrokes(updated);
+    setSelectedStrokeIds(newStrokes.map((s) => s.id));
+    onChange({ strokes: updated, bgColor, bgPattern });
+  }, [selectedStrokeIds, strokes, bgColor, bgPattern, onChange]);
+
+  // Delete selected strokes
+  const handleDeleteSelected = useCallback(() => {
+    if (selectedStrokeIds.length === 0) return;
+    setUndoStack((prev) => [...prev, strokes]);
+    const remaining = strokes.filter((s) => !selectedStrokeIds.includes(s.id));
+    setStrokes(remaining);
+    setSelectedStrokeIds([]);
+    onChange({ strokes: remaining, bgColor, bgPattern });
+  }, [selectedStrokeIds, strokes, bgColor, bgPattern, onChange]);
+
+  // Deselect
+  const handleDeselect = useCallback(() => {
+    setSelectedStrokeIds([]);
+    setSelectionBox(null);
+  }, []);
+
+  // Keyboard Shortcuts for Selection
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) return;
+
+      if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+        if (selectedStrokeIds.length > 0) {
+          e.preventDefault();
+          handleCopySelected();
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+        if (clipboardStrokes.length > 0) {
+          e.preventDefault();
+          handlePasteSelected();
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key === 'd') {
+        if (selectedStrokeIds.length > 0) {
+          e.preventDefault();
+          handleDuplicateSelected();
+        }
+      } else if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selectedStrokeIds.length > 0) {
+          e.preventDefault();
+          handleDeleteSelected();
+        }
+      } else if (e.key === 'Escape') {
+        handleDeselect();
+      } else if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+        if (selectedStrokeIds.length > 0) {
+          e.preventDefault();
+          const dist = e.shiftKey ? 10 : 2;
+          const dx = e.key === 'ArrowLeft' ? -dist : e.key === 'ArrowRight' ? dist : 0;
+          const dy = e.key === 'ArrowUp' ? -dist : e.key === 'ArrowDown' ? dist : 0;
+          const updated = strokes.map((s) => selectedStrokeIds.includes(s.id) ? moveStroke(s, dx, dy) : s);
+          setStrokes(updated);
+          onChange({ strokes: updated, bgColor, bgPattern });
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedStrokeIds, clipboardStrokes, handleCopySelected, handlePasteSelected, handleDuplicateSelected, handleDeleteSelected, handleDeselect, strokes, bgColor, bgPattern, onChange]);
+
   // Update active tool's color
   const updateActiveToolColor = (newColor: string) => {
     setToolStyles((prev) => {
       const updated = {
         ...prev,
         [activeTool]: {
-          ...(prev[activeTool] || { width: 3 }),
+          ...(prev[activeTool] || { width: 4 }),
           color: newColor,
         },
       };
@@ -720,7 +900,7 @@ export const DiaryWhiteboardCanvas: React.FC<{
       // Draw Eraser Indicator
       if (activeTool === 'eraser' && eraserPos) {
         ctx.save();
-        const r = activeWidth * 2.2 || 18;
+        const r = activeWidth * 2.2 || 24;
         ctx.strokeStyle = isLight ? '#ef4444' : '#f87171';
         ctx.lineWidth = 1.5;
         ctx.setLineDash([4, 3]);
@@ -731,8 +911,66 @@ export const DiaryWhiteboardCanvas: React.FC<{
         ctx.fill();
         ctx.restore();
       }
+
+      // Selection Marquee Box
+      if (selectionBox) {
+        ctx.save();
+        const minX = Math.min(selectionBox.x1, selectionBox.x2);
+        const minY = Math.min(selectionBox.y1, selectionBox.y2);
+        const selW = Math.abs(selectionBox.x2 - selectionBox.x1);
+        const selH = Math.abs(selectionBox.y2 - selectionBox.y1);
+        ctx.fillStyle = isLight ? 'rgba(99, 102, 241, 0.12)' : 'rgba(99, 102, 241, 0.2)';
+        ctx.fillRect(minX, minY, selW, selH);
+        ctx.strokeStyle = '#6366f1';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([5, 4]);
+        ctx.strokeRect(minX, minY, selW, selH);
+        ctx.restore();
+      }
+
+      // Selected Strokes Bounding Box & Corner Handles
+      if (selectedStrokeIds.length > 0) {
+        const selectedStrokes = strokes.filter((s) => selectedStrokeIds.includes(s.id));
+        if (selectedStrokes.length > 0) {
+          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+          selectedStrokes.forEach((s) => {
+            const b = getStrokeBounds(s);
+            if (b.minX < minX) minX = b.minX;
+            if (b.maxX > maxX) maxX = b.maxX;
+            if (b.minY < minY) minY = b.minY;
+            if (b.maxY > maxY) maxY = b.maxY;
+          });
+          const pad = 6;
+          const bbX = minX - pad;
+          const bbY = minY - pad;
+          const bbW = maxX - minX + pad * 2;
+          const bbH = maxY - minY + pad * 2;
+
+          ctx.save();
+          ctx.strokeStyle = '#38bdf8';
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([4, 4]);
+          ctx.strokeRect(bbX, bbY, bbW, bbH);
+          ctx.setLineDash([]);
+
+          const handles = [
+            { x: bbX, y: bbY },
+            { x: bbX + bbW, y: bbY },
+            { x: bbX, y: bbY + bbH },
+            { x: bbX + bbW, y: bbY + bbH },
+          ];
+          handles.forEach((h) => {
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(h.x - 3.5, h.y - 3.5, 7, 7);
+            ctx.strokeStyle = '#0284c7';
+            ctx.lineWidth = 1.5;
+            ctx.strokeRect(h.x - 3.5, h.y - 3.5, 7, 7);
+          });
+          ctx.restore();
+        }
+      }
     },
-    [activeColor, activeTool, activeWidth, drawBackground, renderSingleStroke, strokes, tempStrokes, eraserPos, isLight]
+    [activeColor, activeTool, activeWidth, drawBackground, renderSingleStroke, strokes, tempStrokes, eraserPos, isLight, selectionBox, selectedStrokeIds]
   );
 
   // Resize canvas to container
@@ -782,6 +1020,37 @@ export const DiaryWhiteboardCanvas: React.FC<{
 
   const handlePointerDown = (e: React.MouseEvent | React.TouchEvent) => {
     const pt = getCoords(e);
+
+    if (activeTool === 'select') {
+      const selBounds = getSelectedBounds();
+      if (selBounds && pt.x >= selBounds.minX && pt.x <= selBounds.maxX && pt.y >= selBounds.minY && pt.y <= selBounds.maxY) {
+        setIsMovingSelection(true);
+        setMoveStartPoint(pt);
+        initialSelectedStrokesRef.current = strokes.filter((s) => selectedStrokeIds.includes(s.id)).map((s) => JSON.parse(JSON.stringify(s)));
+        return;
+      }
+
+      const hit = [...strokes].reverse().find((s) => isStrokeIntersectingEraser(s, pt, 12));
+      if (hit) {
+        const isShift = (e as React.MouseEvent).shiftKey;
+        if (isShift) {
+          setSelectedStrokeIds((prev) => prev.includes(hit.id) ? prev.filter((id) => id !== hit.id) : [...prev, hit.id]);
+        } else {
+          setSelectedStrokeIds([hit.id]);
+        }
+        setIsMovingSelection(true);
+        setMoveStartPoint(pt);
+        initialSelectedStrokesRef.current = [JSON.parse(JSON.stringify(hit))];
+        return;
+      }
+
+      setSelectedStrokeIds([]);
+      setSelectionBox({ x1: pt.x, y1: pt.y, x2: pt.x, y2: pt.y });
+      setStartPoint(pt);
+      setIsDrawing(true);
+      return;
+    }
+
     if (activeTool === 'text') {
       setTextModalPos(pt);
       setTextInput('');
@@ -791,7 +1060,7 @@ export const DiaryWhiteboardCanvas: React.FC<{
     if (activeTool === 'eraser') {
       setIsDrawing(true);
       setEraserPos(pt);
-      const radius = activeWidth * 2.2 || 18;
+      const radius = activeWidth * 2.2 || 24;
       const remaining = strokes.filter((s) => !isStrokeIntersectingEraser(s, pt, radius));
       if (remaining.length !== strokes.length) {
         setUndoStack((prev) => [...prev, strokes]);
@@ -809,10 +1078,30 @@ export const DiaryWhiteboardCanvas: React.FC<{
   const handlePointerMove = (e: React.MouseEvent | React.TouchEvent) => {
     const pt = getCoords(e);
 
+    if (activeTool === 'select') {
+      if (isMovingSelection && moveStartPoint) {
+        const dx = pt.x - moveStartPoint.x;
+        const dy = pt.y - moveStartPoint.y;
+        const moved = initialSelectedStrokesRef.current.map((s) => moveStroke(s, dx, dy));
+        const updateMap = new Map(moved.map((s) => [s.id, s]));
+        const updatedAll = strokes.map((s) => updateMap.get(s.id) || s);
+        setStrokes(updatedAll);
+        return;
+      }
+      if (isDrawing && startPoint) {
+        const box = { x1: startPoint.x, y1: startPoint.y, x2: pt.x, y2: pt.y };
+        setSelectionBox(box);
+        const found = strokes.filter((s) => isStrokeInRect(s, box)).map((s) => s.id);
+        setSelectedStrokeIds(found);
+        return;
+      }
+      return;
+    }
+
     if (activeTool === 'eraser') {
       setEraserPos(pt);
       if (isDrawing) {
-        const radius = activeWidth * 2.2 || 18;
+        const radius = activeWidth * 2.2 || 24;
         const remaining = strokes.filter((s) => !isStrokeIntersectingEraser(s, pt, radius));
         if (remaining.length !== strokes.length) {
           setUndoStack((prev) => [...prev, strokes]);
@@ -837,6 +1126,30 @@ export const DiaryWhiteboardCanvas: React.FC<{
   };
 
   const handlePointerUp = (e: React.MouseEvent | React.TouchEvent) => {
+    if (activeTool === 'select') {
+      if (isMovingSelection && moveStartPoint) {
+        const pt = getCoords(e);
+        const dx = pt.x - moveStartPoint.x;
+        const dy = pt.y - moveStartPoint.y;
+        if (Math.hypot(dx, dy) > 2) {
+          const moved = initialSelectedStrokesRef.current.map((s) => moveStroke(s, dx, dy));
+          const updateMap = new Map(moved.map((s) => [s.id, s]));
+          const updatedAll = strokes.map((s) => updateMap.get(s.id) || s);
+          setUndoStack((prev) => [...prev, strokes]);
+          setStrokes(updatedAll);
+          onChange({ strokes: updatedAll, bgColor, bgPattern });
+        }
+        setIsMovingSelection(false);
+        setMoveStartPoint(null);
+      }
+      if (isDrawing && startPoint) {
+        setSelectionBox(null);
+        setStartPoint(null);
+        setIsDrawing(false);
+      }
+      return;
+    }
+
     if (activeTool === 'eraser') {
       setIsDrawing(false);
       setEraserPos(null);
@@ -848,12 +1161,13 @@ export const DiaryWhiteboardCanvas: React.FC<{
     setIsDrawing(false);
     const endPt = getCoords(e);
     const isGeom = isGeomTool(activeTool);
+    const width = activeTool === 'highlighter' ? 22 : activeWidth;
 
     const newStroke: Stroke = {
       id: `stroke-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
       tool: activeTool,
       color: activeColor,
-      width: activeWidth,
+      width,
       points: isGeom ? [] : [...currentPoints],
       geometry: isGeom && startPoint ? { x1: startPoint.x, y1: startPoint.y, x2: endPt.x, y2: endPt.y } : undefined,
       timestamp: Date.now(),
@@ -913,51 +1227,6 @@ export const DiaryWhiteboardCanvas: React.FC<{
     onChange({ strokes: [], bgColor, bgPattern });
   };
 
-  const handleStampPreset = (type: string) => {
-    const cx = (containerRef.current?.clientWidth || 400) / 2;
-    const cy = (containerRef.current?.clientHeight || 300) / 2;
-    const newStrokes: Stroke[] = [];
-
-    const addStk = (tool: string, color: string, width: number, geom?: any, label?: string) => {
-      newStrokes.push({
-        id: `stamp-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-        tool,
-        color,
-        width,
-        points: [],
-        geometry: geom ? { ...geom, label } : undefined,
-        timestamp: Date.now(),
-      });
-    };
-
-    if (type === 'two_pointers') {
-      addStk('array_cells', '#38bdf8', 2.5, { x1: cx - 110, y1: cy, x2: cx + 110, y2: cy + 34 });
-      addStk('two_pointers', '#ec4899', 2, { x1: cx - 90, y1: cy + 38, x2: cx - 90, y2: cy + 58 }, 'L (left=0)');
-      addStk('two_pointers', '#10b981', 2, { x1: cx + 70, y1: cy + 38, x2: cx + 70, y2: cy + 58 }, 'R (right=4)');
-    } else if (type === 'bst') {
-      addStk('tree_node', '#10b981', 3, { x1: cx, y1: cy, x2: cx, y2: cy }, '50');
-      addStk('tree_node', '#06b6d4', 3, { x1: cx - 60, y1: cy + 55, x2: cx - 60, y2: cy + 55 }, '30');
-      addStk('tree_node', '#06b6d4', 3, { x1: cx + 60, y1: cy + 55, x2: cx + 60, y2: cy + 55 }, '70');
-      addStk('arrow', '#6366f1', 2, { x1: cx - 10, y1: cy + 10, x2: cx - 45, y2: cy + 45 });
-      addStk('arrow', '#6366f1', 2, { x1: cx + 10, y1: cy + 10, x2: cx + 45, y2: cy + 45 });
-    } else if (type === 'url_shortener') {
-      addStk('user_client', '#3b82f6', 2.5, { x1: cx - 120, y1: cy, x2: cx - 85, y2: cy + 35 }, 'Client');
-      addStk('arrow', '#6366f1', 2, { x1: cx - 85, y1: cy + 17, x2: cx - 60, y2: cy + 17 });
-      addStk('load_balancer', '#f59e0b', 2.5, { x1: cx - 60, y1: cy - 5, x2: cx - 15, y2: cy + 38 }, 'LB');
-      addStk('arrow', '#6366f1', 2, { x1: cx - 15, y1: cy + 17, x2: cx + 10, y2: cy + 17 });
-      addStk('server_box', '#818cf8', 2.5, { x1: cx + 10, y1: cy - 5, x2: cx + 65, y2: cy + 35 }, 'App Srv');
-      addStk('arrow', '#10b981', 2, { x1: cx + 65, y1: cy + 8, x2: cx + 90, y2: cy - 15 });
-      addStk('cache_mem', '#f43f5e', 2.5, { x1: cx + 90, y1: cy - 35, x2: cx + 145, y2: cy - 5 }, 'Redis');
-      addStk('arrow', '#10b981', 2, { x1: cx + 65, y1: cy + 24, x2: cx + 90, y2: cy + 40 });
-      addStk('db_cylinder', '#10b981', 2.5, { x1: cx + 90, y1: cy + 25, x2: cx + 145, y2: cy + 70 }, 'SQL DB');
-    }
-
-    setUndoStack((prev) => [...prev, strokes]);
-    const updated = [...strokes, ...newStrokes];
-    setStrokes(updated);
-    onChange({ strokes: updated, bgColor, bgPattern });
-    setShowPresetsDrawer(false);
-  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: bgColor, position: 'relative' }}>
@@ -968,19 +1237,22 @@ export const DiaryWhiteboardCanvas: React.FC<{
           alignItems: 'center',
           justifyContent: 'space-between',
           padding: '4px 8px',
-          background: 'rgba(15, 23, 42, 0.95)',
+          background: 'var(--bg-surface-elevated)',
           borderBottom: '1px solid var(--border-subtle)',
           flexWrap: 'wrap',
           gap: '4px',
           zIndex: 10,
         }}
       >
-        {/* Drawing & Shape Tools */}
+        {/* Drawing, Selection & Shape Tools */}
         <div style={{ display: 'flex', gap: '3px', alignItems: 'center', flexWrap: 'wrap' }}>
           {[
-            { id: 'pen', icon: Pencil, label: 'Pen', defColor: '#6366f1' },
+            { id: 'select', icon: MousePointer, label: 'Select & Move / Copy-Paste', defColor: '#6366f1' },
+            { id: 'pen', icon: Pencil, label: 'Fine Pen (4px)', defColor: '#6366f1' },
+            { id: 'brush', icon: PenTool, label: 'Brush Pen (8px)', defColor: '#06b6d4' },
+            { id: 'highlighter', icon: Highlighter, label: 'Highlighter (22px)', defColor: '#f59e0b' },
             { id: 'temp_pen', icon: Clock, label: 'Temp Ink (3s)', defColor: '#38bdf8' },
-            { id: 'eraser', icon: Eraser, label: 'Eraser', defColor: '#ffffff' },
+            { id: 'eraser', icon: Eraser, label: 'Precision Eraser', defColor: '#ffffff' },
             { id: 'text', icon: Type, label: 'Text Label', defColor: '#ffffff' },
           ].map((t) => {
             const Icon = t.icon;
@@ -992,22 +1264,22 @@ export const DiaryWhiteboardCanvas: React.FC<{
                 key={t.id}
                 type="button"
                 onClick={() => setActiveTool(t.id)}
-                title={`${t.label} (Remembers style)`}
+                title={`${t.label}`}
                 style={{
-                  background: isActive ? 'rgba(99, 102, 241, 0.35)' : 'rgba(255, 255, 255, 0.04)',
+                  background: isActive ? 'var(--primary-glow, rgba(99, 102, 241, 0.35))' : 'transparent',
                   borderColor: isActive ? 'var(--primary)' : 'transparent',
-                  color: isActive ? '#ffffff' : 'var(--text-muted)',
+                  color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
                   borderWidth: '1px',
                   borderStyle: 'solid',
                   borderRadius: '4px',
-                  padding: '3px 5px',
+                  padding: '3px 6px',
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '3px',
                 }}
               >
-                <Icon size={12} color={isActive ? toolColor : 'var(--text-muted)'} />
+                <Icon size={13} color={isActive ? toolColor : 'currentColor'} />
               </button>
             );
           })}
@@ -1021,16 +1293,15 @@ export const DiaryWhiteboardCanvas: React.FC<{
               setShowShapesDrawer(!showShapesDrawer);
               setShowDsaDrawer(false);
               setShowArchDrawer(false);
-              setShowPresetsDrawer(false);
               setShowBgDrawer(false);
             }}
             style={{
               fontSize: '10px',
-              padding: '2px 5px',
+              padding: '2px 6px',
               borderRadius: '4px',
               border: '1px solid var(--border-subtle)',
-              background: showShapesDrawer ? 'rgba(99, 102, 241, 0.25)' : 'transparent',
-              color: showShapesDrawer ? '#ffffff' : 'var(--text-muted)',
+              background: showShapesDrawer ? 'var(--primary-glow, rgba(99, 102, 241, 0.25))' : 'transparent',
+              color: showShapesDrawer ? 'var(--text-primary)' : 'var(--text-secondary)',
               cursor: 'pointer',
             }}
           >
@@ -1043,16 +1314,15 @@ export const DiaryWhiteboardCanvas: React.FC<{
               setShowDsaDrawer(!showDsaDrawer);
               setShowShapesDrawer(false);
               setShowArchDrawer(false);
-              setShowPresetsDrawer(false);
               setShowBgDrawer(false);
             }}
             style={{
               fontSize: '10px',
-              padding: '2px 5px',
+              padding: '2px 6px',
               borderRadius: '4px',
               border: '1px solid rgba(56, 189, 248, 0.35)',
               background: showDsaDrawer ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
-              color: showDsaDrawer ? '#38bdf8' : 'var(--text-muted)',
+              color: showDsaDrawer ? '#38bdf8' : 'var(--text-secondary)',
               cursor: 'pointer',
             }}
           >
@@ -1065,16 +1335,15 @@ export const DiaryWhiteboardCanvas: React.FC<{
               setShowArchDrawer(!showArchDrawer);
               setShowShapesDrawer(false);
               setShowDsaDrawer(false);
-              setShowPresetsDrawer(false);
               setShowBgDrawer(false);
             }}
             style={{
               fontSize: '10px',
-              padding: '2px 5px',
+              padding: '2px 6px',
               borderRadius: '4px',
               border: '1px solid var(--border-subtle)',
-              background: showArchDrawer ? 'rgba(99, 102, 241, 0.25)' : 'transparent',
-              color: showArchDrawer ? '#ffffff' : 'var(--text-muted)',
+              background: showArchDrawer ? 'var(--primary-glow, rgba(99, 102, 241, 0.25))' : 'transparent',
+              color: showArchDrawer ? 'var(--text-primary)' : 'var(--text-secondary)',
               cursor: 'pointer',
             }}
           >
@@ -1084,45 +1353,22 @@ export const DiaryWhiteboardCanvas: React.FC<{
           <button
             type="button"
             onClick={() => {
-              setShowPresetsDrawer(!showPresetsDrawer);
-              setShowShapesDrawer(false);
-              setShowDsaDrawer(false);
-              setShowArchDrawer(false);
-              setShowBgDrawer(false);
-            }}
-            style={{
-              fontSize: '10px',
-              padding: '2px 5px',
-              borderRadius: '4px',
-              border: '1px solid rgba(16, 185, 129, 0.35)',
-              background: showPresetsDrawer ? 'rgba(16, 185, 129, 0.2)' : 'transparent',
-              color: showPresetsDrawer ? '#34d399' : 'var(--text-muted)',
-              cursor: 'pointer',
-            }}
-          >
-            ⚡ Presets {showPresetsDrawer ? '▲' : '▼'}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
               setShowBgDrawer(!showBgDrawer);
               setShowShapesDrawer(false);
               setShowDsaDrawer(false);
               setShowArchDrawer(false);
-              setShowPresetsDrawer(false);
             }}
             style={{
               fontSize: '10px',
-              padding: '2px 5px',
+              padding: '2px 6px',
               borderRadius: '4px',
               border: '1px solid var(--border-subtle)',
-              background: showBgDrawer ? 'rgba(99, 102, 241, 0.25)' : 'transparent',
-              color: showBgDrawer ? '#ffffff' : 'var(--text-muted)',
+              background: showBgDrawer ? 'var(--primary-glow, rgba(99, 102, 241, 0.25))' : 'transparent',
+              color: showBgDrawer ? 'var(--text-primary)' : 'var(--text-secondary)',
               cursor: 'pointer',
             }}
           >
-            🎨 Grid & BG {showBgDrawer ? '▲' : '▼'}
+            🎨 Grid &amp; BG {showBgDrawer ? '▲' : '▼'}
           </button>
         </div>
 
@@ -1153,7 +1399,7 @@ export const DiaryWhiteboardCanvas: React.FC<{
             style={{
               background: 'none',
               border: 'none',
-              color: undoStack.length > 0 ? '#c7d2fe' : 'var(--text-dim)',
+              color: undoStack.length > 0 ? 'var(--text-primary)' : 'var(--text-dim)',
               cursor: undoStack.length > 0 ? 'pointer' : 'default',
               padding: '2px 4px',
               marginLeft: '2px',
@@ -1181,7 +1427,7 @@ export const DiaryWhiteboardCanvas: React.FC<{
 
       {/* ─── Drawer: Shapes ─── */}
       {showShapesDrawer && (
-        <div style={{ display: 'flex', gap: '3px', padding: '3px 8px', background: 'rgba(0,0,0,0.85)', borderBottom: '1px solid var(--border-subtle)', overflowX: 'auto' }}>
+        <div style={{ display: 'flex', gap: '3px', padding: '3px 8px', background: 'var(--bg-card)', borderBottom: '1px solid var(--border-subtle)', overflowX: 'auto' }}>
           {[
             { id: 'line', label: 'Line 📏' },
             { id: 'arrow', label: 'Arrow ➡️' },
@@ -1200,11 +1446,11 @@ export const DiaryWhiteboardCanvas: React.FC<{
               onClick={() => setActiveTool(t.id)}
               style={{
                 fontSize: '9.5px',
-                padding: '2px 5px',
+                padding: '2px 6px',
                 borderRadius: '3px',
                 border: activeTool === t.id ? '1px solid var(--primary)' : '1px solid transparent',
-                background: activeTool === t.id ? 'rgba(99, 102, 241, 0.3)' : 'rgba(255,255,255,0.05)',
-                color: '#ffffff',
+                background: activeTool === t.id ? 'var(--primary-glow, rgba(99, 102, 241, 0.3))' : 'var(--bg-hover)',
+                color: activeTool === t.id ? 'var(--text-primary)' : 'var(--text-secondary)',
                 cursor: 'pointer',
                 whiteSpace: 'nowrap',
               }}
@@ -1217,7 +1463,7 @@ export const DiaryWhiteboardCanvas: React.FC<{
 
       {/* ─── Drawer: DSA Tools ─── */}
       {showDsaDrawer && (
-        <div style={{ display: 'flex', gap: '3px', padding: '3px 8px', background: 'rgba(8, 28, 44, 0.95)', borderBottom: '1px solid rgba(56, 189, 248, 0.3)', overflowX: 'auto' }}>
+        <div style={{ display: 'flex', gap: '3px', padding: '3px 8px', background: 'var(--bg-card)', borderBottom: '1px solid rgba(56, 189, 248, 0.3)', overflowX: 'auto' }}>
           {[
             { id: 'array_cells', label: 'Array [0..N]' },
             { id: 'two_pointers', label: 'Two Pointers (L/R)' },
@@ -1234,11 +1480,11 @@ export const DiaryWhiteboardCanvas: React.FC<{
               onClick={() => setActiveTool(t.id)}
               style={{
                 fontSize: '9.5px',
-                padding: '2px 5px',
+                padding: '2px 6px',
                 borderRadius: '3px',
                 border: activeTool === t.id ? '1px solid #38bdf8' : '1px solid transparent',
-                background: activeTool === t.id ? 'rgba(56, 189, 248, 0.3)' : 'rgba(255,255,255,0.05)',
-                color: '#7dd3fc',
+                background: activeTool === t.id ? 'rgba(56, 189, 248, 0.3)' : 'var(--bg-hover)',
+                color: activeTool === t.id ? '#ffffff' : '#7dd3fc',
                 cursor: 'pointer',
                 whiteSpace: 'nowrap',
               }}
@@ -1251,7 +1497,7 @@ export const DiaryWhiteboardCanvas: React.FC<{
 
       {/* ─── Drawer: Architecture Tools ─── */}
       {showArchDrawer && (
-        <div style={{ display: 'flex', gap: '3px', padding: '3px 8px', background: 'rgba(0,0,0,0.9)', borderBottom: '1px solid var(--border-subtle)', overflowX: 'auto' }}>
+        <div style={{ display: 'flex', gap: '3px', padding: '3px 8px', background: 'var(--bg-card)', borderBottom: '1px solid var(--border-subtle)', overflowX: 'auto' }}>
           {[
             { id: 'db_cylinder', label: 'SQL DB' },
             { id: 'db_nosql', label: 'NoSQL' },
@@ -1271,11 +1517,11 @@ export const DiaryWhiteboardCanvas: React.FC<{
               onClick={() => setActiveTool(t.id)}
               style={{
                 fontSize: '9.5px',
-                padding: '2px 5px',
+                padding: '2px 6px',
                 borderRadius: '3px',
                 border: activeTool === t.id ? '1px solid var(--primary)' : '1px solid transparent',
-                background: activeTool === t.id ? 'rgba(99, 102, 241, 0.3)' : 'rgba(255,255,255,0.05)',
-                color: '#ffffff',
+                background: activeTool === t.id ? 'var(--primary-glow, rgba(99, 102, 241, 0.3))' : 'var(--bg-hover)',
+                color: activeTool === t.id ? 'var(--text-primary)' : 'var(--text-secondary)',
                 cursor: 'pointer',
                 whiteSpace: 'nowrap',
               }}
@@ -1286,61 +1532,11 @@ export const DiaryWhiteboardCanvas: React.FC<{
         </div>
       )}
 
-      {/* ─── Drawer: Presets ─── */}
-      {showPresetsDrawer && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', padding: '4px 8px', background: 'rgba(6, 44, 36, 0.96)', borderBottom: '1px solid rgba(16, 185, 129, 0.35)' }}>
-          <div style={{ display: 'flex', gap: '4px' }}>
-            <button
-              type="button"
-              onClick={() => setPresetTab('dsa')}
-              style={{
-                fontSize: '9px',
-                fontWeight: 700,
-                padding: '2px 6px',
-                borderRadius: '3px',
-                border: 'none',
-                background: presetTab === 'dsa' ? '#10b981' : 'rgba(255,255,255,0.08)',
-                color: presetTab === 'dsa' ? '#ffffff' : '#a7f3d0',
-                cursor: 'pointer',
-              }}
-            >
-              🔲 DSA Presets
-            </button>
-            <button
-              type="button"
-              onClick={() => setPresetTab('arch')}
-              style={{
-                fontSize: '9px',
-                fontWeight: 700,
-                padding: '2px 6px',
-                borderRadius: '3px',
-                border: 'none',
-                background: presetTab === 'arch' ? '#10b981' : 'rgba(255,255,255,0.08)',
-                color: presetTab === 'arch' ? '#ffffff' : '#a7f3d0',
-                cursor: 'pointer',
-              }}
-            >
-              🏛️ System Design
-            </button>
-          </div>
-          <div style={{ display: 'flex', gap: '3px', overflowX: 'auto', paddingBottom: '2px' }}>
-            {presetTab === 'dsa' ? (
-              <>
-                <button type="button" onClick={() => handleStampPreset('two_pointers')} style={{ fontSize: '9px', padding: '2px 5px', borderRadius: '3px', background: 'rgba(16,185,129,0.25)', border: '1px solid rgba(16,185,129,0.4)', color: '#ffffff', cursor: 'pointer', whiteSpace: 'nowrap' }}>👆 Two Pointers</button>
-                <button type="button" onClick={() => handleStampPreset('bst')} style={{ fontSize: '9px', padding: '2px 5px', borderRadius: '3px', background: 'rgba(16,185,129,0.25)', border: '1px solid rgba(16,185,129,0.4)', color: '#ffffff', cursor: 'pointer', whiteSpace: 'nowrap' }}>🌲 BST Tree</button>
-              </>
-            ) : (
-              <>
-                <button type="button" onClick={() => handleStampPreset('url_shortener')} style={{ fontSize: '9px', padding: '2px 5px', borderRadius: '3px', background: 'rgba(16,185,129,0.25)', border: '1px solid rgba(16,185,129,0.4)', color: '#ffffff', cursor: 'pointer', whiteSpace: 'nowrap' }}>🔗 TinyURL Architecture</button>
-              </>
-            )}
-          </div>
-        </div>
-      )}
+
 
       {/* ─── Drawer: Background & Themes ─── */}
       {showBgDrawer && (
-        <div style={{ display: 'flex', gap: '4px', padding: '4px 8px', background: 'rgba(0,0,0,0.85)', borderBottom: '1px solid var(--border-subtle)', overflowX: 'auto' }}>
+        <div style={{ display: 'flex', gap: '4px', padding: '4px 8px', background: 'var(--bg-card)', borderBottom: '1px solid var(--border-subtle)', overflowX: 'auto' }}>
           {BG_PRESETS.map((bp) => (
             <button
               key={bp.id}
@@ -1354,9 +1550,9 @@ export const DiaryWhiteboardCanvas: React.FC<{
                 fontSize: '9px',
                 padding: '2px 6px',
                 borderRadius: '3px',
-                border: bgColor === bp.color && bgPattern === bp.pattern ? '1px solid var(--primary)' : '1px solid rgba(255,255,255,0.1)',
-                background: bgColor === bp.color && bgPattern === bp.pattern ? 'rgba(99, 102, 241, 0.25)' : 'rgba(255,255,255,0.04)',
-                color: '#ffffff',
+                border: bgColor === bp.color && bgPattern === bp.pattern ? '1px solid var(--primary)' : '1px solid var(--border-subtle)',
+                background: bgColor === bp.color && bgPattern === bp.pattern ? 'var(--primary-glow, rgba(99, 102, 241, 0.25))' : 'var(--bg-hover)',
+                color: 'var(--text-primary)',
                 cursor: 'pointer',
                 whiteSpace: 'nowrap',
               }}
@@ -1369,6 +1565,133 @@ export const DiaryWhiteboardCanvas: React.FC<{
 
       {/* ─── Canvas Workspace ─── */}
       <div ref={containerRef} style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+        {/* Floating Selection Action Bar for Copy, Duplicate, Paste, Delete & Deselect */}
+        {selectedStrokeIds.length > 0 && (() => {
+          const b = getSelectedBounds();
+          if (!b) return null;
+          const screenX = Math.max(10, Math.min((containerRef.current?.clientWidth || 400) - 240, b.minX));
+          const screenY = Math.max(10, b.minY - 36);
+
+          return (
+            <div
+              style={{
+                position: 'absolute',
+                left: `${screenX}px`,
+                top: `${screenY}px`,
+                zIndex: 60,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                background: 'var(--bg-surface-elevated)',
+                border: '1px solid var(--border-medium, var(--border-subtle))',
+                borderRadius: '6px',
+                padding: '3px 6px',
+                boxShadow: '0 4px 15px rgba(0, 0, 0, 0.4)',
+                backdropFilter: 'blur(8px)',
+              }}
+            >
+              <span style={{ fontSize: '9px', fontWeight: 700, color: 'var(--primary)', paddingRight: '2px' }}>
+                {selectedStrokeIds.length} sel
+              </span>
+              <button
+                type="button"
+                onClick={handleCopySelected}
+                title="Copy Selection (Ctrl+C)"
+                style={{
+                  background: 'var(--bg-hover)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: '4px',
+                  color: 'var(--text-primary)',
+                  fontSize: '9.5px',
+                  padding: '2px 6px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '3px',
+                }}
+              >
+                <Copy size={10} />
+                <span>Copy</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleDuplicateSelected}
+                title="Duplicate Selection (Ctrl+D)"
+                style={{
+                  background: 'var(--bg-hover)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: '4px',
+                  color: 'var(--text-primary)',
+                  fontSize: '9.5px',
+                  padding: '2px 6px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '3px',
+                }}
+              >
+                <Plus size={10} />
+                <span>Dup</span>
+              </button>
+              {clipboardStrokes.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handlePasteSelected}
+                  title="Paste (Ctrl+V)"
+                  style={{
+                    background: 'var(--bg-hover)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: '4px',
+                    color: 'var(--text-primary)',
+                    fontSize: '9.5px',
+                    padding: '2px 6px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '3px',
+                  }}
+                >
+                  <Clipboard size={10} />
+                  <span>Paste</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleDeleteSelected}
+                title="Delete Selection (Del)"
+                style={{
+                  background: 'rgba(244, 63, 94, 0.15)',
+                  border: '1px solid rgba(244, 63, 94, 0.35)',
+                  borderRadius: '4px',
+                  color: '#f43f5e',
+                  fontSize: '9.5px',
+                  padding: '2px 6px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '3px',
+                }}
+              >
+                <Trash2 size={10} />
+              </button>
+              <button
+                type="button"
+                onClick={handleDeselect}
+                title="Deselect (Esc)"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--text-muted)',
+                  padding: '2px 4px',
+                  cursor: 'pointer',
+                }}
+              >
+                <X size={11} />
+              </button>
+            </div>
+          );
+        })()}
+
         <canvas
           ref={canvasRef}
           onMouseDown={handlePointerDown}
@@ -1377,7 +1700,7 @@ export const DiaryWhiteboardCanvas: React.FC<{
           onTouchStart={handlePointerDown}
           onTouchMove={handlePointerMove}
           onTouchEnd={handlePointerUp}
-          style={{ width: '100%', height: '100%', display: 'block', cursor: activeTool === 'text' ? 'text' : activeTool === 'eraser' ? 'cell' : 'crosshair' }}
+          style={{ width: '100%', height: '100%', display: 'block', cursor: activeTool === 'select' ? 'default' : activeTool === 'text' ? 'text' : activeTool === 'eraser' ? 'cell' : 'crosshair' }}
         />
 
         {/* Inline Text Tool Modal */}
@@ -1388,7 +1711,7 @@ export const DiaryWhiteboardCanvas: React.FC<{
               left: `${Math.min(textModalPos.x, (containerRef.current?.clientWidth || 300) - 180)}px`,
               top: `${Math.max(10, textModalPos.y - 35)}px`,
               zIndex: 50,
-              background: 'rgba(15, 23, 42, 0.95)',
+              background: 'var(--bg-surface-elevated)',
               border: '1px solid var(--border-subtle)',
               borderRadius: '6px',
               padding: '4px 6px',
@@ -1408,7 +1731,7 @@ export const DiaryWhiteboardCanvas: React.FC<{
               }}
               autoFocus
               style={{
-                background: 'rgba(0,0,0,0.5)',
+                background: 'var(--bg-hover)',
                 border: '1px solid var(--border-subtle)',
                 borderRadius: '4px',
                 color: activeColor,

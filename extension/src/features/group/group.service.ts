@@ -112,9 +112,10 @@ export class GroupService {
     let passwordHash: string | undefined = undefined;
 
     if (params.isPrivate && params.password) {
-      passwordHash = await sha256Hex(params.password);
+      const cleanPassword = params.password.trim();
+      passwordHash = await sha256Hex(cleanPassword);
       // Zero-knowledge secret room ID: only peers with exact password compute same roomId
-      const secretSeed = `${cleanSlug}:${params.password}`;
+      const secretSeed = `${cleanSlug}:${cleanPassword}`;
       const secretHash = await sha256Hex(secretSeed);
       roomId = `group:${cleanSlug || 'squad'}-sec-${secretHash.slice(0, 16)}`;
     } else {
@@ -169,19 +170,20 @@ export class GroupService {
     let targetRoomId = group.roomId;
 
     if (group.isPrivate) {
-      if (!password && !group.passwordHash) {
+      const cleanPassword = password ? password.trim() : undefined;
+      if (!cleanPassword && !group.passwordHash) {
         return { success: false, error: 'Password required to enter this private group' };
       }
 
-      if (password) {
+      if (cleanPassword) {
         // Compute zero-knowledge room ID with the entered password
-        const secretSeed = `${group.slug}:${password}`;
+        const secretSeed = `${group.slug}:${cleanPassword}`;
         const secretHash = await sha256Hex(secretSeed);
         targetRoomId = `group:${group.slug}-sec-${secretHash.slice(0, 16)}`;
 
         // If we have stored passwordHash, verify local match
         if (group.passwordHash) {
-          const inputHash = await sha256Hex(password);
+          const inputHash = await sha256Hex(cleanPassword);
           if (inputHash !== group.passwordHash) {
             return { success: false, error: 'Incorrect password for this group' };
           }

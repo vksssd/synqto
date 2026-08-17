@@ -48,8 +48,8 @@ export const DiaryView: React.FC = () => {
   const [activeDiary, setActiveDiary] = useState<DiaryBook>(diaryService.getActiveDiary());
   const [activeEntry, setActiveEntry] = useState<DiaryEntry | null>(diaryService.getActiveEntry());
 
-  // Collapsible Pages/Entries Sidebar
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
+  // Collapsible Pages/Entries Sidebar (Collapsed by default)
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(true);
 
   // Local state for smooth typing without cursor jumping or re-render stutter
   const [localTitle, setLocalTitle] = useState<string>('');

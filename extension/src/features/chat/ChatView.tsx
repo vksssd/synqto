@@ -1,3 +1,6 @@
+
+
+
 // ─── WhatsApp-Style Real-Time Chat View Component ───
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -8,8 +11,6 @@ import {
   BarChart2,
   HelpCircle,
   Download,
-  Check,
-  Maximize2,
 } from 'lucide-react';
 import { ChatService, ChatMessageItem } from './chat.service';
 import { ChatCard } from './ChatCard';
@@ -18,6 +19,7 @@ import { PeerIdentity } from '@/core/network/packet';
 import { DiscoveryService } from '@/features/discovery/discovery.service';
 import { TutorService } from '@/features/tutor/tutor.service';
 import { VoiceService } from '@/features/voice/voice.service';
+// import './chatLayoutFixes.css';
 
 interface ChatViewProps {
   myIdentity: PeerIdentity | null;
@@ -228,16 +230,18 @@ export const ChatView: React.FC<ChatViewProps> = ({ myIdentity, roomId }) => {
           </div>
         ) : (
           messages.map((msg) => (
-            <ChatCard
-              key={msg.id}
-              message={msg}
-              myIdentity={myIdentity}
-              onReply={(m) => setReplyingTo(m)}
-              onReact={handleReact}
-              onVotePoll={handleVotePoll}
-              onAnswerQuiz={handleAnswerQuiz}
-              onOpenImage={(url, caption) => setLightboxImage({ url, caption })}
-            />
+            <div className="chat-card-item" key={msg.id}>
+              <ChatCard
+                message={msg}  
+                messages={messages}
+                myIdentity={myIdentity}
+                onReply={(m) => setReplyingTo(m)}
+                onReact={handleReact}
+                onVotePoll={handleVotePoll}
+                onAnswerQuiz={handleAnswerQuiz}
+                onOpenImage={(url, caption) => setLightboxImage({ url, caption })}
+              />
+            </div>
           ))
         )}
         <div ref={scrollEndRef} />

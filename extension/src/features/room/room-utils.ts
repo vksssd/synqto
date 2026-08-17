@@ -31,7 +31,8 @@ export function computeRoomId(slug: string, canonicalUrl: string): string {
     .replace(/[^a-z0-9-_]/g, '-')
     .slice(0, 24)
     .replace(/-+$/, '');
-  const hash = fnv1aHash(canonicalUrl);
+  const normalizedUrl = (canonicalUrl || '').trim().toLowerCase().replace(/\/+$/, '');
+  const hash = fnv1aHash(normalizedUrl || canonicalUrl || 'lobby');
   return `room:${cleanSlug || 'lobby'}-${hash}`;
 }
 

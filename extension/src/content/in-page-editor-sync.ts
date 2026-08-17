@@ -11,6 +11,10 @@ export interface RemotePeerCursor {
 
 export class InPageEditorSync {
   private isEnabled: boolean = true;
+  private showDock: boolean = false;
+  private dockPosition: { top: number; right: number } = { top: 16, right: 90 };
+  private isDragging: boolean = false;
+  private dragMoved: boolean = false;
   private activePeers: Map<string, RemotePeerCursor> = new Map();
   private containerEl: HTMLElement | null = null;
   private lastSentCode: string = '';
@@ -22,10 +26,20 @@ export class InPageEditorSync {
   }
 
   private async init() {
-    // 1. Load user preference
+    // 1. Load user preference & FAB settings
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-      const res = await chrome.storage.local.get(['synqto_code_together_enabled']);
-      this.isEnabled = res.synqto_code_together_enabled !== false; // Default: enabled
+      const res = await chrome.storage.local.get([
+        'synqto_code_together_enabled',
+        'synqto_code_together_dock_visible',
+        'synqto_fab_settings',
+        'nerd_buddy_fab_settings',
+      ]);
+      this.isEnabled = res.synqto_code_together_enabled !== false;
+      const fabSettings = res.synqto_fab_settings || res.nerd_buddy_fab_settings;
+      this.showDock = Boolean(res.synqto_code_together_dock_visible || fabSettings?.showCodeTogetherDock);
+      if (fabSettings?.savedCodeTogetherPosition) {
+        this.dockPosition = { ...fabSettings.savedCodeTogetherPosition };
+      }
     }
 
     // 2. Inject the main-world bridge into page DOM
@@ -37,10 +51,15 @@ export class InPageEditorSync {
     // 4. Setup runtime message listeners from extension / WebRTC mesh
     this.setupRuntimeListeners();
 
-    // 5. Render non-intrusive in-page "Code Together" dock badge
-    this.renderFloatingDock();
+    // 5. Setup storage change listeners for live toggle
+    this.setupStorageListeners();
 
-    // 6. Start active cursor cleanup ticker
+    // 6. Render in-page "Code Together" dock badge (ONLY if enabled in settings)
+    if (this.showDock) {
+      this.renderFloatingDock();
+    }
+
+    // 7. Start active cursor cleanup ticker
     this.startCursorCleanup();
 
     // Request initial code state from extension if available
@@ -51,6 +70,45 @@ export class InPageEditorSync {
         }
       });
     }
+  }
+
+  private setupStorageListeners() {
+    if (typeof chrome === 'undefined' || !chrome.storage?.onChanged) return;
+
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== 'local') return;
+
+      let changed = false;
+      if (changes.synqto_code_together_enabled) {
+        this.isEnabled = changes.synqto_code_together_enabled.newValue !== false;
+        changed = true;
+      }
+      if (changes.synqto_code_together_dock_visible) {
+        this.showDock = Boolean(changes.synqto_code_together_dock_visible.newValue);
+        changed = true;
+      }
+      if (changes.synqto_fab_settings || changes.nerd_buddy_fab_settings) {
+        const newSettings = changes.synqto_fab_settings?.newValue || changes.nerd_buddy_fab_settings?.newValue;
+        if (newSettings) {
+          if (newSettings.showCodeTogetherDock !== undefined) {
+            this.showDock = Boolean(newSettings.showCodeTogetherDock);
+          }
+          if (newSettings.savedCodeTogetherPosition) {
+            this.dockPosition = { ...newSettings.savedCodeTogetherPosition };
+          }
+          changed = true;
+        }
+      }
+
+      if (changed) {
+        if (this.showDock) {
+          this.renderFloatingDock();
+        } else if (this.containerEl) {
+          this.containerEl.remove();
+          this.containerEl = null;
+        }
+      }
+    });
   }
 
   // ─── Main-World Bridge Injection (CSP Compliant) ───
@@ -195,16 +253,20 @@ export class InPageEditorSync {
     }, '*');
   }
 
-  // ─── Floating "Code Together" Status Dock ───
+  // ─── Floating & Draggable "Code Together" Status Dock ───
   private renderFloatingDock() {
     if (this.containerEl) this.containerEl.remove();
+    if (!this.showDock) return;
 
     const dock = document.createElement('div');
     dock.id = 'synqto-code-together-dock';
+    const top = Number.isFinite(this.dockPosition?.top) ? this.dockPosition.top : 16;
+    const right = Number.isFinite(this.dockPosition?.right) ? this.dockPosition.right : 90;
+
     dock.style.cssText = `
       position: fixed !important;
-      top: 16px !important;
-      right: 90px !important;
+      top: ${top}px !important;
+      right: ${right}px !important;
       z-index: 2147483640 !important;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace !important;
       display: flex !important;
@@ -218,16 +280,96 @@ export class InPageEditorSync {
       color: #ffffff !important;
       font-size: 11px !important;
       font-weight: 700 !important;
-      cursor: pointer !important;
+      cursor: grab !important;
       backdrop-filter: blur(16px) !important;
       user-select: none !important;
-      transition: all 0.2s ease !important;
+      touch-action: none !important;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
     `;
 
     document.body.appendChild(dock);
     this.containerEl = dock;
 
+    // Draggable handling
+    let startX = 0;
+    let startY = 0;
+    let initialRight = right;
+    let initialTop = top;
+
+    const onPointerMove = (e: MouseEvent | TouchEvent) => {
+      if (!this.isDragging) return;
+      const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+      const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+
+      const dx = clientX - startX;
+      const dy = clientY - startY;
+
+      if (Math.hypot(dx, dy) > 4) {
+        this.dragMoved = true;
+        const newRight = initialRight - dx;
+        const newTop = initialTop + dy;
+
+        this.dockPosition = {
+          right: Math.max(10, Math.min(window.innerWidth - 160, newRight)),
+          top: Math.max(10, Math.min(window.innerHeight - 50, newTop)),
+        };
+
+        if (this.containerEl) {
+          this.containerEl.style.setProperty('right', `${this.dockPosition.right}px`, 'important');
+          this.containerEl.style.setProperty('top', `${this.dockPosition.top}px`, 'important');
+        }
+      }
+    };
+
+    const onPointerUp = () => {
+      if (this.isDragging) {
+        this.isDragging = false;
+        if (this.containerEl) this.containerEl.style.cursor = 'grab';
+        window.removeEventListener('mousemove', onPointerMove);
+        window.removeEventListener('mouseup', onPointerUp);
+        window.removeEventListener('touchmove', onPointerMove);
+        window.removeEventListener('touchend', onPointerUp);
+
+        if (this.dragMoved) {
+          if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+            chrome.storage.local.get(['synqto_fab_settings'], (res) => {
+              const current = res.synqto_fab_settings || {};
+              chrome.storage.local.set({
+                synqto_fab_settings: {
+                  ...current,
+                  savedCodeTogetherPosition: { ...this.dockPosition },
+                },
+              });
+            });
+          }
+
+          setTimeout(() => {
+            this.dragMoved = false;
+          }, 60);
+        }
+      }
+    };
+
+    const onPointerDown = (e: MouseEvent | TouchEvent) => {
+      this.isDragging = true;
+      this.dragMoved = false;
+      if (this.containerEl) this.containerEl.style.cursor = 'grabbing';
+      startX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+      startY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+      initialRight = this.dockPosition.right;
+      initialTop = this.dockPosition.top;
+
+      window.addEventListener('mousemove', onPointerMove, { passive: true });
+      window.addEventListener('mouseup', onPointerUp);
+      window.addEventListener('touchmove', onPointerMove, { passive: true });
+      window.addEventListener('touchend', onPointerUp);
+    };
+
+    dock.addEventListener('mousedown', onPointerDown);
+    dock.addEventListener('touchstart', onPointerDown, { passive: true });
+
     dock.addEventListener('click', () => {
+      if (this.dragMoved) return;
       this.toggleCodeTogether();
     });
 
@@ -240,6 +382,7 @@ export class InPageEditorSync {
     const peerCount = this.activePeers.size;
 
     this.containerEl.innerHTML = `
+      <span style="font-size: 10px; opacity: 0.5; margin-right: -2px;">⠿</span>
       <span style="font-size: 13px;">${this.isEnabled ? '👥' : '🔒'}</span>
       <span style="color: ${this.isEnabled ? '#818cf8' : '#94a3b8'};">Code Together:</span>
       <span style="padding: 1px 6px; border-radius: 10px; font-size: 10px; background: ${this.isEnabled ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255, 255, 255, 0.08)'}; color: ${this.isEnabled ? '#34d399' : '#94a3b8'};">

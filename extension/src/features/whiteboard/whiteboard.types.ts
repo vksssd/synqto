@@ -1,7 +1,8 @@
 // ─── Collaborative & Personal Whiteboard Types, Tools, Backgrounds, System Design & Notebook ───
 
 export type WhiteboardToolType =
-  | 'select'          // 🖐️ Pan & Select Hand
+  | 'select'          // ↖️ Section Select, Drag-to-Move, Copy-Paste
+  | 'hand'            // 🖐️ Canvas Pan Hand
   | 'pen'             // Standard fine pen (smooth bezier curve)
   | 'brush'           // Smooth pressure/brush stroke pen
   | 'highlighter'     // Semi-transparent colored marker

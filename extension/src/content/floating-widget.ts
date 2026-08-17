@@ -36,6 +36,8 @@ interface InPageStroke {
   id: string;
   tool:
     | WhiteboardToolType
+    | 'select'
+    | 'hand'
     | 'dns_router'
     | 'firewall'
     | 'star'
@@ -67,6 +69,54 @@ interface InPageStroke {
   geometry?: { x1: number; y1: number; x2: number; y2: number; label?: string };
   text?: string;
   expiresAt?: number;
+}
+
+// ── Geometric Collision & Bounding Box Helpers ──
+function getStrokeBounds(stroke: InPageStroke): { minX: number; minY: number; maxX: number; maxY: number } {
+  if (stroke.geometry) {
+    const minX = Math.min(stroke.geometry.x1, stroke.geometry.x2);
+    const maxX = Math.max(stroke.geometry.x1, stroke.geometry.x2);
+    const minY = Math.min(stroke.geometry.y1, stroke.geometry.y2);
+    const maxY = Math.max(stroke.geometry.y1, stroke.geometry.y2);
+    return { minX, minY, maxX, maxY };
+  }
+  if (stroke.points && stroke.points.length > 0) {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const p of stroke.points) {
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+    }
+    return { minX, minY, maxX, maxY };
+  }
+  return { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+}
+
+function isStrokeInRect(stroke: InPageStroke, rect: { x1: number; y1: number; x2: number; y2: number }): boolean {
+  const rMinX = Math.min(rect.x1, rect.x2);
+  const rMaxX = Math.max(rect.x1, rect.x2);
+  const rMinY = Math.min(rect.y1, rect.y2);
+  const rMaxY = Math.max(rect.y1, rect.y2);
+  const b = getStrokeBounds(stroke);
+  return !(b.maxX < rMinX || b.minX > rMaxX || b.maxY < rMinY || b.minY > rMaxY);
+}
+
+function moveStroke(stroke: InPageStroke, dx: number, dy: number): InPageStroke {
+  const updated = { ...stroke };
+  if (updated.geometry) {
+    updated.geometry = {
+      ...updated.geometry,
+      x1: updated.geometry.x1 + dx,
+      y1: updated.geometry.y1 + dy,
+      x2: updated.geometry.x2 + dx,
+      y2: updated.geometry.y2 + dy,
+    };
+  }
+  if (updated.points && updated.points.length > 0) {
+    updated.points = updated.points.map((p) => ({ x: p.x + dx, y: p.y + dy }));
+  }
+  return updated;
 }
 
 export class FloatingWidget {
@@ -111,10 +161,10 @@ export class FloatingWidget {
   private wbShowShapesDrawer: boolean = false;
   private wbShowDsaDrawer: boolean = false;
   private wbShowArchDrawer: boolean = false;
-  private wbShowPresetsDrawer: boolean = false;
   private wbShowThemesDrawer: boolean = false;
-  private wbPresetTab: 'dsa' | 'arch' = 'dsa';
   private toolStyles: Record<string, { color: string; width: number }> = {
+    select: { color: '#6366f1', width: 3 },
+    hand: { color: '#6366f1', width: 3 },
     pen: { color: '#6366f1', width: 3 },
     brush: { color: '#06b6d4', width: 6 },
     highlighter: { color: '#f59e0b', width: 16 },
@@ -163,9 +213,11 @@ export class FloatingWidget {
   private wbWidth: number = 3;
   private wbTheme: string = 'grid';
   private wbBgColor: string = '#090d16';
-  private wbPrivacyMode: 'collaborative' | 'personal' = 'collaborative';
+  private wbPrivacyMode: 'collaborative' | 'personal' = 'personal';
   private wbStrokes: InPageStroke[] = [];
   private wbPersonalStrokes: InPageStroke[] = [];
+  private wbPersonalTheme: string = 'grid';
+  private wbPersonalBgColor: string = '#090d16';
   private wbRedoStack: InPageStroke[] = [];
   private isWbDrawing: boolean = false;
   private wbCurrentPoints: WhiteboardPoint[] = [];
@@ -174,6 +226,16 @@ export class FloatingWidget {
   private wbLaserTrails: { x: number; y: number; alpha: number; timestamp: number }[] = [];
   private wbTorchPos: WhiteboardPoint | null = null;
   private wbEraserPos: WhiteboardPoint | null = null;
+  private wbSelectedStrokeIds: string[] = [];
+  private wbSelectionBox: { x1: number; y1: number; x2: number; y2: number } | null = null;
+  private wbClipboardStrokes: InPageStroke[] = [];
+  private wbIsMovingSelection: boolean = false;
+  private wbIsMarqueeSelecting: boolean = false;
+  private wbAnimationRafId: number | null = null;
+  private wbDrawRafScheduled: boolean = false;
+  private latestPreviewPoints?: WhiteboardPoint[];
+  private latestPreviewGeometry?: any;
+  private wbPatternCache: Map<string, CanvasPattern> = new Map();
   private themeSettings: any = null;
 
   constructor() {
@@ -183,6 +245,7 @@ export class FloatingWidget {
   private async init() {
     await this.loadIdentity();
     await this.loadSettings();
+    await this.loadInPagePersonalBoard();
     await this.loadServerConnectionStatus();
     await this.loadTimerState();
     this.startTimerTickLoop();
@@ -211,6 +274,38 @@ export class FloatingWidget {
     }
   }
 
+  private async loadInPagePersonalBoard() {
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      try {
+        const res = await chrome.storage.local.get(['synqto_inpage_personal_board', 'synqto_wb_privacy_mode']);
+        if (res.synqto_inpage_personal_board) {
+          const board = res.synqto_inpage_personal_board;
+          if (Array.isArray(board.strokes)) this.wbPersonalStrokes = board.strokes;
+          if (board.theme) this.wbPersonalTheme = board.theme;
+          if (board.bgColor) this.wbPersonalBgColor = board.bgColor;
+        }
+        if (res.synqto_wb_privacy_mode) {
+          this.wbPrivacyMode = res.synqto_wb_privacy_mode;
+        }
+      } catch (e) {}
+    }
+  }
+
+  private saveInPagePersonalBoard() {
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      try {
+        chrome.storage.local.set({
+          synqto_inpage_personal_board: {
+            strokes: this.wbPersonalStrokes,
+            theme: this.wbPersonalTheme,
+            bgColor: this.wbPersonalBgColor,
+          },
+          synqto_wb_privacy_mode: this.wbPrivacyMode,
+        });
+      } catch (e) {}
+    }
+  }
+
   private async loadSettings() {
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       const res = await chrome.storage.local.get([
@@ -218,7 +313,6 @@ export class FloatingWidget {
         SYNQTO_FAB_STORAGE_KEY,
         'synqto_theme_settings',
         'synqto_collab_notebook',
-        'synqto_personal_notebook',
         'synqto_active_problem',
         'nerd_buddy_active_problem',
         'synqto_live_stage',
@@ -238,14 +332,6 @@ export class FloatingWidget {
           this.wbStrokes = activePage.strokes || [];
           if (activePage.background) this.wbTheme = activePage.background;
           if (activePage.bgColor) this.wbBgColor = activePage.bgColor;
-        }
-      }
-
-      if (res.synqto_personal_notebook && Array.isArray(res.synqto_personal_notebook.pages)) {
-        const nb = res.synqto_personal_notebook;
-        const activePage = nb.pages.find((p: any) => p.id === nb.activePageId) || nb.pages[0];
-        if (activePage) {
-          this.wbPersonalStrokes = activePage.strokes || [];
         }
       }
 
@@ -742,58 +828,68 @@ export class FloatingWidget {
         .chat-bubble {
           display: flex;
           flex-direction: column;
-          max-width: 86%;
-          padding: 8px 12px;
-          border-radius: 14px;
+          max-width: 82%;
+          min-width: 80px;
+          padding: 6px 9px 4px 10px;
+          border-radius: 9px;
           font-size: 12px;
           position: relative;
           word-break: break-word;
-          line-height: 1.45;
+          line-height: 1.42;
+          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.16);
         }
 
         .chat-bubble.self {
           align-self: flex-end;
-          background: linear-gradient(135deg, rgba(99, 102, 241, 0.28), rgba(139, 92, 246, 0.22));
-          border: 1px solid rgba(99, 102, 241, 0.35);
-          border-bottom-right-radius: 4px;
-          color: #ffffff;
+          background: linear-gradient(135deg, rgba(45, 212, 191, 0.18), rgba(20, 184, 166, 0.24));
+          border: 1px solid rgba(45, 212, 191, 0.32);
+          border-top-right-radius: 2px;
+          color: var(--text-primary, #ffffff);
         }
 
         .chat-bubble.other {
           align-self: flex-start;
-          background: var(--bg-surface-elevated);
+          background: var(--bg-surface-elevated, #1e2b2f);
           border: 1px solid var(--border-subtle);
-          border-bottom-left-radius: 4px;
-          color: #f1f5f9;
+          border-top-left-radius: 2px;
+          color: var(--text-primary, #f1f5f9);
+        }
+
+        .wa-quote-box {
+          background: rgba(0, 0, 0, 0.22);
+          border-left: 3px solid var(--primary);
+          border-radius: 4px;
+          padding: 3px 6px;
+          margin-bottom: 4px;
+          font-size: 10px;
         }
 
         .chat-header {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          gap: 8px;
-          margin-bottom: 4px;
-          font-size: 11px;
+          gap: 6px;
+          margin-bottom: 2px;
+          font-size: 10.5px;
         }
 
         .chat-author {
-          font-weight: 600;
+          font-weight: 700;
           display: flex;
           align-items: center;
           gap: 4px;
         }
 
-        .chat-timestamp {
-          color: var(--text-dim);
-          font-size: 10px;
-        }
-
-        .chat-footer {
-          margin-top: 3px;
-          display: flex;
+        .chat-meta {
+          display: inline-flex;
           align-items: center;
-          justify-content: flex-end;
-          font-size: 10px;
+          gap: 3px;
+          float: right;
+          margin-left: 8px;
+          margin-top: 3px;
+          font-size: 9.5px;
+          color: var(--text-dim, #94a3b8);
+          user-select: none;
         }
 
         .ack-read {
@@ -1073,14 +1169,16 @@ export class FloatingWidget {
           <div class="whiteboard-container">
             <div class="wb-toolbar">
               <div class="wb-tool-group" style="flex-wrap:wrap;gap:2px;">
-                <button class="wb-tool-btn ${this.wbTool === 'pen' ? 'active' : ''}" data-wbtool="pen" title="Fine Pen">✏️</button>
-                <button class="wb-tool-btn ${this.wbTool === 'brush' ? 'active' : ''}" data-wbtool="brush" title="Brush Pen">✒️</button>
-                <button class="wb-tool-btn ${this.wbTool === 'highlighter' ? 'active' : ''}" data-wbtool="highlighter" title="Highlighter">🖍️</button>
-                <button class="wb-tool-btn ${this.wbTool === 'temp_pen' ? 'active' : ''}" data-wbtool="temp_pen" title="⏳ Disappearing Ink (3s)">⏳</button>
-                <button class="wb-tool-btn ${this.wbTool === 'laser' ? 'active' : ''}" data-wbtool="laser" title="Laser Pointer">🔴</button>
-                <button class="wb-tool-btn ${this.wbTool === 'torch' ? 'active' : ''}" data-wbtool="torch" title="Spotlight Torch">🔦</button>
-                <button class="wb-tool-btn ${this.wbTool === 'eraser' ? 'active' : ''}" data-wbtool="eraser" title="Eraser">🧹</button>
-                <button class="wb-tool-btn ${this.wbTool === 'text' ? 'active' : ''}" data-wbtool="text" title="Text Label">T</button>
+                <button class="wb-tool-btn ${this.wbTool === 'select' ? 'active' : ''}" data-wbtool="select" title="Select & Move (↖️)">↖️</button>
+                <button class="wb-tool-btn ${this.wbTool === 'hand' ? 'active' : ''}" data-wbtool="hand" title="Pan Canvas (✋)">✋</button>
+                <button class="wb-tool-btn ${this.wbTool === 'pen' ? 'active' : ''}" data-wbtool="pen" title="Fine Pen (✏️)">✏️</button>
+                <button class="wb-tool-btn ${this.wbTool === 'brush' ? 'active' : ''}" data-wbtool="brush" title="Brush Pen (✒️)">✒️</button>
+                <button class="wb-tool-btn ${this.wbTool === 'highlighter' ? 'active' : ''}" data-wbtool="highlighter" title="Translucent Highlighter (🖍️)">🖍️</button>
+                <button class="wb-tool-btn ${this.wbTool === 'temp_pen' ? 'active' : ''}" data-wbtool="temp_pen" title="⏳ Disappearing Ink (3s Fade)">⏳</button>
+                <button class="wb-tool-btn ${this.wbTool === 'laser' ? 'active' : ''}" data-wbtool="laser" title="Live Laser Pointer (🔴)">🔴</button>
+                <button class="wb-tool-btn ${this.wbTool === 'torch' ? 'active' : ''}" data-wbtool="torch" title="Spotlight Torch (🔦)">🔦</button>
+                <button class="wb-tool-btn ${this.wbTool === 'eraser' ? 'active' : ''}" data-wbtool="eraser" title="Precision Eraser (🧹)">🧹</button>
+                <button class="wb-tool-btn ${this.wbTool === 'text' ? 'active' : ''}" data-wbtool="text" title="Text Label (🔤)">🔤</button>
 
                 <div style="width:1px;height:12px;background:var(--border-subtle);margin:0 1px;"></div>
 
@@ -1097,10 +1195,6 @@ export class FloatingWidget {
                   🏛️ Arch ${this.wbShowArchDrawer ? '▲' : '▼'}
                 </button>
 
-                <button class="wb-drawer-toggle ${this.wbShowPresetsDrawer ? 'active' : ''}" id="nb-wb-toggle-presets" style="font-size:9px;padding:2px 4px;border-radius:4px;border:1px solid rgba(16,185,129,0.35);background:${this.wbShowPresetsDrawer ? 'rgba(16,185,129,0.2)' : 'transparent'};color:${this.wbShowPresetsDrawer ? '#34d399' : 'var(--text-muted)'};cursor:pointer;">
-                  ⚡ Presets ${this.wbShowPresetsDrawer ? '▲' : '▼'}
-                </button>
-
                 <button class="wb-drawer-toggle ${this.wbShowThemesDrawer ? 'active' : ''}" id="nb-wb-toggle-themes" style="font-size:9px;padding:2px 4px;border-radius:4px;border:1px solid var(--border-subtle);background:${this.wbShowThemesDrawer ? 'rgba(99,102,241,0.25)' : 'transparent'};color:${this.wbShowThemesDrawer ? '#fff' : 'var(--text-muted)'};cursor:pointer;">
                   🎨 Style ${this.wbShowThemesDrawer ? '▲' : '▼'}
                 </button>
@@ -1108,9 +1202,9 @@ export class FloatingWidget {
 
               <!-- Right Controls -->
               <div class="wb-tool-group">
-                <div style="display:flex;gap:2px;align-items:center;background:rgba(0,0,0,0.3);padding:2px 3px;border-radius:4px;">
-                  <button class="wb-privacy-btn" data-wbprivacy="collaborative" style="font-size:9px;font-weight:700;padding:2px 4px;border-radius:3px;border:none;cursor:pointer;background:${this.wbPrivacyMode === 'collaborative' ? 'var(--primary)' : 'transparent'};color:${this.wbPrivacyMode === 'collaborative' ? '#fff' : 'var(--text-muted)'};" title="👥 Collaborative with Room Peers">👥 Collab</button>
-                  <button class="wb-privacy-btn" data-wbprivacy="personal" style="font-size:9px;font-weight:700;padding:2px 4px;border-radius:3px;border:none;cursor:pointer;background:${this.wbPrivacyMode === 'personal' ? 'var(--primary)' : 'transparent'};color:${this.wbPrivacyMode === 'personal' ? '#fff' : 'var(--text-muted)'};" title="🔒 Personal Private Scratchpad">🔒 Personal</button>
+                <div style="display:flex;gap:2px;align-items:center;background:rgba(0,0,0,0.4);padding:2px 4px;border-radius:5px;border:1px solid var(--border-subtle);">
+                  <button class="wb-privacy-btn" data-wbprivacy="personal" style="font-size:9px;font-weight:700;padding:2px 5px;border-radius:3px;border:none;cursor:pointer;background:${this.wbPrivacyMode === 'personal' ? 'linear-gradient(135deg, #f59e0b, #f43f5e)' : 'transparent'};color:${this.wbPrivacyMode === 'personal' ? '#fff' : 'var(--text-muted)'};" title="🔒 Personal Private Scratchpad (Offline, Independent)">🔒 Private</button>
+                  <button class="wb-privacy-btn" data-wbprivacy="collaborative" style="font-size:9px;font-weight:700;padding:2px 5px;border-radius:3px;border:none;cursor:pointer;background:${this.wbPrivacyMode === 'collaborative' ? 'linear-gradient(135deg, #10b981, #06b6d4)' : 'transparent'};color:${this.wbPrivacyMode === 'collaborative' ? '#fff' : 'var(--text-muted)'};" title="👥 Collaborative Room Board (Synced across all peers)">👥 Collab</button>
                 </div>
                 <button class="wb-tool-btn" id="nb-wb-undo" title="Undo">↩️</button>
                 <button class="wb-tool-btn" id="nb-wb-redo" title="Redo">↪️</button>
@@ -1120,145 +1214,111 @@ export class FloatingWidget {
               </div>
             </div>
 
+            <!-- Floating Selection Action Bar -->
+            <div id="nb-wb-selection-floating-bar" style="display:${this.wbSelectedStrokeIds.length > 0 ? 'flex' : 'none'};align-items:center;gap:4px;padding:3px 8px;background:rgba(15,23,42,0.95);border-bottom:1px solid #6366f1;box-shadow:0 4px 12px rgba(0,0,0,0.5);font-size:10px;">
+              <span style="color:#818cf8;font-weight:700;margin-right:2px;">Selected (${this.wbSelectedStrokeIds.length}):</span>
+              <button id="nb-wb-sel-copy" style="background:rgba(99,102,241,0.2);border:1px solid rgba(99,102,241,0.4);color:#fff;border-radius:3px;padding:2px 6px;cursor:pointer;font-size:9.5px;" title="Copy (Ctrl+C)">📋 Copy</button>
+              <button id="nb-wb-sel-dup" style="background:rgba(16,185,129,0.2);border:1px solid rgba(16,185,129,0.4);color:#fff;border-radius:3px;padding:2px 6px;cursor:pointer;font-size:9.5px;" title="Duplicate (Ctrl+D)">✨ Dup</button>
+              <button id="nb-wb-sel-paste" style="background:rgba(56,189,248,0.2);border:1px solid rgba(56,189,248,0.4);color:#fff;border-radius:3px;padding:2px 6px;cursor:pointer;font-size:9.5px;" title="Paste (Ctrl+V)">📥 Paste</button>
+              <button id="nb-wb-sel-del" style="background:rgba(239,68,68,0.2);border:1px solid rgba(239,68,68,0.4);color:#fca5a5;border-radius:3px;padding:2px 6px;cursor:pointer;font-size:9.5px;" title="Delete (Del)">🗑️ Delete</button>
+              <button id="nb-wb-sel-clear" style="background:transparent;border:1px solid var(--border-subtle);color:var(--text-muted);border-radius:3px;padding:2px 6px;cursor:pointer;font-size:9.5px;" title="Deselect (Esc)">✕</button>
+            </div>
+
             <!-- Drawer: Shapes -->
-            ${this.wbShowShapesDrawer ? `
-              <div style="display:flex;align-items:center;gap:3px;padding:3px 6px;background:rgba(0,0,0,0.85);border-bottom:1px solid var(--border-subtle);overflow-x:auto;">
-                <span style="font-size:8.5px;color:var(--text-muted);font-weight:600;">Shapes:</span>
-                ${[
-                  { id: 'line', label: 'Line 📏' },
-                  { id: 'arrow', label: 'Arrow ➡️' },
-                  { id: 'arrow_bi', label: 'Bi-Arrow ↔️' },
-                  { id: 'rect', label: 'Rect 🔲' },
-                  { id: 'rounded_rect', label: 'Rounded ▢' },
-                  { id: 'circle', label: 'Circle ⭕' },
-                  { id: 'triangle', label: 'Triangle ▲' },
-                  { id: 'star', label: 'Star ⭐' },
-                  { id: 'decision_diamond', label: 'Diamond 💎' },
-                  { id: 'sticky_note', label: 'Sticky 📝' },
-                  { id: 'code_box', label: 'Code &lt;/&gt;' },
-                ].map((t) => `
-                  <button class="wb-tool-btn ${this.wbTool === t.id ? 'active' : ''}" data-wbtool="${t.id}" style="font-size:9px;padding:2px 5px;white-space:nowrap;">${t.label}</button>
-                `).join('')}
-              </div>
-            ` : ''}
+            <div id="nb-wb-drawer-shapes" style="display:${this.wbShowShapesDrawer ? 'flex' : 'none'};align-items:center;gap:3px;padding:3px 6px;background:rgba(0,0,0,0.85);border-bottom:1px solid var(--border-subtle);overflow-x:auto;">
+              <span style="font-size:8.5px;color:var(--text-muted);font-weight:600;">Shapes:</span>
+              ${[
+                { id: 'line', label: 'Line 📏' },
+                { id: 'arrow', label: 'Arrow ➡️' },
+                { id: 'arrow_bi', label: 'Bi-Arrow ↔️' },
+                { id: 'rect', label: 'Rect 🔲' },
+                { id: 'rounded_rect', label: 'Rounded ▢' },
+                { id: 'circle', label: 'Circle ⭕' },
+                { id: 'triangle', label: 'Triangle ▲' },
+                { id: 'star', label: 'Star ⭐' },
+                { id: 'decision_diamond', label: 'Diamond 💎' },
+                { id: 'sticky_note', label: 'Sticky 📝' },
+                { id: 'code_box', label: 'Code &lt;/&gt;' },
+              ].map((t) => `
+                <button class="wb-tool-btn ${this.wbTool === t.id ? 'active' : ''}" data-wbtool="${t.id}" style="font-size:9px;padding:2px 5px;white-space:nowrap;">${t.label}</button>
+              `).join('')}
+            </div>
 
             <!-- Drawer: DSA Visualizers -->
-            ${this.wbShowDsaDrawer ? `
-              <div style="display:flex;align-items:center;gap:3px;padding:3px 6px;background:rgba(8,28,44,0.95);border-bottom:1px solid rgba(56,189,248,0.3);overflow-x:auto;">
-                <span style="font-size:8.5px;color:#7dd3fc;font-weight:700;">🔲 DSA:</span>
-                ${[
-                  { id: 'array_cells', label: 'Array [0..N]' },
-                  { id: 'two_pointers', label: 'Two Pointers (L/R)' },
-                  { id: 'stack_lifo', label: 'Stack (LIFO)' },
-                  { id: 'queue_fifo', label: 'Queue (FIFO)' },
-                  { id: 'tree_node', label: 'Tree Node' },
-                  { id: 'hashmap_table', label: 'HashMap Bucket' },
-                  { id: 'decision_diamond', label: 'Branch Diamond' },
-                  { id: 'code_box', label: 'Pseudocode Box' },
-                ].map((t) => `
-                  <button class="wb-tool-btn ${this.wbTool === t.id ? 'active' : ''}" data-wbtool="${t.id}" style="font-size:9px;padding:2px 5px;white-space:nowrap;color:#7dd3fc;">${t.label}</button>
-                `).join('')}
-              </div>
-            ` : ''}
+            <div id="nb-wb-drawer-dsa" style="display:${this.wbShowDsaDrawer ? 'flex' : 'none'};align-items:center;gap:3px;padding:3px 6px;background:rgba(8,28,44,0.95);border-bottom:1px solid rgba(56,189,248,0.3);overflow-x:auto;">
+              <span style="font-size:8.5px;color:#7dd3fc;font-weight:700;">🔲 DSA:</span>
+              ${[
+                { id: 'array_cells', label: 'Array [0..N]' },
+                { id: 'two_pointers', label: 'Two Pointers (L/R)' },
+                { id: 'stack_lifo', label: 'Stack (LIFO)' },
+                { id: 'queue_fifo', label: 'Queue (FIFO)' },
+                { id: 'tree_node', label: 'Tree Node' },
+                { id: 'hashmap_table', label: 'HashMap Bucket' },
+                { id: 'decision_diamond', label: 'Branch Diamond' },
+                { id: 'code_box', label: 'Pseudocode Box' },
+              ].map((t) => `
+                <button class="wb-tool-btn ${this.wbTool === t.id ? 'active' : ''}" data-wbtool="${t.id}" style="font-size:9px;padding:2px 5px;white-space:nowrap;color:#7dd3fc;">${t.label}</button>
+              `).join('')}
+            </div>
 
             <!-- Drawer: Architecture Shapes -->
-            ${this.wbShowArchDrawer ? `
-              <div style="display:flex;align-items:center;gap:3px;padding:3px 6px;background:rgba(0,0,0,0.9);border-bottom:1px solid var(--border-subtle);overflow-x:auto;">
-                <span style="font-size:8.5px;color:var(--text-muted);font-weight:600;">Arch:</span>
-                ${[
-                  { id: 'db_cylinder', label: 'SQL DB' },
-                  { id: 'db_nosql', label: 'NoSQL' },
-                  { id: 'cache_mem', label: 'Redis' },
-                  { id: 'message_queue', label: 'Kafka' },
-                  { id: 'load_balancer', label: 'LB' },
-                  { id: 'server_box', label: 'App Server' },
-                  { id: 'cloud', label: 'API GW' },
-                  { id: 'cdn_edge', label: 'CDN Edge' },
-                  { id: 'object_storage', label: 'S3 Bucket' },
-                  { id: 'auth_jwt', label: 'Auth Shield' },
-                  { id: 'websocket_gw', label: 'WS Gateway' },
-                  { id: 'elasticsearch', label: 'ES Search' },
-                  { id: 'dns_router', label: 'DNS' },
-                  { id: 'firewall', label: 'Firewall' },
-                  { id: 'user_client', label: 'Client' },
-                  { id: 'mobile_client', label: 'Mobile' },
-                  { id: 'async_arrow', label: 'Async ⇢' },
-                  { id: 'tradeoff_note', label: '⚖️ CAP Card' },
-                ].map((t) => `
-                  <button class="wb-tool-btn ${this.wbTool === t.id ? 'active' : ''}" data-wbtool="${t.id}" style="font-size:9px;padding:2px 5px;white-space:nowrap;">${t.label}</button>
-                `).join('')}
-              </div>
-            ` : ''}
-
-            <!-- Drawer: 1-Click Blueprints Presets -->
-            ${this.wbShowPresetsDrawer ? `
-              <div style="display:flex;flex-direction:column;gap:3px;padding:4px 6px;background:rgba(6,44,36,0.96);border-bottom:1px solid rgba(16,185,129,0.35);">
-                <div style="display:flex;gap:3px;align-items:center;">
-                  <button class="wb-preset-tab-btn" data-presettab="dsa" style="font-size:9px;font-weight:700;padding:2px 6px;border-radius:3px;border:none;background:${this.wbPresetTab === 'dsa' ? '#10b981' : 'rgba(255,255,255,0.08)'};color:${this.wbPresetTab === 'dsa' ? '#fff' : '#a7f3d0'};cursor:pointer;">🔲 DSA Presets (10)</button>
-                  <button class="wb-preset-tab-btn" data-presettab="arch" style="font-size:9px;font-weight:700;padding:2px 6px;border-radius:3px;border:none;background:${this.wbPresetTab === 'arch' ? '#10b981' : 'rgba(255,255,255,0.08)'};color:${this.wbPresetTab === 'arch' ? '#fff' : '#a7f3d0'};cursor:pointer;">🏛️ System Design (8)</button>
-                </div>
-                <div style="display:flex;gap:3px;overflow-x:auto;padding-bottom:2px;">
-                  ${this.wbPresetTab === 'dsa' ? [
-                    { id: 'two_pointers', label: '👆 Two Pointers' },
-                    { id: 'bst', label: '🌲 BST Tree' },
-                    { id: 'floyd_cycle', label: '🐢 Floyd Cycle' },
-                    { id: 'mono_stack', label: '📥 Monotonic Stack' },
-                    { id: 'dp_table', label: '📊 2D DP Table' },
-                    { id: 'trie', label: '🌳 Prefix Trie' },
-                    { id: 'graph_bfs', label: '🔵 Graph BFS' },
-                    { id: 'min_heap', label: '🏔️ Min-Heap' },
-                    { id: 'intervals', label: '📏 Intervals' },
-                    { id: 'recursion_tree', label: '🌿 Recursion' },
-                  ].map((p) => `
-                    <button class="wb-stamp-preset-btn" data-preset="${p.id}" style="font-size:9px;padding:2px 5px;border-radius:3px;background:rgba(16,185,129,0.25);border:1px solid rgba(16,185,129,0.4);color:#fff;cursor:pointer;white-space:nowrap;">${p.label}</button>
-                  `).join('') : [
-                    { id: 'url_shortener', label: '🔗 TinyURL' },
-                    { id: 'rate_limiter', label: '🚦 Rate Limiter' },
-                    { id: 'chat_system', label: '💬 Chat System' },
-                    { id: 'distributed_cache', label: '⚡ Dist. Cache' },
-                    { id: 'ecommerce_saga', label: '🛒 Order Saga' },
-                    { id: 'web_crawler', label: '🕷️ Web Crawler' },
-                    { id: 'microservices_3tier', label: '🏛️ 3-Tier App' },
-                    { id: 'search_analytics', label: '🔍 ES Cluster' },
-                  ].map((p) => `
-                    <button class="wb-stamp-preset-btn" data-preset="${p.id}" style="font-size:9px;padding:2px 5px;border-radius:3px;background:rgba(16,185,129,0.25);border:1px solid rgba(16,185,129,0.4);color:#fff;cursor:pointer;white-space:nowrap;">${p.label}</button>
-                  `).join('')}
-                </div>
-              </div>
-            ` : ''}
+            <div id="nb-wb-drawer-arch" style="display:${this.wbShowArchDrawer ? 'flex' : 'none'};align-items:center;gap:3px;padding:3px 6px;background:rgba(0,0,0,0.9);border-bottom:1px solid var(--border-subtle);overflow-x:auto;">
+              <span style="font-size:8.5px;color:var(--text-muted);font-weight:600;">Arch:</span>
+              ${[
+                { id: 'db_cylinder', label: 'SQL DB' },
+                { id: 'db_nosql', label: 'NoSQL' },
+                { id: 'cache_mem', label: 'Redis' },
+                { id: 'message_queue', label: 'Kafka' },
+                { id: 'load_balancer', label: 'LB' },
+                { id: 'server_box', label: 'App Server' },
+                { id: 'cloud', label: 'API GW' },
+                { id: 'cdn_edge', label: 'CDN Edge' },
+                { id: 'object_storage', label: 'S3 Bucket' },
+                { id: 'auth_jwt', label: 'Auth Shield' },
+                { id: 'websocket_gw', label: 'WS Gateway' },
+                { id: 'elasticsearch', label: 'ES Search' },
+                { id: 'dns_router', label: 'DNS' },
+                { id: 'firewall', label: 'Firewall' },
+                { id: 'user_client', label: 'Client' },
+                { id: 'mobile_client', label: 'Mobile' },
+                { id: 'async_arrow', label: 'Async ⇢' },
+                { id: 'tradeoff_note', label: '⚖️ CAP Card' },
+              ].map((t) => `
+                <button class="wb-tool-btn ${this.wbTool === t.id ? 'active' : ''}" data-wbtool="${t.id}" style="font-size:9px;padding:2px 5px;white-space:nowrap;">${t.label}</button>
+              `).join('')}
+            </div>
 
             <!-- Drawer: Style & Themes -->
-            ${this.wbShowThemesDrawer ? `
-              <div class="wb-palette-bar" style="flex-wrap:wrap;gap:4px;">
-                <div style="display:flex;gap:2px;align-items:center;overflow-x:auto;">
-                  <button class="size-pill ${this.wbTheme === 'grid' ? 'active' : ''}" data-wbtheme="grid">⬛ Grid</button>
-                  <button class="size-pill ${this.wbTheme === 'isometric' ? 'active' : ''}" data-wbtheme="isometric">📐 3D Iso</button>
-                  <button class="size-pill ${this.wbTheme === 'ruled' ? 'active' : ''}" data-wbtheme="ruled">📏 Ruled</button>
-                  <button class="size-pill ${this.wbTheme === 'plot' ? 'active' : ''}" data-wbtheme="plot">📈 Plot</button>
-                  <button class="size-pill ${this.wbTheme === 'matrix' ? 'active' : ''}" data-wbtheme="matrix">📊 Matrix</button>
-                  <button class="size-pill ${this.wbTheme === 'dotted' ? 'active' : ''}" data-wbtheme="dotted">🟦 Dots</button>
-                  <button class="size-pill ${this.wbTheme === 'blank' ? 'active' : ''}" data-wbtheme="blank">Blank</button>
-                </div>
-
-                <div style="display:flex;gap:3px;align-items:center;">
-                  ${['#090d16', '#0f172a', '#062c24', '#fef3c7', '#ffffff', '#1e1035'].map((bg) => `
-                    <div class="bg-dot" data-wbbg="${bg}" style="width:10px;height:10px;border-radius:2px;background:${bg};border:${this.wbBgColor === bg ? '2px solid #6366f1' : '1px solid rgba(255,255,255,0.2)'};cursor:pointer;" title="Background Color"></div>
-                  `).join('')}
-                </div>
-
-                <div style="display:flex;gap:4px;align-items:center;">
-                  ${['#6366f1', '#06b6d4', '#10b981', '#f59e0b', '#f43f5e', '#ffffff'].map((c) => `
-                    <div class="color-dot ${this.wbColor === c ? 'active' : ''}" data-color="${c}" style="background:${c};"></div>
-                  `).join('')}
-                </div>
-
-                <div style="display:flex;gap:2px;align-items:center;">
-                  <button class="size-pill ${this.wbWidth === 2 ? 'active' : ''}" data-size="2">S</button>
-                  <button class="size-pill ${this.wbWidth === 4 ? 'active' : ''}" data-size="4">M</button>
-                  <button class="size-pill ${this.wbWidth === 8 ? 'active' : ''}" data-size="8">L</button>
-                </div>
+            <div id="nb-wb-drawer-themes" class="wb-palette-bar" style="display:${this.wbShowThemesDrawer ? 'flex' : 'none'};flex-wrap:wrap;gap:4px;">
+              <div style="display:flex;gap:2px;align-items:center;overflow-x:auto;">
+                <button class="size-pill ${this.wbTheme === 'grid' ? 'active' : ''}" data-wbtheme="grid">⬛ Grid</button>
+                <button class="size-pill ${this.wbTheme === 'isometric' ? 'active' : ''}" data-wbtheme="isometric">📐 3D Iso</button>
+                <button class="size-pill ${this.wbTheme === 'ruled' ? 'active' : ''}" data-wbtheme="ruled">📏 Ruled</button>
+                <button class="size-pill ${this.wbTheme === 'plot' ? 'active' : ''}" data-wbtheme="plot">📈 Plot</button>
+                <button class="size-pill ${this.wbTheme === 'matrix' ? 'active' : ''}" data-wbtheme="matrix">📊 Matrix</button>
+                <button class="size-pill ${this.wbTheme === 'dotted' ? 'active' : ''}" data-wbtheme="dotted">🟦 Dots</button>
+                <button class="size-pill ${this.wbTheme === 'blank' ? 'active' : ''}" data-wbtheme="blank">Blank</button>
               </div>
-            ` : ''}
+
+              <div style="display:flex;gap:3px;align-items:center;">
+                ${['#090d16', '#0f172a', '#062c24', '#fef3c7', '#ffffff', '#f8fafc', '#1e1035'].map((bg) => `
+                  <div class="bg-dot" data-wbbg="${bg}" style="width:12px;height:12px;border-radius:3px;background:${bg};border:${this.wbBgColor === bg ? '2px solid #6366f1' : '1px solid rgba(255,255,255,0.25)'};cursor:pointer;" title="Background: ${bg}"></div>
+                `).join('')}
+              </div>
+
+              <div style="display:flex;gap:4px;align-items:center;">
+                ${['#6366f1', '#06b6d4', '#10b981', '#f59e0b', '#f43f5e', '#a855f7', '#ffffff', '#0f172a'].map((c) => `
+                  <div class="color-dot ${this.wbColor === c ? 'active' : ''}" data-color="${c}" style="background:${c};"></div>
+                `).join('')}
+              </div>
+
+              <div style="display:flex;gap:2px;align-items:center;">
+                <button class="size-pill ${this.wbWidth === 3 ? 'active' : ''}" data-size="3">S</button>
+                <button class="size-pill ${this.wbWidth === 5 ? 'active' : ''}" data-size="5">M</button>
+                <button class="size-pill ${this.wbWidth === 9 ? 'active' : ''}" data-size="9">L</button>
+                <button class="size-pill ${this.wbWidth === 18 ? 'active' : ''}" data-size="18">XL</button>
+              </div>
+            </div>
 
             <!-- HTML5 Interactive Canvas -->
             <canvas id="nb-whiteboard-canvas"></canvas>
@@ -1273,34 +1333,43 @@ export class FloatingWidget {
                 <div style="font-size:11px;max-width:220px;">Say hello or ask for a hint! Messages are synchronized P2P across all peers.</div>
               </div>
             ` : this.messages.map((m, idx) => `
-              <div class="chat-bubble ${m.isSelf ? 'self' : 'other'}">
-                ${m.replyPreview ? `<div style="border-left:2px solid var(--primary);padding-left:6px;margin-bottom:4px;font-size:10px;color:var(--text-muted);">${this.escapeHtml(m.replyPreview)}</div>` : ''}
-                
-                <div class="chat-header">
-                  <div class="chat-author">
-                    <span>${m.from?.avatar || '👤'}</span>
-                    <span style="color:${m.isSelf ? '#ffffff' : m.from?.color || '#a5b4fc'}">
-                      ${m.isSelf ? 'You' : m.from?.nickname || 'Buddy'}
-                    </span>
+              <div class="chat-bubble ${m.isSelf ? 'self' : 'other'}" id="nb-msg-${m.id}">
+                ${m.replyPreview ? `
+                  <div class="wa-quote-box">
+                    <div style="font-weight:700;color:var(--primary);">${this.escapeHtml(m.replyTo?.preview?.split(':')[0] || 'Reply')}</div>
+                    <div style="color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this.escapeHtml(m.replyPreview)}</div>
                   </div>
-                  <div style="display:flex;align-items:center;gap:4px;">
-                    <span class="chat-timestamp">${this.formatTimestamp(m.timestamp)}</span>
+                ` : ''}
+                
+                ${!m.isSelf ? `
+                  <div class="chat-header">
+                    <div class="chat-author">
+                      <span>${m.from?.avatar || '👤'}</span>
+                      <span style="color:${m.from?.color || 'var(--primary)'};">
+                        ${this.escapeHtml(m.from?.nickname || 'Buddy')}
+                      </span>
+                    </div>
                     <button class="icon-btn nb-reply-trigger" data-id="${m.id}" data-text="${this.escapeHtml(m.text.slice(0, 35))}" data-nick="${this.escapeHtml(m.from?.nickname || 'Buddy')}" style="padding:0;width:18px;height:18px;" title="Reply">
                       ↩
                     </button>
                   </div>
-                </div>
-
-                <div class="chat-body">${this.renderFormattedText(m.text, idx, m)}</div>
-
-                ${m.isSelf ? `
-                  <div class="chat-footer">
-                    ${m.status === 'pending' ? '<span>⏳</span>' : ''}
-                    ${m.status === 'sent' ? '<span style="color:var(--text-dim);">✓</span>' : ''}
-                    ${m.status === 'delivered' ? '<span style="color:var(--text-secondary);">✓✓</span>' : ''}
-                    ${m.status === 'read' ? '<span class="ack-read">✓✓</span>' : ''}
-                  </div>
                 ` : ''}
+
+                <div class="chat-body">
+                  ${this.renderFormattedText(m.text, idx, m)}
+                  
+                  <span class="chat-meta">
+                    <span>${this.formatTimestamp(m.timestamp)}</span>
+                    ${m.isSelf ? `
+                      <span class="ack-icon">
+                        ${m.status === 'pending' ? '⏳' : ''}
+                        ${m.status === 'sent' ? '<span style="color:var(--text-dim);">✓</span>' : ''}
+                        ${m.status === 'delivered' ? '<span style="color:var(--text-secondary);">✓✓</span>' : ''}
+                        ${m.status === 'read' ? '<span class="ack-read">✓✓</span>' : ''}
+                      </span>
+                    ` : ''}
+                  </span>
+                </div>
               </div>
             `).join('')}
           </div>
@@ -1697,7 +1766,9 @@ export class FloatingWidget {
     const canvas = this.shadow.getElementById('nb-whiteboard-canvas') as HTMLCanvasElement;
     if (!canvas) return;
 
-    // Attach Tool Selector
+    this.triggerWbAnimationLoop();
+
+    // Attach Tool Selector (Direct DOM Active Class Update - Zero Blink)
     const toolBtns = this.shadow.querySelectorAll('.wb-tool-btn[data-wbtool]');
     toolBtns.forEach((btn) => {
       btn.addEventListener('click', (e) => {
@@ -1707,49 +1778,88 @@ export class FloatingWidget {
           const style = this.toolStyles[tool] || { color: '#6366f1', width: 3 };
           this.wbColor = style.color;
           this.wbWidth = style.width;
-          this.render();
+          toolBtns.forEach((b) => b.classList.remove('active'));
+          (e.currentTarget as HTMLElement).classList.add('active');
+
+          const colorDots = this.shadow?.querySelectorAll('.color-dot');
+          colorDots?.forEach((d) => d.classList.toggle('active', d.getAttribute('data-color') === this.wbColor));
+
+          const sizePills = this.shadow?.querySelectorAll('.size-pill[data-size]');
+          sizePills?.forEach((p) => p.classList.toggle('active', Number(p.getAttribute('data-size')) === this.wbWidth));
+
+          if (tool !== 'select') {
+            this.wbSelectedStrokeIds = [];
+            this.updateSelectionBar();
+          }
+
+          this.drawWbCanvas();
         }
       });
     });
 
-    // Drawer Toggles
-    const toggleDrawer = (drawer: 'shapes' | 'dsa' | 'arch' | 'presets' | 'themes') => {
-      this.wbShowShapesDrawer = drawer === 'shapes' ? !this.wbShowShapesDrawer : false;
-      this.wbShowDsaDrawer = drawer === 'dsa' ? !this.wbShowDsaDrawer : false;
-      this.wbShowArchDrawer = drawer === 'arch' ? !this.wbShowArchDrawer : false;
-      this.wbShowPresetsDrawer = drawer === 'presets' ? !this.wbShowPresetsDrawer : false;
-      this.wbShowThemesDrawer = drawer === 'themes' ? !this.wbShowThemesDrawer : false;
-      this.render();
+    // Drawer Toggles (Direct DOM Toggle - Zero Re-render / Zero Blink)
+    const toggleDrawer = (drawerName: 'shapes' | 'dsa' | 'arch' | 'themes') => {
+      const wasOpen =
+        drawerName === 'shapes'
+          ? this.wbShowShapesDrawer
+          : drawerName === 'dsa'
+          ? this.wbShowDsaDrawer
+          : drawerName === 'arch'
+          ? this.wbShowArchDrawer
+          : this.wbShowThemesDrawer;
+
+      this.wbShowShapesDrawer = false;
+      this.wbShowDsaDrawer = false;
+      this.wbShowArchDrawer = false;
+      this.wbShowThemesDrawer = false;
+
+      if (!wasOpen) {
+        if (drawerName === 'shapes') this.wbShowShapesDrawer = true;
+        if (drawerName === 'dsa') this.wbShowDsaDrawer = true;
+        if (drawerName === 'arch') this.wbShowArchDrawer = true;
+        if (drawerName === 'themes') this.wbShowThemesDrawer = true;
+      }
+
+      const drawers = {
+        shapes: this.shadow?.getElementById('nb-wb-drawer-shapes'),
+        dsa: this.shadow?.getElementById('nb-wb-drawer-dsa'),
+        arch: this.shadow?.getElementById('nb-wb-drawer-arch'),
+        themes: this.shadow?.getElementById('nb-wb-drawer-themes'),
+      };
+      const btns = {
+        shapes: this.shadow?.getElementById('nb-wb-toggle-shapes'),
+        dsa: this.shadow?.getElementById('nb-wb-toggle-dsa'),
+        arch: this.shadow?.getElementById('nb-wb-toggle-arch'),
+        themes: this.shadow?.getElementById('nb-wb-toggle-themes'),
+      };
+
+      if (drawers.shapes) drawers.shapes.style.display = this.wbShowShapesDrawer ? 'flex' : 'none';
+      if (drawers.dsa) drawers.dsa.style.display = this.wbShowDsaDrawer ? 'flex' : 'none';
+      if (drawers.arch) drawers.arch.style.display = this.wbShowArchDrawer ? 'flex' : 'none';
+      if (drawers.themes) drawers.themes.style.display = this.wbShowThemesDrawer ? 'flex' : 'none';
+
+      if (btns.shapes) {
+        btns.shapes.classList.toggle('active', this.wbShowShapesDrawer);
+        btns.shapes.textContent = `🔷 Shapes ${this.wbShowShapesDrawer ? '▲' : '▼'}`;
+      }
+      if (btns.dsa) {
+        btns.dsa.classList.toggle('active', this.wbShowDsaDrawer);
+        btns.dsa.textContent = `🔲 DSA ${this.wbShowDsaDrawer ? '▲' : '▼'}`;
+      }
+      if (btns.arch) {
+        btns.arch.classList.toggle('active', this.wbShowArchDrawer);
+        btns.arch.textContent = `🏛️ Arch ${this.wbShowArchDrawer ? '▲' : '▼'}`;
+      }
+      if (btns.themes) {
+        btns.themes.classList.toggle('active', this.wbShowThemesDrawer);
+        btns.themes.textContent = `🎨 Style ${this.wbShowThemesDrawer ? '▲' : '▼'}`;
+      }
     };
 
     this.shadow.getElementById('nb-wb-toggle-shapes')?.addEventListener('click', () => toggleDrawer('shapes'));
     this.shadow.getElementById('nb-wb-toggle-dsa')?.addEventListener('click', () => toggleDrawer('dsa'));
     this.shadow.getElementById('nb-wb-toggle-arch')?.addEventListener('click', () => toggleDrawer('arch'));
-    this.shadow.getElementById('nb-wb-toggle-presets')?.addEventListener('click', () => toggleDrawer('presets'));
     this.shadow.getElementById('nb-wb-toggle-themes')?.addEventListener('click', () => toggleDrawer('themes'));
-
-    // Preset Tabs
-    const presetTabBtns = this.shadow.querySelectorAll('.wb-preset-tab-btn[data-presettab]');
-    presetTabBtns.forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        const tab = (e.currentTarget as HTMLElement).getAttribute('data-presettab') as any;
-        if (tab) {
-          this.wbPresetTab = tab;
-          this.render();
-        }
-      });
-    });
-
-    // Preset Stamp Buttons
-    const stampBtns = this.shadow.querySelectorAll('.wb-stamp-preset-btn[data-preset]');
-    stampBtns.forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        const pId = (e.currentTarget as HTMLElement).getAttribute('data-preset');
-        if (pId) {
-          this.handleStampPreset(pId);
-        }
-      });
-    });
 
     // Popout Standalone Popup Window
     this.shadow.getElementById('nb-wb-popout')?.addEventListener('click', () => {
@@ -1765,52 +1875,75 @@ export class FloatingWidget {
       }
     });
 
-    // Attach Privacy Mode Selector (Collab vs Personal)
+    // Privacy Mode Selector (Collab vs Personal)
     const privacyBtns = this.shadow.querySelectorAll('.wb-privacy-btn[data-wbprivacy]');
     privacyBtns.forEach((btn) => {
       btn.addEventListener('click', (e) => {
         const mode = (e.currentTarget as HTMLElement).getAttribute('data-wbprivacy') as any;
         if (mode) {
           this.wbPrivacyMode = mode;
-          this.render();
+          this.saveInPagePersonalBoard();
+          privacyBtns.forEach((b) => {
+            const bMode = (b as HTMLElement).getAttribute('data-wbprivacy');
+            (b as HTMLElement).style.background =
+              bMode === mode
+                ? (bMode === 'personal' ? 'linear-gradient(135deg, #f59e0b, #f43f5e)' : 'linear-gradient(135deg, #10b981, #06b6d4)')
+                : 'transparent';
+            (b as HTMLElement).style.color = bMode === mode ? '#fff' : 'var(--text-muted)';
+          });
+          this.wbSelectedStrokeIds = [];
+          this.updateSelectionBar();
+          this.drawWbCanvas();
         }
       });
     });
 
-    // Attach Board Theme Selector
+    // Board Theme Selector (Grid, Iso, Ruled, Plot, Matrix, Dotted, Blank)
     const themeBtns = this.shadow.querySelectorAll('.size-pill[data-wbtheme]');
     themeBtns.forEach((btn) => {
       btn.addEventListener('click', (e) => {
         const theme = (e.currentTarget as HTMLElement).getAttribute('data-wbtheme') as any;
         if (theme) {
-          this.wbTheme = theme;
-          if (theme === 'clean_white' && this.wbColor === '#ffffff') {
-            this.wbColor = '#0f172a';
+          if (this.wbPrivacyMode === 'personal') {
+            this.wbPersonalTheme = theme;
+            this.saveInPagePersonalBoard();
+          } else {
+            this.wbTheme = theme;
+            if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+              chrome.runtime.sendMessage({ type: 'WHITEBOARD_BG_LOCAL', background: theme, bgColor: this.wbBgColor }).catch(() => {});
+            }
           }
-          if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage && this.wbPrivacyMode === 'collaborative') {
-            chrome.runtime.sendMessage({ type: 'WHITEBOARD_BG_LOCAL', background: theme, bgColor: this.wbBgColor }).catch(() => {});
-          }
-          this.render();
+          themeBtns.forEach((b) => b.classList.toggle('active', b.getAttribute('data-wbtheme') === theme));
+          this.drawWbCanvas();
         }
       });
     });
 
-    // Attach Background Color Selector
+    // Background Color Selector
     const bgDots = this.shadow.querySelectorAll('.bg-dot[data-wbbg]');
     bgDots.forEach((dot) => {
       dot.addEventListener('click', (e) => {
         const bg = (e.currentTarget as HTMLElement).getAttribute('data-wbbg');
         if (bg) {
-          this.wbBgColor = bg;
-          if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage && this.wbPrivacyMode === 'collaborative') {
-            chrome.runtime.sendMessage({ type: 'WHITEBOARD_BG_LOCAL', background: this.wbTheme, bgColor: bg }).catch(() => {});
+          if (this.wbPrivacyMode === 'personal') {
+            this.wbPersonalBgColor = bg;
+            this.saveInPagePersonalBoard();
+          } else {
+            this.wbBgColor = bg;
+            if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+              chrome.runtime.sendMessage({ type: 'WHITEBOARD_BG_LOCAL', background: this.wbTheme, bgColor: bg }).catch(() => {});
+            }
           }
-          this.render();
+          bgDots.forEach((d) => {
+            const colorVal = (d as HTMLElement).getAttribute('data-wbbg');
+            (d as HTMLElement).style.border = colorVal === bg ? '2px solid #6366f1' : '1px solid rgba(255,255,255,0.25)';
+          });
+          this.drawWbCanvas();
         }
       });
     });
 
-    // Attach Color Selector (Updates Active Tool's Independent Color)
+    // Color Selector (Updates Active Tool's Independent Color)
     const colorDots = this.shadow.querySelectorAll('.color-dot');
     colorDots.forEach((dot) => {
       dot.addEventListener('click', (e) => {
@@ -1820,12 +1953,13 @@ export class FloatingWidget {
           if (this.toolStyles[this.wbTool]) {
             this.toolStyles[this.wbTool].color = col;
           }
-          this.render();
+          colorDots.forEach((d) => d.classList.toggle('active', d.getAttribute('data-color') === col));
+          this.drawWbCanvas();
         }
       });
     });
 
-    // Attach Size Selector (Updates Active Tool's Independent Width)
+    // Size Selector (Updates Active Tool's Independent Width)
     const sizePills = this.shadow.querySelectorAll('.size-pill[data-size]');
     sizePills.forEach((p) => {
       p.addEventListener('click', (e) => {
@@ -1835,9 +1969,92 @@ export class FloatingWidget {
           if (this.toolStyles[this.wbTool]) {
             this.toolStyles[this.wbTool].width = sz;
           }
-          this.render();
+          sizePills.forEach((sp) => sp.classList.toggle('active', Number(sp.getAttribute('data-size')) === sz));
+          this.drawWbCanvas();
         }
       });
+    });
+
+    // Selection Bar Actions (Copy, Duplicate, Paste, Delete, Deselect)
+    this.shadow.getElementById('nb-wb-sel-copy')?.addEventListener('click', () => {
+      const activeList = this.wbPrivacyMode === 'personal' ? this.wbPersonalStrokes : this.wbStrokes;
+      this.wbClipboardStrokes = activeList.filter((s) => this.wbSelectedStrokeIds.includes(s.id));
+    });
+
+    this.shadow.getElementById('nb-wb-sel-dup')?.addEventListener('click', () => {
+      const activeList = this.wbPrivacyMode === 'personal' ? this.wbPersonalStrokes : this.wbStrokes;
+      const toDup = activeList.filter((s) => this.wbSelectedStrokeIds.includes(s.id));
+      if (toDup.length > 0) {
+        const duplicated: InPageStroke[] = toDup.map((s) => ({
+          ...moveStroke(s, 20, 20),
+          id: 'stroke-' + Math.random().toString(36).slice(2, 10),
+        }));
+        if (this.wbPrivacyMode === 'personal') {
+          this.wbPersonalStrokes.push(...duplicated);
+          this.saveInPagePersonalBoard();
+        } else {
+          this.wbStrokes.push(...duplicated);
+          duplicated.forEach((s) => {
+            if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+              chrome.runtime.sendMessage({ type: 'WHITEBOARD_STROKE_LOCAL', stroke: s }).catch(() => {});
+            }
+          });
+        }
+        this.wbSelectedStrokeIds = duplicated.map((s) => s.id);
+        this.updateSelectionBar();
+        this.drawWbCanvas();
+      }
+    });
+
+    this.shadow.getElementById('nb-wb-sel-paste')?.addEventListener('click', () => {
+      if (this.wbClipboardStrokes.length > 0) {
+        const pasted: InPageStroke[] = this.wbClipboardStrokes.map((s) => ({
+          ...moveStroke(s, 24, 24),
+          id: 'stroke-' + Math.random().toString(36).slice(2, 10),
+        }));
+        if (this.wbPrivacyMode === 'personal') {
+          this.wbPersonalStrokes.push(...pasted);
+          this.saveInPagePersonalBoard();
+        } else {
+          this.wbStrokes.push(...pasted);
+          pasted.forEach((s) => {
+            if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+              chrome.runtime.sendMessage({ type: 'WHITEBOARD_STROKE_LOCAL', stroke: s }).catch(() => {});
+            }
+          });
+        }
+        this.wbSelectedStrokeIds = pasted.map((s) => s.id);
+        this.updateSelectionBar();
+        this.drawWbCanvas();
+      }
+    });
+
+    this.shadow.getElementById('nb-wb-sel-del')?.addEventListener('click', () => {
+      if (this.wbSelectedStrokeIds.length > 0) {
+        const activeList = this.wbPrivacyMode === 'personal' ? this.wbPersonalStrokes : this.wbStrokes;
+        const deleted = activeList.filter((s) => this.wbSelectedStrokeIds.includes(s.id));
+        this.wbRedoStack.push(...deleted);
+        if (this.wbPrivacyMode === 'personal') {
+          this.wbPersonalStrokes = this.wbPersonalStrokes.filter((s) => !this.wbSelectedStrokeIds.includes(s.id));
+          this.saveInPagePersonalBoard();
+        } else {
+          this.wbStrokes = this.wbStrokes.filter((s) => !this.wbSelectedStrokeIds.includes(s.id));
+          deleted.forEach((d) => {
+            if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+              chrome.runtime.sendMessage({ type: 'WHITEBOARD_UNDO_LOCAL', strokeId: d.id }).catch(() => {});
+            }
+          });
+        }
+        this.wbSelectedStrokeIds = [];
+        this.updateSelectionBar();
+        this.drawWbCanvas();
+      }
+    });
+
+    this.shadow.getElementById('nb-wb-sel-clear')?.addEventListener('click', () => {
+      this.wbSelectedStrokeIds = [];
+      this.updateSelectionBar();
+      this.drawWbCanvas();
     });
 
     // Undo / Redo / Clear / Export
@@ -1846,6 +2063,7 @@ export class FloatingWidget {
       if (activeList.length === 0 && this.wbRedoStack.length > 0) {
         if (this.wbPrivacyMode === 'personal') {
           this.wbPersonalStrokes = [...this.wbRedoStack];
+          this.saveInPagePersonalBoard();
         } else {
           this.wbStrokes = [...this.wbRedoStack];
           this.wbStrokes.forEach((s) => {
@@ -1862,10 +2080,12 @@ export class FloatingWidget {
         const removed = activeList.pop();
         if (removed) {
           this.wbRedoStack.push(removed);
-          this.drawWbCanvas();
-          if (this.wbPrivacyMode === 'collaborative' && typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+          if (this.wbPrivacyMode === 'personal') {
+            this.saveInPagePersonalBoard();
+          } else if (this.wbPrivacyMode === 'collaborative' && typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
             chrome.runtime.sendMessage({ type: 'WHITEBOARD_UNDO_LOCAL', strokeId: removed.id }).catch(() => {});
           }
+          this.drawWbCanvas();
         }
       }
     });
@@ -1874,12 +2094,16 @@ export class FloatingWidget {
       if (this.wbRedoStack.length > 0) {
         const restored = this.wbRedoStack.pop();
         if (restored) {
-          const activeList = this.wbPrivacyMode === 'personal' ? this.wbPersonalStrokes : this.wbStrokes;
-          activeList.push(restored);
-          this.drawWbCanvas();
-          if (this.wbPrivacyMode === 'collaborative' && typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
-            chrome.runtime.sendMessage({ type: 'WHITEBOARD_STROKE_LOCAL', stroke: restored }).catch(() => {});
+          if (this.wbPrivacyMode === 'personal') {
+            this.wbPersonalStrokes.push(restored);
+            this.saveInPagePersonalBoard();
+          } else {
+            this.wbStrokes.push(restored);
+            if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+              chrome.runtime.sendMessage({ type: 'WHITEBOARD_STROKE_LOCAL', stroke: restored }).catch(() => {});
+            }
           }
+          this.drawWbCanvas();
         }
       }
     });
@@ -1890,12 +2114,15 @@ export class FloatingWidget {
       this.wbRedoStack = [...activeList];
       if (this.wbPrivacyMode === 'personal') {
         this.wbPersonalStrokes = [];
+        this.saveInPagePersonalBoard();
       } else {
         this.wbStrokes = [];
         if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
           chrome.runtime.sendMessage({ type: 'WHITEBOARD_CLEAR_LOCAL' }).catch(() => {});
         }
       }
+      this.wbSelectedStrokeIds = [];
+      this.updateSelectionBar();
       this.drawWbCanvas();
     });
 
@@ -1907,18 +2134,21 @@ export class FloatingWidget {
       a.click();
     });
 
-    // Setup Canvas Dimensions
-    setTimeout(() => {
+    // Setup Canvas Dimensions with High-DPI support
+    const setupDimensions = () => {
       const rect = canvas.getBoundingClientRect();
       const dpr = window.devicePixelRatio || 1;
       canvas.width = (rect.width || 380) * dpr;
       canvas.height = (rect.height || 360) * dpr;
-
       const ctx = canvas.getContext('2d');
-      if (ctx) ctx.scale(dpr, dpr);
-
+      if (ctx) {
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.scale(dpr, dpr);
+      }
       this.drawWbCanvas();
-    }, 30);
+    };
+
+    setTimeout(setupDimensions, 30);
 
     // Pointer Event Listeners
     const getCoords = (e: MouseEvent | TouchEvent): WhiteboardPoint => {
@@ -1927,6 +2157,9 @@ export class FloatingWidget {
       if ('touches' in e && e.touches.length > 0) {
         cx = e.touches[0].clientX;
         cy = e.touches[0].clientY;
+      } else if ('changedTouches' in e && e.changedTouches.length > 0) {
+        cx = e.changedTouches[0].clientX;
+        cy = e.changedTouches[0].clientY;
       } else if ('clientX' in e) {
         cx = (e as MouseEvent).clientX;
         cy = (e as MouseEvent).clientY;
@@ -1961,6 +2194,41 @@ export class FloatingWidget {
 
     canvas.addEventListener('mousedown', (e) => {
       const pt = getCoords(e);
+
+      // Select Tool Handlers
+      if (this.wbTool === 'select') {
+        const activeList = this.wbPrivacyMode === 'personal' ? this.wbPersonalStrokes : this.wbStrokes;
+        const clickedOnSelected =
+          this.wbSelectedStrokeIds.length > 0 &&
+          activeList.some((s) => {
+            if (!this.wbSelectedStrokeIds.includes(s.id)) return false;
+            const b = getStrokeBounds(s);
+            return pt.x >= b.minX - 6 && pt.x <= b.maxX + 6 && pt.y >= b.minY - 6 && pt.y <= b.maxY + 6;
+          });
+
+        if (clickedOnSelected) {
+          this.wbIsMovingSelection = true;
+          this.wbDragStartCoords = pt;
+        } else {
+          const clickedStroke = [...activeList].reverse().find((s) => {
+            const b = getStrokeBounds(s);
+            return pt.x >= b.minX - 4 && pt.x <= b.maxX + 4 && pt.y >= b.minY - 4 && pt.y <= b.maxY + 4;
+          });
+
+          if (clickedStroke) {
+            this.wbSelectedStrokeIds = [clickedStroke.id];
+            this.wbIsMovingSelection = true;
+            this.wbDragStartCoords = pt;
+          } else {
+            this.wbSelectedStrokeIds = [];
+            this.wbIsMarqueeSelecting = true;
+            this.wbSelectionBox = { x1: pt.x, y1: pt.y, x2: pt.x, y2: pt.y };
+          }
+          this.updateSelectionBar();
+        }
+        this.drawWbCanvas();
+        return;
+      }
 
       if (this.wbTool === 'eraser') {
         this.isWbDrawing = true;
@@ -2006,6 +2274,38 @@ export class FloatingWidget {
     canvas.addEventListener('mousemove', (e) => {
       const pt = getCoords(e);
 
+      // Select Tool Drag / Marquee
+      if (this.wbTool === 'select') {
+        if (this.wbIsMovingSelection && this.wbDragStartCoords) {
+          const dx = pt.x - this.wbDragStartCoords.x;
+          const dy = pt.y - this.wbDragStartCoords.y;
+          this.wbDragStartCoords = pt;
+
+          if (this.wbPrivacyMode === 'personal') {
+            this.wbPersonalStrokes = this.wbPersonalStrokes.map((s) =>
+              this.wbSelectedStrokeIds.includes(s.id) ? moveStroke(s, dx, dy) : s
+            );
+          } else {
+            this.wbStrokes = this.wbStrokes.map((s) =>
+              this.wbSelectedStrokeIds.includes(s.id) ? moveStroke(s, dx, dy) : s
+            );
+          }
+          this.requestWbRedraw();
+          return;
+        }
+
+        if (this.wbIsMarqueeSelecting && this.wbSelectionBox) {
+          this.wbSelectionBox.x2 = pt.x;
+          this.wbSelectionBox.y2 = pt.y;
+          const activeList = this.wbPrivacyMode === 'personal' ? this.wbPersonalStrokes : this.wbStrokes;
+          const matching = activeList.filter((s) => isStrokeInRect(s, this.wbSelectionBox!));
+          this.wbSelectedStrokeIds = matching.map((s) => s.id);
+          this.updateSelectionBar();
+          this.requestWbRedraw();
+          return;
+        }
+      }
+
       if (this.wbTool === 'eraser') {
         this.wbEraserPos = pt;
         if (this.isWbDrawing) {
@@ -2027,19 +2327,20 @@ export class FloatingWidget {
             }
           }
         }
-        this.drawWbCanvas();
+        this.requestWbRedraw();
         return;
       }
 
       if (this.wbTool === 'laser') {
         this.wbLaserTrails.push({ x: pt.x, y: pt.y, alpha: 1.0, timestamp: Date.now() });
-        this.drawWbCanvas();
+        this.triggerWbAnimationLoop();
+        this.requestWbRedraw();
         return;
       }
 
       if (this.wbTool === 'torch') {
         this.wbTorchPos = pt;
-        this.drawWbCanvas();
+        this.requestWbRedraw();
         return;
       }
 
@@ -2047,7 +2348,7 @@ export class FloatingWidget {
       const isGeom = isGeomTool(this.wbTool);
 
       if (isGeom && this.wbStartPoint) {
-        this.drawWbCanvas(undefined, {
+        this.requestWbRedraw(undefined, {
           x1: this.wbStartPoint.x,
           y1: this.wbStartPoint.y,
           x2: pt.x,
@@ -2055,11 +2356,31 @@ export class FloatingWidget {
         });
       } else {
         this.wbCurrentPoints.push(pt);
-        this.drawWbCanvas(this.wbCurrentPoints);
+        this.requestWbRedraw(this.wbCurrentPoints);
       }
     });
 
     const handleMouseUp = (e: MouseEvent | TouchEvent) => {
+      if (this.wbTool === 'select') {
+        if (this.wbIsMovingSelection) {
+          this.wbIsMovingSelection = false;
+          this.wbDragStartCoords = null;
+          if (this.wbPrivacyMode === 'collaborative' && typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+            const updated = this.wbStrokes.filter((s) => this.wbSelectedStrokeIds.includes(s.id));
+            if (updated.length > 0) {
+              chrome.runtime.sendMessage({ type: 'WHITEBOARD_UPDATE_STROKES_LOCAL', strokes: updated }).catch(() => {});
+            }
+          }
+        }
+        if (this.wbIsMarqueeSelecting) {
+          this.wbIsMarqueeSelecting = false;
+          this.wbSelectionBox = null;
+        }
+        this.updateSelectionBar();
+        this.drawWbCanvas();
+        return;
+      }
+
       if (this.wbTool === 'eraser') {
         this.isWbDrawing = false;
         this.wbEraserPos = null;
@@ -2086,12 +2407,15 @@ export class FloatingWidget {
         width,
         opacity: this.wbTool === 'highlighter' ? 0.35 : 1.0,
         points: isGeom ? [] : [...this.wbCurrentPoints],
-        geometry: isGeom && this.wbStartPoint ? {
-          x1: this.wbStartPoint.x,
-          y1: this.wbStartPoint.y,
-          x2: endPt.x,
-          y2: endPt.y,
-        } : undefined,
+        geometry:
+          isGeom && this.wbStartPoint
+            ? {
+                x1: this.wbStartPoint.x,
+                y1: this.wbStartPoint.y,
+                x2: endPt.x,
+                y2: endPt.y,
+              }
+            : undefined,
       };
 
       if (this.wbTool === 'temp_pen') {
@@ -2115,177 +2439,134 @@ export class FloatingWidget {
     canvas.addEventListener('mouseleave', handleMouseUp);
   }
 
-  private handleStampPreset(type: string) {
-    const cx = 190;
-    const cy = 160;
-    const strokesToStamp: InPageStroke[] = [];
+  private updateSelectionBar() {
+    if (!this.shadow) return;
+    const bar = this.shadow.getElementById('nb-wb-selection-floating-bar');
+    if (!bar) return;
+    const count = this.wbSelectedStrokeIds.length;
+    if (count > 0) {
+      bar.style.display = 'flex';
+      const label = bar.querySelector('span');
+      if (label) label.textContent = `Selected (${count}):`;
+    } else {
+      bar.style.display = 'none';
+    }
+  }
 
-    const addStk = (tool: WhiteboardToolType | string, color: string, width: number, geom?: any, label?: string) => {
-      const s: InPageStroke = {
-        id: 'stroke-' + Math.random().toString(36).slice(2, 10),
-        tool: tool as WhiteboardToolType,
-        color,
-        width,
-        opacity: 1.0,
-        points: [],
-        geometry: geom ? { ...geom, label } : undefined,
-      };
-      strokesToStamp.push(s);
+  private triggerWbAnimationLoop() {
+    if (this.wbAnimationRafId !== null) return;
+    if (this.activeTab !== 'whiteboard') return;
+    if (this.wbLaserTrails.length === 0 && this.tempDisappearingStrokes.length === 0) return;
+
+    const tick = () => {
+      if (this.activeTab !== 'whiteboard') {
+        this.wbAnimationRafId = null;
+        return;
+      }
+
+      let needsRedraw = false;
+      const now = Date.now();
+
+      if (this.wbLaserTrails.length > 0) {
+        this.wbLaserTrails = this.wbLaserTrails
+          .map((pt) => ({ ...pt, alpha: pt.alpha - 0.05 }))
+          .filter((pt) => pt.alpha > 0);
+        needsRedraw = true;
+      }
+
+      if (this.tempDisappearingStrokes.length > 0) {
+        const initialLen = this.tempDisappearingStrokes.length;
+        this.tempDisappearingStrokes = this.tempDisappearingStrokes.filter(
+          (item) => now - item.createdAt < item.durationMs
+        );
+        if (this.tempDisappearingStrokes.length > 0 || initialLen > 0) {
+          needsRedraw = true;
+        }
+      }
+
+      if (needsRedraw) {
+        this.drawWbCanvas();
+      }
+
+      if (this.wbLaserTrails.length > 0 || this.tempDisappearingStrokes.length > 0) {
+        this.wbAnimationRafId = requestAnimationFrame(tick);
+      } else {
+        this.wbAnimationRafId = null;
+      }
     };
 
-    // ─── 10 DSA Presets ───
-    if (type === 'two_pointers') {
-      addStk('array_cells', '#38bdf8', 2.5, { x1: cx - 110, y1: cy, x2: cx + 110, y2: cy + 34 });
-      addStk('two_pointers', '#ec4899', 2, { x1: cx - 90, y1: cy + 38, x2: cx - 90, y2: cy + 58 }, 'L (left=0)');
-      addStk('two_pointers', '#10b981', 2, { x1: cx + 70, y1: cy + 38, x2: cx + 70, y2: cy + 58 }, 'R (right=4)');
-      addStk('text', '#f59e0b', 3, { x1: cx - 100, y1: cy - 25, x2: cx - 100, y2: cy - 25 }, 'Target = nums[L] + nums[R]');
-    } else if (type === 'bst') {
-      addStk('tree_node', '#10b981', 3, { x1: cx, y1: cy, x2: cx, y2: cy }, '50');
-      addStk('tree_node', '#06b6d4', 3, { x1: cx - 60, y1: cy + 55, x2: cx - 60, y2: cy + 55 }, '30');
-      addStk('tree_node', '#06b6d4', 3, { x1: cx + 60, y1: cy + 55, x2: cx + 60, y2: cy + 55 }, '70');
-      addStk('arrow', '#6366f1', 2, { x1: cx - 10, y1: cy + 10, x2: cx - 45, y2: cy + 45 });
-      addStk('arrow', '#6366f1', 2, { x1: cx + 10, y1: cy + 10, x2: cx + 45, y2: cy + 45 });
-      addStk('text', '#34d399', 2.5, { x1: cx - 80, y1: cy - 20, x2: cx - 80, y2: cy - 20 }, 'BST: Left < Root < Right');
-    } else if (type === 'floyd_cycle') {
-      const startX = cx - 110;
-      for (let i = 0; i < 3; i++) {
-        const nx = startX + i * 55;
-        addStk('rounded_rect', '#38bdf8', 2.5, { x1: nx, y1: cy, x2: nx + 38, y2: cy + 24 }, `N${i + 1}`);
-        addStk('arrow', '#f59e0b', 2, { x1: nx + 38, y1: cy + 12, x2: nx + 55, y2: cy + 12 });
-      }
-      addStk('rounded_rect', '#ec4899', 2.5, { x1: startX + 165, y1: cy + 35, x2: startX + 203, y2: cy + 59 }, 'N4');
-      addStk('rounded_rect', '#ec4899', 2.5, { x1: startX + 110, y1: cy + 50, x2: startX + 148, y2: cy + 74 }, 'N5');
-      addStk('arrow', '#ec4899', 2, { x1: startX + 148, y1: cy + 24, x2: startX + 165, y2: cy + 35 });
-      addStk('arrow', '#ec4899', 2, { x1: startX + 165, y1: cy + 55, x2: startX + 148, y2: cy + 62 });
-      addStk('arrow', '#ec4899', 2, { x1: startX + 110, y1: cy + 58, x2: startX + 110, y2: cy + 24 });
-      addStk('two_pointers', '#10b981', 2, { x1: startX + 70, y1: cy - 20, x2: startX + 70, y2: cy - 4 }, '🐢 Slow');
-      addStk('two_pointers', '#f59e0b', 2, { x1: startX + 165, y1: cy - 20, x2: startX + 165, y2: cy - 4 }, '🐇 Fast');
-    } else if (type === 'mono_stack') {
-      addStk('array_cells', '#38bdf8', 2.5, { x1: cx - 110, y1: cy + 10, x2: cx - 10, y2: cy + 40 });
-      addStk('stack_lifo', '#f59e0b', 2.5, { x1: cx + 25, y1: cy - 10, x2: cx + 75, y2: cy + 70 });
-      addStk('arrow', '#ec4899', 2, { x1: cx - 15, y1: cy + 15, x2: cx + 20, y2: cy + 25 });
-      addStk('text', '#f59e0b', 2.5, { x1: cx - 90, y1: cy - 20, x2: cx - 90, y2: cy - 20 }, 'Monotonic Stack (NGE)');
-    } else if (type === 'dp_table') {
-      this.wbTheme = 'matrix';
-      addStk('text', '#38bdf8', 3, { x1: cx - 90, y1: cy - 25, x2: cx - 90, y2: cy - 25 }, 'DP[i][j] = DP[i-1][j] + DP[i][j-1]');
-      addStk('tradeoff_note', '#facc15', 2, { x1: cx - 80, y1: cy + 20, x2: cx + 80, y2: cy + 70 }, 'Base Case: DP[0][j]=1');
-    } else if (type === 'trie') {
-      addStk('tree_node', '#10b981', 3, { x1: cx, y1: cy, x2: cx, y2: cy }, '*');
-      addStk('tree_node', '#38bdf8', 2.5, { x1: cx - 50, y1: cy + 50, x2: cx - 50, y2: cy + 50 }, 'c');
-      addStk('tree_node', '#38bdf8', 2.5, { x1: cx - 50, y1: cy + 100, x2: cx - 50, y2: cy + 100 }, 'a');
-      addStk('tree_node', '#ec4899', 2.5, { x1: cx - 80, y1: cy + 145, x2: cx - 80, y2: cy + 145 }, 't (end)');
-      addStk('tree_node', '#ec4899', 2.5, { x1: cx - 20, y1: cy + 145, x2: cx - 20, y2: cy + 145 }, 'r (end)');
-      addStk('arrow', '#6366f1', 2, { x1: cx - 8, y1: cy + 8, x2: cx - 42, y2: cy + 42 });
-      addStk('arrow', '#6366f1', 2, { x1: cx - 50, y1: cy + 62, x2: cx - 50, y2: cy + 88 });
-      addStk('arrow', '#6366f1', 2, { x1: cx - 55, y1: cy + 112, x2: cx - 72, y2: cy + 135 });
-      addStk('arrow', '#6366f1', 2, { x1: cx - 45, y1: cy + 112, x2: cx - 28, y2: cy + 135 });
-    } else if (type === 'graph_bfs') {
-      addStk('tree_node', '#10b981', 3, { x1: cx - 70, y1: cy, x2: cx - 70, y2: cy }, '1');
-      addStk('tree_node', '#38bdf8', 3, { x1: cx - 30, y1: cy + 40, x2: cx - 30, y2: cy + 40 }, '2');
-      addStk('tree_node', '#38bdf8', 3, { x1: cx - 30, y1: cy - 40, x2: cx - 30, y2: cy - 40 }, '3');
-      addStk('tree_node', '#818cf8', 3, { x1: cx + 20, y1: cy + 40, x2: cx + 20, y2: cy + 40 }, '4');
-      addStk('arrow', '#6366f1', 2, { x1: cx - 58, y1: cy + 8, x2: cx - 38, y2: cy + 30 });
-      addStk('arrow', '#6366f1', 2, { x1: cx - 58, y1: cy - 8, x2: cx - 38, y2: cy - 30 });
-      addStk('arrow', '#6366f1', 2, { x1: cx - 18, y1: cy + 40, x2: cx + 8, y2: cy + 40 });
-      addStk('queue_fifo', '#10b981', 2, { x1: cx + 55, y1: cy - 15, x2: cx + 130, y2: cy + 15 }, 'Queue');
-    } else if (type === 'min_heap') {
-      addStk('tree_node', '#10b981', 3, { x1: cx, y1: cy, x2: cx, y2: cy }, '10');
-      addStk('tree_node', '#38bdf8', 2.5, { x1: cx - 40, y1: cy + 40, x2: cx - 40, y2: cy + 40 }, '15');
-      addStk('tree_node', '#38bdf8', 2.5, { x1: cx + 40, y1: cy + 40, x2: cx + 40, y2: cy + 40 }, '20');
-      addStk('arrow', '#6366f1', 2, { x1: cx - 8, y1: cy + 8, x2: cx - 32, y2: cy + 32 });
-      addStk('arrow', '#6366f1', 2, { x1: cx + 8, y1: cy + 8, x2: cx + 32, y2: cy + 32 });
-      addStk('array_cells', '#f59e0b', 2.5, { x1: cx - 65, y1: cy + 75, x2: cx + 65, y2: cy + 100 });
-    } else if (type === 'intervals') {
-      addStk('line', '#38bdf8', 4, { x1: cx - 100, y1: cy, x2: cx - 30, y2: cy }, '[1, 4]');
-      addStk('line', '#ec4899', 4, { x1: cx - 60, y1: cy + 20, x2: cx + 20, y2: cy + 20 }, '[2, 6]');
-      addStk('line', '#10b981', 4, { x1: cx + 40, y1: cy, x2: cx + 100, y2: cy }, '[8, 10]');
-      addStk('arrow', '#f59e0b', 2, { x1: cx - 20, y1: cy + 35, x2: cx - 20, y2: cy + 55 });
-      addStk('line', '#10b981', 6, { x1: cx - 100, y1: cy + 70, x2: cx + 20, y2: cy + 70 }, 'Merged: [1, 6]');
-    } else if (type === 'recursion_tree') {
-      addStk('code_box', '#818cf8', 2, { x1: cx - 35, y1: cy, x2: cx + 35, y2: cy + 25 }, 'solve(N)');
-      addStk('code_box', '#38bdf8', 2, { x1: cx - 85, y1: cy + 50, x2: cx - 25, y2: cy + 75 }, 'solve(N/2)');
-      addStk('code_box', '#38bdf8', 2, { x1: cx + 25, y1: cy + 50, x2: cx + 85, y2: cy + 75 }, 'solve(N/2)');
-      addStk('arrow', '#6366f1', 2, { x1: cx - 15, y1: cy + 25, x2: cx - 50, y2: cy + 50 });
-      addStk('arrow', '#6366f1', 2, { x1: cx + 15, y1: cy + 25, x2: cx + 50, y2: cy + 50 });
+    this.wbAnimationRafId = requestAnimationFrame(tick);
+  }
+
+  private requestWbRedraw(previewPoints?: WhiteboardPoint[], previewGeometry?: any) {
+    this.latestPreviewPoints = previewPoints;
+    this.latestPreviewGeometry = previewGeometry;
+    if (this.wbDrawRafScheduled) return;
+    this.wbDrawRafScheduled = true;
+    requestAnimationFrame(() => {
+      this.wbDrawRafScheduled = false;
+      this.drawWbCanvas(this.latestPreviewPoints, this.latestPreviewGeometry);
+    });
+  }
+
+  private getOrCreatePattern(theme: string, isLightBg: boolean, ctx: CanvasRenderingContext2D): CanvasPattern | null {
+    const key = `${theme}-${isLightBg ? 'light' : 'dark'}`;
+    if (this.wbPatternCache.has(key)) {
+      return this.wbPatternCache.get(key)!;
     }
 
-    // ─── 8 System Design Presets ───
-    else if (type === 'url_shortener') {
-      addStk('user_client', '#3b82f6', 2.5, { x1: cx - 120, y1: cy, x2: cx - 85, y2: cy + 35 }, 'Client');
-      addStk('arrow', '#6366f1', 2, { x1: cx - 85, y1: cy + 17, x2: cx - 60, y2: cy + 17 });
-      addStk('load_balancer', '#f59e0b', 2.5, { x1: cx - 60, y1: cy - 5, x2: cx - 15, y2: cy + 38 }, 'LB');
-      addStk('arrow', '#6366f1', 2, { x1: cx - 15, y1: cy + 17, x2: cx + 10, y2: cy + 17 });
-      addStk('server_box', '#818cf8', 2.5, { x1: cx + 10, y1: cy - 5, x2: cx + 65, y2: cy + 35 }, 'App Srv');
-      addStk('arrow', '#10b981', 2, { x1: cx + 65, y1: cy + 8, x2: cx + 90, y2: cy - 15 });
-      addStk('cache_mem', '#f43f5e', 2.5, { x1: cx + 90, y1: cy - 35, x2: cx + 145, y2: cy - 5 }, 'Redis');
-      addStk('arrow', '#10b981', 2, { x1: cx + 65, y1: cy + 24, x2: cx + 90, y2: cy + 40 });
-      addStk('db_cylinder', '#10b981', 2.5, { x1: cx + 90, y1: cy + 25, x2: cx + 145, y2: cy + 70 }, 'SQL DB');
-    } else if (type === 'rate_limiter') {
-      addStk('user_client', '#3b82f6', 2.5, { x1: cx - 120, y1: cy, x2: cx - 85, y2: cy + 35 }, 'Client');
-      addStk('arrow', '#6366f1', 2, { x1: cx - 85, y1: cy + 17, x2: cx - 50, y2: cy + 17 });
-      addStk('cloud', '#38bdf8', 2.5, { x1: cx - 50, y1: cy - 10, x2: cx + 10, y2: cy + 40 }, 'API GW');
-      addStk('arrow', '#f59e0b', 2, { x1: cx - 20, y1: cy + 40, x2: cx - 20, y2: cy + 65 });
-      addStk('cache_mem', '#f43f5e', 2.5, { x1: cx - 50, y1: cy + 65, x2: cx + 10, y2: cy + 100 }, 'Token Redis');
-      addStk('arrow', '#10b981', 2, { x1: cx + 10, y1: cy + 17, x2: cx + 45, y2: cy + 17 });
-      addStk('server_box', '#818cf8', 2.5, { x1: cx + 45, y1: cy - 5, x2: cx + 110, y2: cy + 35 }, 'Microservices');
-    } else if (type === 'chat_system') {
-      addStk('user_client', '#3b82f6', 2.5, { x1: cx - 120, y1: cy - 25, x2: cx - 85, y2: cy + 10 }, 'User A');
-      addStk('user_client', '#3b82f6', 2.5, { x1: cx - 120, y1: cy + 30, x2: cx - 85, y2: cy + 65 }, 'User B');
-      addStk('arrow_bi', '#6366f1', 2, { x1: cx - 85, y1: cy - 8, x2: cx - 40, y2: cy + 8 });
-      addStk('arrow_bi', '#6366f1', 2, { x1: cx - 85, y1: cy + 45, x2: cx - 40, y2: cy + 25 });
-      addStk('websocket_gw', '#6366f1', 2.5, { x1: cx - 40, y1: cy, x2: cx + 15, y2: cy + 40 }, 'WS GW');
-      addStk('arrow', '#a855f7', 2, { x1: cx + 15, y1: cy + 20, x2: cx + 50, y2: cy + 20 });
-      addStk('message_queue', '#a855f7', 2.5, { x1: cx + 50, y1: cy + 5, x2: cx + 115, y2: cy + 38 }, 'Redis PubSub');
-      addStk('db_nosql', '#34d399', 2.5, { x1: cx + 60, y1: cy + 60, x2: cx + 110, y2: cy + 105 }, 'Cassandra');
-    } else if (type === 'distributed_cache') {
-      addStk('server_box', '#818cf8', 2.5, { x1: cx - 100, y1: cy, x2: cx - 40, y2: cy + 38 }, 'App Srv');
-      addStk('arrow', '#f43f5e', 2, { x1: cx - 40, y1: cy + 18, x2: cx + 5, y2: cy + 18 });
-      addStk('cache_mem', '#f43f5e', 2.5, { x1: cx + 5, y1: cy, x2: cx + 65, y2: cy + 38 }, 'Redis');
-      addStk('async_arrow', '#10b981', 2, { x1: cx + 65, y1: cy + 18, x2: cx + 100, y2: cy + 18 });
-      addStk('db_cylinder', '#10b981', 2.5, { x1: cx + 100, y1: cy - 10, x2: cx + 150, y2: cy + 45 }, 'Postgres');
-    } else if (type === 'ecommerce_saga') {
-      addStk('server_box', '#818cf8', 2.5, { x1: cx - 110, y1: cy, x2: cx - 50, y2: cy + 35 }, 'Order API');
-      addStk('arrow', '#a855f7', 2, { x1: cx - 50, y1: cy + 17, x2: cx - 10, y2: cy + 17 });
-      addStk('message_queue', '#a855f7', 2.5, { x1: cx - 10, y1: cy, x2: cx + 55, y2: cy + 35 }, 'Kafka Bus');
-      addStk('arrow', '#10b981', 2, { x1: cx + 55, y1: cy + 8, x2: cx + 85, y2: cy - 15 });
-      addStk('server_box', '#10b981', 2, { x1: cx + 85, y1: cy - 30, x2: cx + 140, y2: cy - 2 }, 'Payment');
-      addStk('arrow', '#10b981', 2, { x1: cx + 55, y1: cy + 25, x2: cx + 85, y2: cy + 45 });
-      addStk('server_box', '#10b981', 2, { x1: cx + 85, y1: cy + 35, x2: cx + 140, y2: cy + 63 }, 'Inventory');
-    } else if (type === 'web_crawler') {
-      addStk('message_queue', '#a855f7', 2.5, { x1: cx - 110, y1: cy, x2: cx - 45, y2: cy + 35 }, 'URL Queue');
-      addStk('arrow', '#6366f1', 2, { x1: cx - 45, y1: cy + 17, x2: cx - 10, y2: cy + 17 });
-      addStk('server_box', '#818cf8', 2.5, { x1: cx - 10, y1: cy, x2: cx + 45, y2: cy + 35 }, 'Fetchers');
-      addStk('arrow', '#f59e0b', 2, { x1: cx + 45, y1: cy + 17, x2: cx + 75, y2: cy + 17 });
-      addStk('object_storage', '#f97316', 2.5, { x1: cx + 75, y1: cy - 10, x2: cx + 125, y2: cy + 40 }, 'S3 Storage');
-    } else if (type === 'microservices_3tier') {
-      addStk('cdn_edge', '#06b6d4', 2.5, { x1: cx - 120, y1: cy - 10, x2: cx - 75, y2: cy + 30 }, 'CDN Edge');
-      addStk('arrow', '#6366f1', 2, { x1: cx - 75, y1: cy + 12, x2: cx - 45, y2: cy + 12 });
-      addStk('load_balancer', '#f59e0b', 2.5, { x1: cx - 45, y1: cy - 10, x2: cx + 5, y2: cy + 30 }, 'ALB');
-      addStk('arrow', '#6366f1', 2, { x1: cx + 5, y1: cy + 12, x2: cx + 30, y2: cy + 12 });
-      addStk('server_box', '#818cf8', 2.5, { x1: cx + 30, y1: cy - 10, x2: cx + 90, y2: cy + 28 }, 'Services');
-      addStk('arrow', '#10b981', 2, { x1: cx + 90, y1: cy + 12, x2: cx + 110, y2: cy + 12 });
-      addStk('db_cylinder', '#10b981', 2.5, { x1: cx + 110, y1: cy - 18, x2: cx + 155, y2: cy + 35 }, 'SQL Master');
-    } else if (type === 'search_analytics') {
-      addStk('server_box', '#818cf8', 2.5, { x1: cx - 120, y1: cy, x2: cx - 65, y2: cy + 35 }, 'Logs');
-      addStk('arrow', '#a855f7', 2, { x1: cx - 65, y1: cy + 17, x2: cx - 30, y2: cy + 17 });
-      addStk('message_queue', '#a855f7', 2.5, { x1: cx - 30, y1: cy, x2: cx + 30, y2: cy + 35 }, 'Kafka');
-      addStk('arrow', '#14b8a6', 2, { x1: cx + 30, y1: cy + 17, x2: cx + 65, y2: cy + 17 });
-      addStk('elasticsearch', '#14b8a6', 2.5, { x1: cx + 65, y1: cy - 5, x2: cx + 125, y2: cy + 35 }, 'Elasticsearch');
-    }
+    const pCanvas = document.createElement('canvas');
+    const pCtx = pCanvas.getContext('2d');
+    if (!pCtx) return null;
 
-    if (this.wbPrivacyMode === 'personal') {
-      this.wbPersonalStrokes.push(...strokesToStamp);
+    if (theme === 'dotted') {
+      pCanvas.width = 18;
+      pCanvas.height = 18;
+      pCtx.fillStyle = isLightBg ? 'rgba(0, 0, 0, 0.15)' : 'rgba(255, 255, 255, 0.12)';
+      pCtx.beginPath();
+      pCtx.arc(9, 9, 1.2, 0, Math.PI * 2);
+      pCtx.fill();
+    } else if (theme === 'matrix') {
+      pCanvas.width = 24;
+      pCanvas.height = 24;
+      pCtx.strokeStyle = isLightBg ? 'rgba(0, 0, 0, 0.12)' : 'rgba(255, 255, 255, 0.08)';
+      pCtx.lineWidth = 1;
+      pCtx.strokeRect(0, 0, 24, 24);
+    } else if (theme === 'ruled') {
+      pCanvas.width = 24;
+      pCanvas.height = 24;
+      pCtx.strokeStyle = isLightBg ? 'rgba(0, 0, 0, 0.09)' : 'rgba(255, 255, 255, 0.06)';
+      pCtx.lineWidth = 1;
+      pCtx.beginPath();
+      pCtx.moveTo(0, 23);
+      pCtx.lineTo(24, 23);
+      pCtx.stroke();
+    } else if (theme === 'grid') {
+      pCanvas.width = 20;
+      pCanvas.height = 20;
+      pCtx.strokeStyle = isLightBg ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.04)';
+      pCtx.lineWidth = 1;
+      pCtx.strokeRect(0, 0, 20, 20);
+    } else if (theme === 'isometric') {
+      pCanvas.width = 48;
+      pCanvas.height = 28;
+      pCtx.strokeStyle = isLightBg ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.05)';
+      pCtx.lineWidth = 1;
+      pCtx.beginPath();
+      pCtx.moveTo(0, 0);
+      pCtx.lineTo(48, 28);
+      pCtx.moveTo(0, 28);
+      pCtx.lineTo(48, 0);
+      pCtx.stroke();
     } else {
-      this.wbStrokes.push(...strokesToStamp);
-      strokesToStamp.forEach((s) => {
-        if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
-          chrome.runtime.sendMessage({ type: 'WHITEBOARD_STROKE_LOCAL', stroke: s }).catch(() => {});
-        }
-      });
+      return null;
     }
 
-    this.wbShowPresetsDrawer = false;
-    this.render();
+    const pattern = ctx.createPattern(pCanvas, 'repeat');
+    if (pattern) {
+      this.wbPatternCache.set(key, pattern);
+    }
+    return pattern;
   }
 
   private drawWbCanvas(previewPoints?: WhiteboardPoint[], previewGeometry?: any) {
@@ -2295,95 +2576,47 @@ export class FloatingWidget {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvas.width / dpr;
+    const h = canvas.height / dpr;
+
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.restore();
 
     // Draw Background Theme
     ctx.save();
-    const isLightBg = this.wbBgColor === '#ffffff' || this.wbBgColor === '#f8fafc' || this.wbBgColor === '#fef3c7';
-    ctx.fillStyle = this.wbBgColor || (isLightBg ? '#f8fafc' : '#090d16');
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const isPersonal = this.wbPrivacyMode === 'personal';
+    const activeTheme = isPersonal ? (this.wbPersonalTheme || 'grid') : (this.wbTheme || 'grid');
+    const activeBgColor = isPersonal ? (this.wbPersonalBgColor || '#090d16') : (this.wbBgColor || '#090d16');
+    const isLightBg = activeBgColor === '#ffffff' || activeBgColor === '#f8fafc' || activeBgColor === '#fef3c7';
+    ctx.fillStyle = activeBgColor || (isLightBg ? '#f8fafc' : '#090d16');
+    ctx.fillRect(0, 0, w, h);
 
-    if (this.wbTheme === 'ruled') {
-      ctx.strokeStyle = isLightBg ? 'rgba(99, 102, 241, 0.25)' : 'rgba(99, 102, 241, 0.18)';
-      ctx.lineWidth = 1;
-      for (let y = 28; y < canvas.height; y += 24) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(canvas.width, y);
-        ctx.stroke();
+    if (activeTheme && activeTheme !== 'plain' && activeTheme !== 'blank') {
+      const pattern = this.getOrCreatePattern(activeTheme, isLightBg, ctx);
+      if (pattern) {
+        ctx.fillStyle = pattern;
+        ctx.fillRect(0, 0, w, h);
       }
-      ctx.strokeStyle = 'rgba(244, 63, 94, 0.4)';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.moveTo(40, 0);
-      ctx.lineTo(40, canvas.height);
-      ctx.stroke();
-    } else if (this.wbTheme === 'plot') {
-      const midX = Math.floor(canvas.width / 2);
-      const midY = Math.floor(canvas.height / 2);
-      ctx.strokeStyle = '#6366f1';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.moveTo(0, midY);
-      ctx.lineTo(canvas.width, midY);
-      ctx.moveTo(midX, 0);
-      ctx.lineTo(midX, canvas.height);
-      ctx.stroke();
-    } else if (this.wbTheme === 'dotted') {
-      ctx.fillStyle = isLightBg ? 'rgba(0, 0, 0, 0.25)' : 'rgba(255, 255, 255, 0.16)';
-      for (let x = 8; x < canvas.width; x += 18) {
-        for (let y = 8; y < canvas.height; y += 18) {
-          ctx.beginPath();
-          ctx.arc(x, y, 1.2, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      }
-    } else if (this.wbTheme === 'matrix') {
-      ctx.strokeStyle = isLightBg ? 'rgba(99, 102, 241, 0.22)' : 'rgba(99, 102, 241, 0.15)';
-      ctx.lineWidth = 1;
-      const cell = 26;
-      for (let x = 0; x < canvas.width; x += cell) {
+      if (activeTheme === 'ruled') {
+        ctx.strokeStyle = 'rgba(244, 63, 94, 0.35)';
+        ctx.lineWidth = 1.5;
         ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, canvas.height);
+        ctx.moveTo(40, 0);
+        ctx.lineTo(40, h);
         ctx.stroke();
-      }
-      for (let y = 0; y < canvas.height; y += cell) {
+      } else if (activeTheme === 'plot') {
+        const midX = w / 2;
+        const midY = h / 2;
+        ctx.strokeStyle = isLightBg ? '#4f46e5' : '#818cf8';
+        ctx.lineWidth = 1.5;
         ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(canvas.width, y);
-        ctx.stroke();
-      }
-    } else if (this.wbTheme === 'isometric') {
-      ctx.strokeStyle = isLightBg ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.08)';
-      ctx.lineWidth = 1;
-      const isoStep = 24;
-      const tan30 = Math.tan((30 * Math.PI) / 180);
-      for (let x = -canvas.width; x < canvas.width * 2; x += isoStep * 2) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x + canvas.height / tan30, canvas.height);
-        ctx.stroke();
-
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x - canvas.height / tan30, canvas.height);
-        ctx.stroke();
-      }
-    } else if (this.wbTheme === 'grid') {
-      ctx.strokeStyle = isLightBg ? 'rgba(0, 0, 0, 0.07)' : 'rgba(255, 255, 255, 0.04)';
-      ctx.lineWidth = 1;
-      const gridSize = 20;
-      for (let x = 0; x < canvas.width; x += gridSize) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, canvas.height);
-        ctx.stroke();
-      }
-      for (let y = 0; y < canvas.height; y += gridSize) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(canvas.width, y);
+        ctx.moveTo(0, midY);
+        ctx.lineTo(w, midY);
+        ctx.moveTo(midX, 0);
+        ctx.lineTo(midX, h);
         ctx.stroke();
       }
     }
@@ -2392,13 +2625,15 @@ export class FloatingWidget {
     // Eraser Indicator
     if (this.wbTool === 'eraser' && this.wbEraserPos) {
       ctx.save();
-      const r = (this.wbWidth || 4) * 3;
-      ctx.strokeStyle = '#ef4444';
+      const r = (this.wbWidth || 4) * 2.5;
+      ctx.strokeStyle = isLightBg ? '#ef4444' : '#f87171';
       ctx.lineWidth = 1.5;
       ctx.setLineDash([3, 3]);
       ctx.beginPath();
       ctx.arc(this.wbEraserPos.x, this.wbEraserPos.y, r, 0, Math.PI * 2);
       ctx.stroke();
+      ctx.fillStyle = isLightBg ? 'rgba(239, 68, 68, 0.08)' : 'rgba(239, 68, 68, 0.15)';
+      ctx.fill();
       ctx.restore();
     }
 
@@ -2420,10 +2655,10 @@ export class FloatingWidget {
         const { x1, y1, x2, y2 } = s.geometry;
         const minX = Math.min(x1, x2);
         const minY = Math.min(y1, y2);
-        const w = Math.abs(x2 - x1);
-        const h = Math.abs(y2 - y1);
-        const midX = minX + w / 2;
-        const midY = minY + h / 2;
+        const gw = Math.abs(x2 - x1);
+        const gh = Math.abs(y2 - y1);
+        const midX = minX + gw / 2;
+        const midY = minY + gh / 2;
 
         if (s.tool === 'line') {
           ctx.beginPath();
@@ -2431,7 +2666,7 @@ export class FloatingWidget {
           ctx.lineTo(x2, y2);
           ctx.stroke();
           if (s.geometry.label) {
-            ctx.fillStyle = '#ffffff';
+            ctx.fillStyle = isLightBg ? '#0f172a' : '#ffffff';
             ctx.font = 'bold 10px monospace';
             ctx.fillText(s.geometry.label, (x1 + x2) / 2, (y1 + y2) / 2 - 6);
           }
@@ -2466,9 +2701,9 @@ export class FloatingWidget {
           ctx.lineTo(x1 + headLen * Math.cos(angle + Math.PI / 6), y1 + headLen * Math.sin(angle + Math.PI / 6));
           ctx.stroke();
         } else if (s.tool === 'rect') {
-          ctx.strokeRect(minX, minY, w, h);
+          ctx.strokeRect(minX, minY, gw, gh);
           if (s.geometry.label) {
-            ctx.fillStyle = '#ffffff';
+            ctx.fillStyle = isLightBg ? '#0f172a' : '#ffffff';
             ctx.font = 'bold 10px sans-serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
@@ -2476,23 +2711,23 @@ export class FloatingWidget {
           }
         } else if (s.tool === 'rounded_rect') {
           ctx.beginPath();
-          ctx.roundRect(minX, minY, Math.max(20, w), Math.max(20, h), 8);
+          ctx.roundRect(minX, minY, Math.max(20, gw), Math.max(20, gh), 8);
           ctx.stroke();
           if (s.geometry.label) {
-            ctx.fillStyle = '#ffffff';
+            ctx.fillStyle = isLightBg ? '#0f172a' : '#ffffff';
             ctx.font = 'bold 10px sans-serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText(s.geometry.label, midX, midY);
           }
         } else if (s.tool === 'circle') {
-          const rx = w / 2;
-          const ry = h / 2;
+          const rx = gw / 2;
+          const ry = gh / 2;
           ctx.beginPath();
           ctx.ellipse(minX + rx, minY + ry, rx, ry, 0, 0, Math.PI * 2);
           ctx.stroke();
           if (s.geometry.label) {
-            ctx.fillStyle = '#ffffff';
+            ctx.fillStyle = isLightBg ? '#0f172a' : '#ffffff';
             ctx.font = 'bold 10px sans-serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
@@ -2501,20 +2736,41 @@ export class FloatingWidget {
         } else if (s.tool === 'triangle') {
           ctx.beginPath();
           ctx.moveTo(midX, minY);
-          ctx.lineTo(minX + w, minY + h);
-          ctx.lineTo(minX, minY + h);
+          ctx.lineTo(minX + gw, minY + gh);
+          ctx.lineTo(minX, minY + gh);
+          ctx.closePath();
+          ctx.stroke();
+        } else if (s.tool === 'star') {
+          const spikes = 5;
+          const outerR = Math.max(12, Math.min(gw, gh) / 2);
+          const innerR = outerR / 2.2;
+          let rot = (Math.PI / 2) * 3;
+          const step = Math.PI / spikes;
+          ctx.beginPath();
+          ctx.moveTo(midX, midY - outerR);
+          for (let i = 0; i < spikes; i++) {
+            let sx = midX + Math.cos(rot) * outerR;
+            let sy = midY + Math.sin(rot) * outerR;
+            ctx.lineTo(sx, sy);
+            rot += step;
+            sx = midX + Math.cos(rot) * innerR;
+            sy = midY + Math.sin(rot) * innerR;
+            ctx.lineTo(sx, sy);
+            rot += step;
+          }
+          ctx.lineTo(midX, midY - outerR);
           ctx.closePath();
           ctx.stroke();
         } else if (s.tool === 'decision_diamond') {
           ctx.beginPath();
           ctx.moveTo(midX, minY);
-          ctx.lineTo(minX + w, midY);
-          ctx.lineTo(midX, minY + h);
+          ctx.lineTo(minX + gw, midY);
+          ctx.lineTo(midX, minY + gh);
           ctx.lineTo(minX, midY);
           ctx.closePath();
           ctx.stroke();
           if (s.geometry.label) {
-            ctx.fillStyle = '#ffffff';
+            ctx.fillStyle = isLightBg ? '#0f172a' : '#ffffff';
             ctx.font = 'bold 10px sans-serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
@@ -2535,8 +2791,8 @@ export class FloatingWidget {
             ctx.fillText(s.geometry.label, x1, y1);
           }
         } else if (s.tool === 'sticky_note') {
-          const noteW = Math.max(80, w);
-          const noteH = Math.max(60, h);
+          const noteW = Math.max(80, gw);
+          const noteH = Math.max(60, gh);
           ctx.fillStyle = '#fef3c7';
           ctx.strokeStyle = '#f59e0b';
           ctx.beginPath();
@@ -2557,9 +2813,9 @@ export class FloatingWidget {
           ctx.textBaseline = 'top';
           ctx.fillText(s.geometry.label || 'Label', x1, y1);
         } else if (s.tool === 'code_box') {
-          const boxW = Math.max(80, w);
-          const boxH = Math.max(32, h);
-          ctx.fillStyle = 'rgba(15, 23, 42, 0.95)';
+          const boxW = Math.max(80, gw);
+          const boxH = Math.max(32, gh);
+          ctx.fillStyle = isLightBg ? 'rgba(240, 249, 255, 0.95)' : 'rgba(15, 23, 42, 0.95)';
           ctx.strokeStyle = '#38bdf8';
           ctx.lineWidth = 1.5;
           ctx.beginPath();
@@ -2567,7 +2823,7 @@ export class FloatingWidget {
           ctx.fill();
           ctx.stroke();
           if (s.geometry.label) {
-            ctx.fillStyle = '#38bdf8';
+            ctx.fillStyle = '#0284c7';
             ctx.font = 'bold 10px monospace';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
@@ -2578,8 +2834,8 @@ export class FloatingWidget {
         // DSA Primitives
         else if (s.tool === 'array_cells') {
           const numCells = 5;
-          const cellW = Math.max(22, Math.floor(Math.max(100, w) / numCells));
-          const cellH = Math.max(24, Math.min(40, h || 28));
+          const cellW = Math.max(22, Math.floor(Math.max(100, gw) / numCells));
+          const cellH = Math.max(24, Math.min(40, gh || 28));
           ctx.fillStyle = isLightBg ? 'rgba(255, 255, 255, 0.95)' : 'rgba(15, 23, 42, 0.9)';
           for (let i = 0; i < numCells; i++) {
             const cx = minX + i * cellW;
@@ -2597,8 +2853,8 @@ export class FloatingWidget {
             ctx.fillStyle = isLightBg ? 'rgba(255, 255, 255, 0.95)' : 'rgba(15, 23, 42, 0.9)';
           }
         } else if (s.tool === 'stack_lifo') {
-          const stkW = Math.max(45, w);
-          const stkH = Math.max(70, h);
+          const stkW = Math.max(45, gw);
+          const stkH = Math.max(70, gh);
           ctx.beginPath();
           ctx.moveTo(minX, minY);
           ctx.lineTo(minX, minY + stkH);
@@ -2619,8 +2875,8 @@ export class FloatingWidget {
             ctx.fillText(i === items - 1 ? 'TOP' : `val_${i + 1}`, minX + stkW / 2, iy + itemH / 2);
           }
         } else if (s.tool === 'queue_fifo') {
-          const qW = Math.max(75, w);
-          const qH = Math.max(28, h);
+          const qW = Math.max(75, gw);
+          const qH = Math.max(28, gh);
           ctx.beginPath();
           ctx.moveTo(minX, minY);
           ctx.lineTo(minX + qW, minY);
@@ -2641,8 +2897,8 @@ export class FloatingWidget {
             ctx.fillText(`e${i + 1}`, qx + qItemW / 2, minY + qH / 2);
           }
         } else if (s.tool === 'hashmap_table') {
-          const hmW = Math.max(75, w);
-          const hmH = Math.max(50, h);
+          const hmW = Math.max(75, gw);
+          const hmH = Math.max(50, gh);
           ctx.strokeRect(minX, minY, hmW, hmH);
           const rows = 3;
           const rH = hmH / rows;
@@ -2658,7 +2914,7 @@ export class FloatingWidget {
           ctx.stroke();
           for (let i = 0; i < rows; i++) {
             ctx.fillStyle = isLightBg ? '#64748b' : '#94a3b8';
-            ctx.font = 'bold 9px monospace';
+            ctx.font = '9px monospace';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText(`${i}`, minX + 11, minY + i * rH + rH / 2);
@@ -2688,8 +2944,8 @@ export class FloatingWidget {
 
         // Architecture Nodes
         else if (s.tool === 'db_cylinder' || s.tool === 'db_nosql') {
-          const dbW = Math.max(50, w);
-          const dbH = Math.max(55, h);
+          const dbW = Math.max(50, gw);
+          const dbH = Math.max(55, gh);
           const ry = Math.min(14, dbH * 0.2);
           ctx.fillStyle = isLightBg ? 'rgba(255, 255, 255, 0.95)' : 'rgba(15, 23, 42, 0.95)';
           ctx.beginPath();
@@ -2710,8 +2966,8 @@ export class FloatingWidget {
             ctx.fillText(s.geometry.label, minX + dbW / 2, minY + dbH / 2 + 4);
           }
         } else if (s.tool === 'cloud') {
-          const cW = Math.max(65, w);
-          const cH = Math.max(40, h);
+          const cW = Math.max(65, gw);
+          const cH = Math.max(40, gh);
           ctx.fillStyle = isLightBg ? 'rgba(255, 255, 255, 0.95)' : 'rgba(15, 23, 42, 0.95)';
           ctx.beginPath();
           ctx.roundRect(minX, minY, cW, cH, 14);
@@ -2725,8 +2981,8 @@ export class FloatingWidget {
             ctx.fillText(s.geometry.label, minX + cW / 2, minY + cH / 2);
           }
         } else if (s.tool === 'load_balancer') {
-          const lbW = Math.max(55, w);
-          const lbH = Math.max(55, h);
+          const lbW = Math.max(55, gw);
+          const lbH = Math.max(55, gh);
           ctx.fillStyle = isLightBg ? 'rgba(255, 255, 255, 0.95)' : 'rgba(15, 23, 42, 0.95)';
           ctx.beginPath();
           ctx.moveTo(minX + lbW / 2, minY);
@@ -2744,8 +3000,8 @@ export class FloatingWidget {
             ctx.fillText(s.geometry.label, minX + lbW / 2, minY + lbH / 2);
           }
         } else if (s.tool === 'message_queue') {
-          const mqW = Math.max(70, w);
-          const mqH = Math.max(34, h);
+          const mqW = Math.max(70, gw);
+          const mqH = Math.max(34, gh);
           ctx.fillStyle = isLightBg ? 'rgba(255, 255, 255, 0.95)' : 'rgba(15, 23, 42, 0.95)';
           ctx.beginPath();
           ctx.roundRect(minX, minY, mqW, mqH, 6);
@@ -2759,8 +3015,8 @@ export class FloatingWidget {
             ctx.fillText(s.geometry.label, minX + mqW / 2, minY + mqH / 2);
           }
         } else if (s.tool === 'server_box') {
-          const sW = Math.max(65, w);
-          const sH = Math.max(40, h);
+          const sW = Math.max(65, gw);
+          const sH = Math.max(40, gh);
           ctx.fillStyle = isLightBg ? 'rgba(255, 255, 255, 0.95)' : 'rgba(15, 23, 42, 0.95)';
           ctx.beginPath();
           ctx.roundRect(minX, minY, sW, sH, 6);
@@ -2778,8 +3034,8 @@ export class FloatingWidget {
             ctx.fillText(s.geometry.label, minX + sW / 2, minY + sH / 2 + 2);
           }
         } else if (s.tool === 'cache_mem') {
-          const caW = Math.max(65, w);
-          const caH = Math.max(32, h);
+          const caW = Math.max(65, gw);
+          const caH = Math.max(32, gh);
           ctx.fillStyle = isLightBg ? 'rgba(244, 63, 94, 0.1)' : 'rgba(244, 63, 94, 0.2)';
           ctx.beginPath();
           ctx.roundRect(minX, minY, caW, caH, 5);
@@ -2791,8 +3047,8 @@ export class FloatingWidget {
           ctx.textBaseline = 'middle';
           ctx.fillText(s.geometry.label || '⚡ Redis Cache', minX + caW / 2, minY + caH / 2);
         } else if (s.tool === 'cdn_edge') {
-          const cdnW = Math.max(65, w);
-          const cdnH = Math.max(36, h);
+          const cdnW = Math.max(65, gw);
+          const cdnH = Math.max(36, gh);
           ctx.fillStyle = isLightBg ? 'rgba(6, 182, 212, 0.1)' : 'rgba(6, 182, 212, 0.2)';
           ctx.beginPath();
           ctx.roundRect(minX, minY, cdnW, cdnH, 12);
@@ -2804,8 +3060,8 @@ export class FloatingWidget {
           ctx.textBaseline = 'middle';
           ctx.fillText(s.geometry.label || '🌐 CDN Edge', minX + cdnW / 2, minY + cdnH / 2);
         } else if (s.tool === 'object_storage') {
-          const obW = Math.max(65, w);
-          const obH = Math.max(45, h);
+          const obW = Math.max(65, gw);
+          const obH = Math.max(45, gh);
           ctx.fillStyle = isLightBg ? 'rgba(249, 115, 22, 0.1)' : 'rgba(249, 115, 22, 0.2)';
           ctx.beginPath();
           ctx.roundRect(minX, minY, obW, obH, 6);
@@ -2817,8 +3073,8 @@ export class FloatingWidget {
           ctx.textBaseline = 'middle';
           ctx.fillText(s.geometry.label || '📦 S3 Storage', minX + obW / 2, minY + obH / 2);
         } else if (s.tool === 'auth_jwt') {
-          const auW = Math.max(60, w);
-          const auH = Math.max(40, h);
+          const auW = Math.max(60, gw);
+          const auH = Math.max(40, gh);
           ctx.beginPath();
           ctx.moveTo(minX + auW / 2, minY);
           ctx.lineTo(minX + auW, minY + auH * 0.3);
@@ -2834,8 +3090,8 @@ export class FloatingWidget {
           ctx.textBaseline = 'middle';
           ctx.fillText(s.geometry.label || '🛡️ JWT Auth', minX + auW / 2, minY + auH / 2);
         } else if (s.tool === 'websocket_gw') {
-          const wsW = Math.max(65, w);
-          const wsH = Math.max(36, h);
+          const wsW = Math.max(65, gw);
+          const wsH = Math.max(36, gh);
           ctx.fillStyle = isLightBg ? 'rgba(99, 102, 241, 0.15)' : 'rgba(99, 102, 241, 0.25)';
           ctx.beginPath();
           ctx.roundRect(minX, minY, wsW, wsH, 6);
@@ -2847,8 +3103,8 @@ export class FloatingWidget {
           ctx.textBaseline = 'middle';
           ctx.fillText(s.geometry.label || '⚡ WS Gateway', minX + wsW / 2, minY + wsH / 2);
         } else if (s.tool === 'elasticsearch') {
-          const esW = Math.max(65, w);
-          const esH = Math.max(36, h);
+          const esW = Math.max(65, gw);
+          const esH = Math.max(36, gh);
           ctx.fillStyle = isLightBg ? 'rgba(20, 184, 166, 0.15)' : 'rgba(20, 184, 166, 0.25)';
           ctx.beginPath();
           ctx.roundRect(minX, minY, esW, esH, 6);
@@ -2860,8 +3116,8 @@ export class FloatingWidget {
           ctx.textBaseline = 'middle';
           ctx.fillText(s.geometry.label || '🔍 Search / ES', minX + esW / 2, minY + esH / 2);
         } else if (s.tool === 'user_client' || s.tool === 'mobile_client') {
-          const clW = Math.max(50, w);
-          const clH = Math.max(34, h);
+          const clW = Math.max(50, gw);
+          const clH = Math.max(34, gh);
           ctx.fillStyle = isLightBg ? 'rgba(59, 130, 246, 0.15)' : 'rgba(59, 130, 246, 0.25)';
           ctx.beginPath();
           ctx.roundRect(minX, minY, clW, clH, 6);
@@ -2888,8 +3144,8 @@ export class FloatingWidget {
           ctx.lineTo(x2 - headLen * Math.cos(angle + Math.PI / 6), y2 - headLen * Math.sin(angle + Math.PI / 6));
           ctx.stroke();
         } else if (s.tool === 'tradeoff_note') {
-          const trW = Math.max(90, w);
-          const trH = Math.max(45, h);
+          const trW = Math.max(90, gw);
+          const trH = Math.max(45, gh);
           ctx.fillStyle = 'rgba(250, 204, 21, 0.18)';
           ctx.strokeStyle = '#facc15';
           ctx.beginPath();
@@ -2935,6 +3191,7 @@ export class FloatingWidget {
       });
     });
 
+    // Render Preview Stroke
     if (previewGeometry) {
       render({
         id: 'preview',
@@ -2960,7 +3217,7 @@ export class FloatingWidget {
     if (this.wbTool === 'torch' && this.wbTorchPos) {
       ctx.save();
       ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillRect(0, 0, w, h);
 
       ctx.globalCompositeOperation = 'destination-out';
       ctx.beginPath();
@@ -2990,6 +3247,64 @@ export class FloatingWidget {
       ctx.fill();
       ctx.restore();
     });
+
+    // Render Marquee Selection Box
+    if (this.wbSelectionBox) {
+      ctx.save();
+      const minX = Math.min(this.wbSelectionBox.x1, this.wbSelectionBox.x2);
+      const minY = Math.min(this.wbSelectionBox.y1, this.wbSelectionBox.y2);
+      const selW = Math.abs(this.wbSelectionBox.x2 - this.wbSelectionBox.x1);
+      const selH = Math.abs(this.wbSelectionBox.y2 - this.wbSelectionBox.y1);
+      ctx.fillStyle = isLightBg ? 'rgba(99, 102, 241, 0.12)' : 'rgba(99, 102, 241, 0.2)';
+      ctx.fillRect(minX, minY, selW, selH);
+      ctx.strokeStyle = '#6366f1';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([5, 4]);
+      ctx.strokeRect(minX, minY, selW, selH);
+      ctx.restore();
+    }
+
+    // Render Selected Strokes Bounding Box & 4 Corner Handles
+    if (this.wbSelectedStrokeIds.length > 0) {
+      const selected = activeList.filter((s) => this.wbSelectedStrokeIds.includes(s.id));
+      if (selected.length > 0) {
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        selected.forEach((s) => {
+          const b = getStrokeBounds(s);
+          if (b.minX < minX) minX = b.minX;
+          if (b.maxX > maxX) maxX = b.maxX;
+          if (b.minY < minY) minY = b.minY;
+          if (b.maxY > maxY) maxY = b.maxY;
+        });
+        const pad = 6;
+        const bbX = minX - pad;
+        const bbY = minY - pad;
+        const bbW = maxX - minX + pad * 2;
+        const bbH = maxY - minY + pad * 2;
+
+        ctx.save();
+        ctx.strokeStyle = '#38bdf8';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 4]);
+        ctx.strokeRect(bbX, bbY, bbW, bbH);
+        ctx.setLineDash([]);
+
+        const handles = [
+          { x: bbX, y: bbY },
+          { x: bbX + bbW, y: bbY },
+          { x: bbX, y: bbY + bbH },
+          { x: bbX + bbW, y: bbY + bbH },
+        ];
+        handles.forEach((hPos) => {
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(hPos.x - 3.5, hPos.y - 3.5, 7, 7);
+          ctx.strokeStyle = '#0284c7';
+          ctx.lineWidth = 1.5;
+          ctx.strokeRect(hPos.x - 3.5, hPos.y - 3.5, 7, 7);
+        });
+        ctx.restore();
+      }
+    }
   }
 
   private listenForRuntimeMessages() {
@@ -3009,6 +3324,10 @@ export class FloatingWidget {
             this.wbStrokes.push(msg.stroke);
             if (this.activeTab === 'whiteboard') this.drawWbCanvas();
           }
+        } else if (msg.type === 'WHITEBOARD_UPDATE_STROKES_LOCAL' && msg.strokes) {
+          const map = new Map<string, InPageStroke>(msg.strokes.map((s: any) => [s.id, s]));
+          this.wbStrokes = this.wbStrokes.map((s) => (map.has(s.id) ? (map.get(s.id) as InPageStroke) : s));
+          if (this.activeTab === 'whiteboard') this.drawWbCanvas();
         } else if (msg.type === 'WHITEBOARD_TEMP_STROKE_LOCAL' && msg.stroke) {
           this.tempDisappearingStrokes.push({
             stroke: msg.stroke,
@@ -3271,17 +3590,14 @@ export class FloatingWidget {
               }
             }
           }
-          if (changes.synqto_personal_notebook) {
-            const nb = changes.synqto_personal_notebook.newValue;
-            if (nb && Array.isArray(nb.pages)) {
-              const activePage = nb.pages.find((p: any) => p.id === nb.activePageId) || nb.pages[0];
-              if (activePage) {
-                this.wbPersonalStrokes = activePage.strokes || [];
-                if (this.wbPrivacyMode === 'personal') {
-                  if (activePage.background) this.wbTheme = activePage.background;
-                  if (activePage.bgColor) this.wbBgColor = activePage.bgColor;
-                  if (this.activeTab === 'whiteboard') this.drawWbCanvas();
-                }
+          if (changes.synqto_inpage_personal_board) {
+            const board = changes.synqto_inpage_personal_board.newValue;
+            if (board) {
+              if (Array.isArray(board.strokes)) this.wbPersonalStrokes = board.strokes;
+              if (board.theme) this.wbPersonalTheme = board.theme;
+              if (board.bgColor) this.wbPersonalBgColor = board.bgColor;
+              if (this.activeTab === 'whiteboard' && this.wbPrivacyMode === 'personal') {
+                this.drawWbCanvas();
               }
             }
           }

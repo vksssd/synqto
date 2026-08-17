@@ -67,7 +67,7 @@ export class PageObserver {
       }
     }
 
-    // 4. Polling fallback (350ms interval) to catch quiet SPA transitions
+    // 4. Polling fallback (1500ms interval) to catch quiet SPA transitions without CPU overhead
     this.pollTimer = setInterval(() => {
       if (!isExtensionValid()) {
         this.destroy();
@@ -76,7 +76,7 @@ export class PageObserver {
       if (window.location.href !== this.lastUrl) {
         this.checkCurrentPage();
       }
-    }, 350);
+    }, 1500);
   }
 
   private debouncedCheck = debounce(() => {

@@ -34,6 +34,11 @@ export class TopologyService {
   private packetIdOrder: string[] = [];
   private readonly MAX_SEEN_PACKETS = 1500;
 
+  // Active connection reconciliation loop & retry tracking
+  private reconciliationTimer: any = null;
+  private retryTimers: Map<string, any> = new Map();
+  private retryAttempts: Map<string, number> = new Map();
+
   // Listeners for UI state and packet routing
   private packetListeners: Set<(packet: NetworkPacket) => void> = new Set();
   private stateListeners: Set<(state: TopologyState) => void> = new Set();
@@ -58,14 +63,21 @@ export class TopologyService {
     this.currentRoomId = roomId;
     this.seenPacketIds.clear();
     this.packetIdOrder = [];
+    this.retryAttempts.clear();
+    this.clearAllRetryTimers();
 
     this.webrtc.setMyPeerId(identity.peerId);
 
     // Connect to signaling server
     this.signaling.connect(roomId, identity.peerId, identity.nickname);
+
+    // Start background topology reconciliation loop
+    this.startReconciliationLoop();
   }
 
   public leave() {
+    this.stopReconciliationLoop();
+    this.clearAllRetryTimers();
     this.signaling.disconnect();
     this.webrtc.closeAll();
     this.isLeader = false;
@@ -75,7 +87,88 @@ export class TopologyService {
     this.standbyPeers.clear();
     this.backboneLeaders.clear();
     this.allPeers.clear();
+    this.retryAttempts.clear();
     this.emitState();
+  }
+
+  private startReconciliationLoop() {
+    this.stopReconciliationLoop();
+    this.reconciliationTimer = setInterval(() => {
+      this.reconcileConnections();
+    }, 3500);
+  }
+
+  private stopReconciliationLoop() {
+    if (this.reconciliationTimer) {
+      clearInterval(this.reconciliationTimer);
+      this.reconciliationTimer = null;
+    }
+  }
+
+  private clearAllRetryTimers() {
+    this.retryTimers.forEach((timer) => clearTimeout(timer));
+    this.retryTimers.clear();
+  }
+
+  /**
+   * Periodically verifies all required topology links and repairs broken or deadlocked handshakes
+   */
+  private reconcileConnections() {
+    if (!this.myIdentity || !this.currentRoomId) return;
+
+    if (this.isLeader) {
+      // Leaders must maintain connections to all backbone leaders
+      this.backboneLeaders.forEach((leaderId) => {
+        if (leaderId === this.myIdentity?.peerId) return;
+        const isConnected = this.webrtc.isConnected(leaderId);
+        const isConnecting = this.webrtc.isConnecting(leaderId);
+
+        if (!isConnected && !isConnecting) {
+          // If disconnected and not already negotiating, trigger connection or ICE restart
+          this.webrtc.initiateConnection(leaderId);
+        }
+      });
+    } else {
+      // Regular peer must maintain connection to primary assigned leader
+      if (this.assignedLeader && this.assignedLeader !== this.myIdentity?.peerId) {
+        const isConnected = this.webrtc.isConnected(this.assignedLeader);
+        const isConnecting = this.webrtc.isConnecting(this.assignedLeader);
+        if (!isConnected && !isConnecting) {
+          this.webrtc.initiateConnection(this.assignedLeader);
+        }
+      }
+
+      // Regular peer must maintain pre-warmed connection to standby leader
+      if (
+        this.assignedStandbyLeader &&
+        this.assignedStandbyLeader !== this.myIdentity?.peerId &&
+        this.assignedStandbyLeader !== this.assignedLeader
+      ) {
+        const isConnected = this.webrtc.isConnected(this.assignedStandbyLeader);
+        const isConnecting = this.webrtc.isConnecting(this.assignedStandbyLeader);
+        if (!isConnected && !isConnecting) {
+          this.webrtc.initiateConnection(this.assignedStandbyLeader);
+        }
+      }
+    }
+  }
+
+  private schedulePeerReconnection(peerId: string) {
+    if (this.retryTimers.has(peerId)) return;
+
+    const attempts = this.retryAttempts.get(peerId) || 0;
+    const delay = Math.min(8000, 1500 * Math.pow(1.5, Math.min(attempts, 4))) + Math.floor(Math.random() * 1000);
+    this.retryAttempts.set(peerId, attempts + 1);
+
+    const timer = setTimeout(() => {
+      this.retryTimers.delete(peerId);
+      if (this.allPeers.has(peerId) && !this.webrtc.isConnected(peerId)) {
+        console.log(`[TopologyService] Reconnecting to peer ${peerId} (attempt #${attempts + 1})...`);
+        this.webrtc.restartIce(peerId);
+      }
+    }, delay);
+
+    this.retryTimers.set(peerId, timer);
   }
 
   private setupSignalingListeners() {
@@ -95,8 +188,8 @@ export class TopologyService {
 
         // Ensure we connect to other leaders for backbone mesh
         this.backboneLeaders.forEach((leaderId) => {
-          if (!this.webrtc.isConnected(leaderId)) {
-            // Lexicographical tie-breaker for who initiates the connection
+          if (!this.webrtc.isConnected(leaderId) && !this.webrtc.isConnecting(leaderId)) {
+            // Lexicographical tie-breaker for initial handshake, reconciliation loop acts as fallback
             if ((this.myIdentity?.peerId || '') < leaderId) {
               this.webrtc.initiateConnection(leaderId);
             }
@@ -111,7 +204,7 @@ export class TopologyService {
 
         // Regular peer: 1) connect to primary assigned leader
         if (this.assignedLeader && this.assignedLeader !== this.myIdentity?.peerId) {
-          if (!this.webrtc.isConnected(this.assignedLeader)) {
+          if (!this.webrtc.isConnected(this.assignedLeader) && !this.webrtc.isConnecting(this.assignedLeader)) {
             this.webrtc.initiateConnection(this.assignedLeader);
           }
         }
@@ -122,7 +215,7 @@ export class TopologyService {
           this.assignedStandbyLeader !== this.myIdentity?.peerId &&
           this.assignedStandbyLeader !== this.assignedLeader
         ) {
-          if (!this.webrtc.isConnected(this.assignedStandbyLeader)) {
+          if (!this.webrtc.isConnected(this.assignedStandbyLeader) && !this.webrtc.isConnecting(this.assignedStandbyLeader)) {
             this.webrtc.initiateConnection(this.assignedStandbyLeader);
           }
         }
@@ -142,7 +235,7 @@ export class TopologyService {
 
       // Connect to other leaders in backbone
       this.backboneLeaders.forEach((leaderId) => {
-        if (!this.webrtc.isConnected(leaderId)) {
+        if (!this.webrtc.isConnected(leaderId) && !this.webrtc.isConnecting(leaderId)) {
           if ((this.myIdentity?.peerId || '') < leaderId) {
             this.webrtc.initiateConnection(leaderId);
           }
@@ -170,11 +263,15 @@ export class TopologyService {
       });
 
       // Connect to primary leader
-      if (this.assignedLeader) {
+      if (this.assignedLeader && !this.webrtc.isConnected(this.assignedLeader)) {
         this.webrtc.initiateConnection(this.assignedLeader);
       }
       // Connect to standby leader
-      if (this.assignedStandbyLeader && this.assignedStandbyLeader !== this.assignedLeader) {
+      if (
+        this.assignedStandbyLeader &&
+        this.assignedStandbyLeader !== this.assignedLeader &&
+        !this.webrtc.isConnected(this.assignedStandbyLeader)
+      ) {
         this.webrtc.initiateConnection(this.assignedStandbyLeader);
       }
 
@@ -212,6 +309,12 @@ export class TopologyService {
 
     this.webrtc.onConnectionState((peerId, status) => {
       if (status === 'connected') {
+        this.retryAttempts.delete(peerId);
+        if (this.retryTimers.has(peerId)) {
+          clearTimeout(this.retryTimers.get(peerId));
+          this.retryTimers.delete(peerId);
+        }
+
         if (this.isLeader && !this.backboneLeaders.has(peerId)) {
           this.clusterPeers.add(peerId);
         }
@@ -230,6 +333,16 @@ export class TopologyService {
             this.assignedStandbyLeader = null;
             this.emitState();
           }
+        }
+
+        // Schedule automatic reconnection if this peer is part of our required topology links
+        const isRequiredPeer =
+          peerId === this.assignedLeader ||
+          peerId === this.assignedStandbyLeader ||
+          this.backboneLeaders.has(peerId);
+
+        if (isRequiredPeer && this.allPeers.has(peerId)) {
+          this.schedulePeerReconnection(peerId);
         }
       }
       this.emitState();

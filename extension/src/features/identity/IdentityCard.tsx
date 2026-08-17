@@ -12,7 +12,7 @@ interface IdentityCardProps {
 
 export const IdentityCard: React.FC<IdentityCardProps> = ({ identity, isLeader = false }) => {
   const identityService = IdentityService.getInstance();
-  const [isExpanded, setIsExpanded] = useState(true);
+  const [isExpanded, setIsExpanded] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [customName, setCustomName] = useState(identity?.nickname || '');
 

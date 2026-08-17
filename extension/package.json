@@ -1,13 +1,15 @@
 {
   "name": "synqto-extension",
-  "version": "0.2.0",
+  "version": "0.2.0.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite build --watch",
     "build": "vite build",
     "package": "node scripts/package.mjs",
-    "clean": "rimraf dist"
+    "clean": "rimraf dist",
+    "preview:ui": "vite --host 127.0.0.1"
+
   },
   "dependencies": {
     "react": "^18.3.1",

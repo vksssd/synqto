@@ -54,7 +54,7 @@ export class WhiteboardService {
   private instanceId: string = uuid();
   private localBus: BroadcastChannel | null = null;
 
-  private privacyMode: WhiteboardPrivacyMode = 'collaborative';
+  private privacyMode: WhiteboardPrivacyMode = 'personal';
 
   // Collaborative Notebook State
   private collabNotebook: WhiteboardNotebook = {
@@ -106,6 +106,7 @@ export class WhiteboardService {
     this.setupLocalBus();
     this.setupRuntimeMessageListener();
     this.setupNetworkListeners();
+    this.loadPrivacyMode();
     this.loadPersonalNotebook();
     this.loadCollabNotebook();
   }
@@ -245,31 +246,108 @@ export class WhiteboardService {
           });
           return true;
         } else if (msg.type === 'WHITEBOARD_STROKE_LOCAL' && msg.stroke) {
-          const page = this.getActivePage();
-          if (!page.strokes.some((s) => s.id === msg.stroke.id)) {
-            page.strokes.push(msg.stroke);
-            if (this.privacyMode === 'collaborative') {
-              this.saveCollabNotebook();
-              this.network.broadcast('whiteboard:stroke', { pageId: page.id, stroke: msg.stroke });
-            } else {
-              this.savePersonalNotebook();
-            }
-            this.notifyListeners();
-            this.broadcastLocal('stroke', { stroke: msg.stroke, pageId: page.id });
+          const targetPage =
+            this.collabNotebook.pages.find((p) => p.id === (msg.pageId || this.collabNotebook.activePageId)) ||
+            this.collabNotebook.pages[0];
+          const existingIdx = targetPage.strokes.findIndex((s) => s.id === msg.stroke.id);
+          if (existingIdx !== -1) {
+            targetPage.strokes[existingIdx] = msg.stroke;
+          } else {
+            targetPage.strokes.push(msg.stroke);
           }
+          this.saveCollabNotebook();
+          this.network.broadcast('whiteboard:stroke', { pageId: targetPage.id, stroke: msg.stroke });
+          if (this.privacyMode === 'collaborative') {
+            this.notifyListeners();
+          }
+          this.broadcastLocal('stroke', { stroke: msg.stroke, pageId: targetPage.id });
+        } else if (msg.type === 'WHITEBOARD_STROKES_LOCAL' && Array.isArray(msg.strokes)) {
+          const targetPage =
+            this.collabNotebook.pages.find((p) => p.id === (msg.pageId || this.collabNotebook.activePageId)) ||
+            this.collabNotebook.pages[0];
+          targetPage.strokes.push(...msg.strokes);
+          this.saveCollabNotebook();
+          if (this.privacyMode === 'collaborative') {
+            this.notifyListeners();
+          }
+        } else if (msg.type === 'WHITEBOARD_UPDATE_STROKES_LOCAL' && Array.isArray(msg.strokes)) {
+          const targetPage =
+            this.collabNotebook.pages.find((p) => p.id === (msg.pageId || this.collabNotebook.activePageId)) ||
+            this.collabNotebook.pages[0];
+          const map = new Map<string, WhiteboardStroke>(msg.strokes.map((s: any) => [s.id, s]));
+          targetPage.strokes = targetPage.strokes.map((s) => (map.has(s.id) ? map.get(s.id)! : s));
+          this.saveCollabNotebook();
+          this.network.broadcast('whiteboard:strokes_batch', { pageId: targetPage.id, strokes: msg.strokes });
+          if (this.privacyMode === 'collaborative') {
+            this.notifyListeners();
+          }
+          this.broadcastLocal('strokes_batch', { strokes: msg.strokes, pageId: targetPage.id });
         } else if (msg.type === 'WHITEBOARD_UNDO_LOCAL' && msg.strokeId) {
-          this.deleteStroke(msg.strokeId);
+          const targetPage =
+            this.collabNotebook.pages.find((p) => p.id === (msg.pageId || this.collabNotebook.activePageId)) ||
+            this.collabNotebook.pages[0];
+          targetPage.strokes = targetPage.strokes.filter((s) => s.id !== msg.strokeId);
+          this.saveCollabNotebook();
+          this.network.broadcast('whiteboard:undo', { pageId: targetPage.id, strokeId: msg.strokeId });
+          if (this.privacyMode === 'collaborative') {
+            this.notifyListeners();
+          }
+          this.broadcastLocal('undo', { strokeId: msg.strokeId, pageId: targetPage.id });
         } else if (msg.type === 'WHITEBOARD_CLEAR_LOCAL') {
-          this.clearAll();
+          const targetPage =
+            this.collabNotebook.pages.find((p) => p.id === (msg.pageId || this.collabNotebook.activePageId)) ||
+            this.collabNotebook.pages[0];
+          targetPage.strokes = [];
+          targetPage.redoStack = [];
+          this.saveCollabNotebook();
+          this.network.broadcast('whiteboard:clear', { pageId: targetPage.id });
+          if (this.privacyMode === 'collaborative') {
+            this.notifyListeners();
+          }
+          this.broadcastLocal('clear', { pageId: targetPage.id });
         } else if (msg.type === 'WHITEBOARD_BG_LOCAL' && msg.background) {
-          this.setBackground(msg.background);
-          if (msg.bgColor) this.setBgColor(msg.bgColor);
+          const targetPage =
+            this.collabNotebook.pages.find((p) => p.id === (msg.pageId || this.collabNotebook.activePageId)) ||
+            this.collabNotebook.pages[0];
+          targetPage.background = msg.background;
+          if (msg.bgColor) targetPage.bgColor = msg.bgColor;
+          this.saveCollabNotebook();
+          this.network.broadcast('whiteboard:background', { background: msg.background, bgColor: targetPage.bgColor });
+          if (this.privacyMode === 'collaborative') {
+            this.backgroundListeners.forEach((fn) => fn(targetPage.background));
+            if (targetPage.bgColor) this.bgColorListeners.forEach((fn) => fn(targetPage.bgColor!));
+          }
+          this.broadcastLocal('background', { background: targetPage.background, bgColor: targetPage.bgColor, pageId: targetPage.id });
         }
       });
     }
   }
 
   // ─── Storage Persistence ───
+  private async loadPrivacyMode() {
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      try {
+        const res = await chrome.storage.local.get(['synqto_whiteboard_privacy_mode']);
+        if (res.synqto_whiteboard_privacy_mode) {
+          this.privacyMode = res.synqto_whiteboard_privacy_mode;
+          this.privacyListeners.forEach((fn) => fn(this.privacyMode));
+          this.notifyNotebookListeners();
+          this.notifyListeners();
+        }
+      } catch (e) {}
+    }
+  }
+
+  private savePrivacyMode() {
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      try {
+        chrome.storage.local.set({
+          synqto_whiteboard_privacy_mode: this.privacyMode,
+        });
+      } catch (e) {}
+    }
+  }
+
   private async loadPersonalNotebook() {
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       try {
@@ -588,6 +666,7 @@ export class WhiteboardService {
 
   public setPrivacyMode(mode: WhiteboardPrivacyMode): void {
     this.privacyMode = mode;
+    this.savePrivacyMode();
     this.privacyListeners.forEach((fn) => fn(mode));
     this.notifyNotebookListeners();
     this.notifyListeners();
@@ -738,35 +817,49 @@ export class WhiteboardService {
     }
   }
 
-  public deleteStrokes(strokeIds: string[]): void {
-    if (strokeIds.length === 0) return;
+  public addStrokes(strokes: WhiteboardStroke[]): void {
+    if (strokes.length === 0) return;
     const page = this.getActivePage();
-    const idSet = new Set(strokeIds);
-    const removed: WhiteboardStroke[] = [];
-    page.strokes = page.strokes.filter((s) => {
-      if (idSet.has(s.id)) {
-        removed.push(s);
-        return false;
-      }
-      return true;
-    });
+    page.strokes.push(...strokes);
+    page.redoStack = [];
 
-    if (removed.length > 0) {
-      page.redoStack.push(...removed);
-      if (this.privacyMode === 'personal') {
-        this.savePersonalNotebook();
-      } else {
-        this.saveCollabNotebook();
-        removed.forEach((s) => {
-          this.network.broadcast('whiteboard:undo', { pageId: page.id, strokeId: s.id });
-        });
-      }
-      removed.forEach((s) => {
-        this.broadcastLocal('undo', { strokeId: s.id, pageId: page.id });
-        this.broadcastRuntime({ type: 'WHITEBOARD_UNDO_LOCAL', strokeId: s.id, pageId: page.id });
+    if (this.privacyMode === 'personal') {
+      this.savePersonalNotebook();
+    } else {
+      this.saveCollabNotebook();
+      strokes.forEach((s) => {
+        this.network.broadcast('whiteboard:stroke', { pageId: page.id, stroke: s });
       });
-      this.notifyListeners();
     }
+
+    strokes.forEach((s) => {
+      this.broadcastLocal('stroke', { stroke: s, pageId: page.id });
+      this.broadcastRuntime({ type: 'WHITEBOARD_STROKE_LOCAL', stroke: s, pageId: page.id });
+    });
+    this.notifyListeners();
+  }
+
+  public updateStrokes(updatedStrokes: WhiteboardStroke[]): void {
+    if (updatedStrokes.length === 0) return;
+    const page = this.getActivePage();
+    const updateMap = new Map(updatedStrokes.map((s) => [s.id, s]));
+
+    page.strokes = page.strokes.map((s) => updateMap.get(s.id) || s);
+
+    if (this.privacyMode === 'personal') {
+      this.savePersonalNotebook();
+    } else {
+      this.saveCollabNotebook();
+      updatedStrokes.forEach((s) => {
+        this.network.broadcast('whiteboard:stroke', { pageId: page.id, stroke: s });
+      });
+    }
+
+    updatedStrokes.forEach((s) => {
+      this.broadcastLocal('stroke', { stroke: s, pageId: page.id });
+      this.broadcastRuntime({ type: 'WHITEBOARD_STROKE_LOCAL', stroke: s, pageId: page.id });
+    });
+    this.notifyListeners();
   }
 
   public undo(): void {

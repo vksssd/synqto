@@ -68,11 +68,11 @@ export const SettingsCard: React.FC = () => {
   const timerService = TimerService.getInstance();
 
   const [expandedCards, setExpandedCards] = useState<Record<string, boolean>>({
-    theme: true,
-    widget: true,
-    timer: true,
-    server: true,
-    privacy: true,
+    theme: false,
+    widget: false,
+    timer: false,
+    server: false,
+    privacy: false,
     about: false,
   });
 
@@ -388,6 +388,14 @@ export const SettingsCard: React.FC = () => {
 
   const anyMatch = hasTheme || hasWidget || hasTimer || hasServer || hasPrivacy || hasAbout;
 
+  const isSearching = searchQuery.trim().length > 0;
+  const isThemeExpanded = isSearching || expandedCards.theme;
+  const isWidgetExpanded = isSearching || expandedCards.widget;
+  const isTimerExpanded = isSearching || expandedCards.timer;
+  const isServerExpanded = isSearching || expandedCards.server;
+  const isPrivacyExpanded = isSearching || expandedCards.privacy;
+  const isAboutExpanded = isSearching || expandedCards.about;
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
       {/* ─── 0. Sticky Settings Search & Quick Filter Bar ─── */}
@@ -549,7 +557,7 @@ export const SettingsCard: React.FC = () => {
 
       {/* ─── 1. Appearance, Themes & Typography Customization Suite ─── */}
       {hasTheme && (
-        <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: expandedCards.theme ? '14px' : '0' }}>
+        <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: isThemeExpanded ? '14px' : '0' }}>
           <div
             className="glass-card-header"
             onClick={() => toggleCard('theme')}
@@ -559,7 +567,7 @@ export const SettingsCard: React.FC = () => {
               justifyContent: 'space-between',
               cursor: 'pointer',
               userSelect: 'none',
-              marginBottom: expandedCards.theme ? '4px' : 0,
+              marginBottom: isThemeExpanded ? '4px' : 0,
             }}
           >
             <div className="glass-card-title">
@@ -592,12 +600,12 @@ export const SettingsCard: React.FC = () => {
                   color: 'var(--text-muted)',
                 }}
               >
-                {expandedCards.theme ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                {isThemeExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
               </div>
             </div>
           </div>
 
-          {expandedCards.theme && (
+          {isThemeExpanded && (
             <>
               <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
                 Fully customize background themes, high-contrast text palettes, brand accents, font scaling, and UI layout density.
@@ -1406,7 +1414,7 @@ export const SettingsCard: React.FC = () => {
 
       {/* ─── 2. In-Page Floating Widget & Popup Customization ─── */}
       {hasWidget && (
-        <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: expandedCards.widget ? '10px' : '0' }}>
+        <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: isWidgetExpanded ? '10px' : '0' }}>
           <div
             className="glass-card-header"
             onClick={() => toggleCard('widget')}
@@ -1416,7 +1424,7 @@ export const SettingsCard: React.FC = () => {
               justifyContent: 'space-between',
               cursor: 'pointer',
               userSelect: 'none',
-              marginBottom: expandedCards.widget ? '4px' : 0,
+              marginBottom: isWidgetExpanded ? '4px' : 0,
             }}
           >
             <div className="glass-card-title">
@@ -1449,12 +1457,12 @@ export const SettingsCard: React.FC = () => {
                   color: 'var(--text-muted)',
                 }}
               >
-                {expandedCards.widget ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                {isWidgetExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
               </div>
             </div>
           </div>
 
-          {expandedCards.widget && (
+          {isWidgetExpanded && (
             <>
               <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '10px' }}>
                 Customize the quick-access floating button on coding and problem pages.
@@ -1611,84 +1619,232 @@ export const SettingsCard: React.FC = () => {
           </div>
         )}
 
+        {/* Independent FAB Visibility Controls */}
+        <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '10px', marginBottom: '10px' }}>
+          <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '6px' }}>
+            🎛️ Independent FAB Toggles:
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {/* Main Synqto FAB Toggle */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '7px 10px',
+                borderRadius: 'var(--radius-sm)',
+                background: 'var(--bg-hover)',
+                border: '1px solid var(--border-subtle)',
+              }}
+            >
+              <div>
+                <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                  ⚡ Main Synqto FAB (Chat &amp; Whiteboard)
+                </div>
+                <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>
+                  Toggle the main floating button on web pages
+                </div>
+              </div>
+              <input
+                type="checkbox"
+                checked={fabSettings.showMainFab !== false}
+                onChange={(e) => {
+                  const updated: FabSettings = { ...fabSettings, showMainFab: e.target.checked };
+                  setFabSettings(updated);
+                  saveFabSettings(updated);
+                }}
+                style={{ accentColor: 'var(--primary)', width: '16px', height: '16px', cursor: 'pointer' }}
+              />
+            </div>
+
+            {/* Focus Timer FAB Toggle */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '7px 10px',
+                borderRadius: 'var(--radius-sm)',
+                background: 'var(--bg-hover)',
+                border: '1px solid var(--border-subtle)',
+              }}
+            >
+              <div>
+                <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                  🚀 Focus Timer FAB (Rocket Racing &amp; Pomodoro)
+                </div>
+                <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>
+                  Toggle the standalone floating timer pill
+                </div>
+              </div>
+              <input
+                type="checkbox"
+                checked={fabSettings.showTimerFab !== false}
+                onChange={(e) => {
+                  const updated: FabSettings = { ...fabSettings, showTimerFab: e.target.checked };
+                  setFabSettings(updated);
+                  saveFabSettings(updated);
+                }}
+                style={{ accentColor: 'var(--primary)', width: '16px', height: '16px', cursor: 'pointer' }}
+              />
+            </div>
+
+            {/* CodeTogether In-Page Dock Toggle */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '7px 10px',
+                borderRadius: 'var(--radius-sm)',
+                background: 'var(--bg-hover)',
+                border: '1px solid var(--border-subtle)',
+              }}
+            >
+              <div>
+                <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                  👥 Code Together In-Page Dock (Draggable Sync Badge)
+                </div>
+                <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>
+                  Show floating collaborative editor sync dock on LeetCode/coding tabs (Off by default)
+                </div>
+              </div>
+              <input
+                type="checkbox"
+                checked={Boolean(fabSettings.showCodeTogetherDock)}
+                onChange={(e) => {
+                  const updated: FabSettings = { ...fabSettings, showCodeTogetherDock: e.target.checked };
+                  setFabSettings(updated);
+                  saveFabSettings(updated);
+                  if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+                    chrome.storage.local.set({ synqto_code_together_dock_visible: e.target.checked });
+                  }
+                }}
+                style={{ accentColor: 'var(--primary)', width: '16px', height: '16px', cursor: 'pointer' }}
+              />
+            </div>
+          </div>
+        </div>
+
         {/* Draggable Position Mode */}
         <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '10px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px', flexWrap: 'wrap', gap: '4px' }}>
             <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-primary)' }}>
-              📍 Position Persistence:
+              📍 Independent Position Persistence:
             </div>
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm"
-              onClick={() => {
-                const updated: FabSettings = {
-                  ...fabSettings,
-                  savedPosition: { right: 24, bottom: 24 },
-                };
-                setFabSettings(updated);
-                saveFabSettings(updated);
-              }}
-              style={{ fontSize: '9.5px', padding: '2px 6px', color: 'var(--primary)' }}
-            >
-              Reset to Default
-            </button>
+            <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => {
+                  const updated: FabSettings = {
+                    ...fabSettings,
+                    savedMainPosition: { right: 24, bottom: 24 },
+                    savedPosition: { right: 24, bottom: 24 },
+                  };
+                  setFabSettings(updated);
+                  saveFabSettings(updated);
+                }}
+                style={{ fontSize: '9px', padding: '2px 5px', color: 'var(--primary)' }}
+                title="Reset Main FAB position to bottom right"
+              >
+                Reset Main Pos
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => {
+                  const updated: FabSettings = {
+                    ...fabSettings,
+                    savedTimerPosition: { right: 140, bottom: 24 },
+                  };
+                  setFabSettings(updated);
+                  saveFabSettings(updated);
+                }}
+                style={{ fontSize: '9px', padding: '2px 5px', color: '#f43f5e' }}
+                title="Reset Focus Timer FAB position"
+              >
+                Reset Timer Pos
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => {
+                  const updated: FabSettings = {
+                    ...fabSettings,
+                    savedCodeTogetherPosition: { top: 16, right: 90 },
+                  };
+                  setFabSettings(updated);
+                  saveFabSettings(updated);
+                }}
+                style={{ fontSize: '9px', padding: '2px 5px', color: '#818cf8' }}
+                title="Reset Code Together Dock position to top right"
+              >
+                Reset Dock Pos
+              </button>
+            </div>
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
             <label
               style={{
-                  background: (fabSettings.positionMode === 'permanent' || !fabSettings.positionMode) ? 'rgba(99, 102, 241, 0.15)' : 'var(--bg-hover)',
-                  border: (fabSettings.positionMode === 'permanent' || !fabSettings.positionMode) ? '1px solid var(--border-focus)' : '1px solid var(--border-subtle)',
-                  cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: '6px',
+                padding: '6px 8px',
+                borderRadius: 'var(--radius-sm)',
+                background: (fabSettings.positionMode === 'permanent' || !fabSettings.positionMode) ? 'rgba(99, 102, 241, 0.15)' : 'var(--bg-hover)',
+                border: (fabSettings.positionMode === 'permanent' || !fabSettings.positionMode) ? '1px solid var(--border-focus)' : '1px solid var(--border-subtle)',
+                cursor: 'pointer',
+              }}
+            >
+              <input
+                type="radio"
+                name="fab_position_mode"
+                checked={fabSettings.positionMode === 'permanent' || !fabSettings.positionMode}
+                onChange={() => {
+                  const updated: FabSettings = { ...fabSettings, positionMode: 'permanent' };
+                  setFabSettings(updated);
+                  saveFabSettings(updated);
                 }}
-              >
-                <input
-                  type="radio"
-                  name="fab_position_mode"
-                  checked={fabSettings.positionMode === 'permanent' || !fabSettings.positionMode}
-                  onChange={() => {
-                    const updated: FabSettings = { ...fabSettings, positionMode: 'permanent' };
-                    setFabSettings(updated);
-                    saveFabSettings(updated);
-                  }}
-                  style={{ marginTop: '2px', accentColor: 'var(--primary)' }}
-                />
-                <div>
-                  <div style={{ fontSize: '10.5px', fontWeight: 600, color: 'var(--text-primary)' }}>📌 Permanent</div>
-                  <div style={{ fontSize: '8.5px', color: 'var(--text-muted)' }}>Remember dragged location</div>
-                </div>
-              </label>
+                style={{ marginTop: '2px', accentColor: 'var(--primary)' }}
+              />
+              <div>
+                <div style={{ fontSize: '10.5px', fontWeight: 600, color: 'var(--text-primary)' }}>📌 Permanent</div>
+                <div style={{ fontSize: '8.5px', color: 'var(--text-muted)' }}>Remember dragged locations independently</div>
+              </div>
+            </label>
 
-              <label
-                style={{
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: '6px',
-                  padding: '6px 8px',
-                  borderRadius: 'var(--radius-sm)',
-                  background: fabSettings.positionMode === 'temporary' ? 'rgba(99, 102, 241, 0.15)' : 'var(--bg-hover)',
-                  border: fabSettings.positionMode === 'temporary' ? '1px solid var(--border-focus)' : '1px solid var(--border-subtle)',
-                  cursor: 'pointer',
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: '6px',
+                padding: '6px 8px',
+                borderRadius: 'var(--radius-sm)',
+                background: fabSettings.positionMode === 'temporary' ? 'rgba(99, 102, 241, 0.15)' : 'var(--bg-hover)',
+                border: fabSettings.positionMode === 'temporary' ? '1px solid var(--border-focus)' : '1px solid var(--border-subtle)',
+                cursor: 'pointer',
+              }}
+            >
+              <input
+                type="radio"
+                name="fab_position_mode"
+                checked={fabSettings.positionMode === 'temporary'}
+                onChange={() => {
+                  const updated: FabSettings = { ...fabSettings, positionMode: 'temporary' };
+                  setFabSettings(updated);
+                  saveFabSettings(updated);
                 }}
-              >
-                <input
-                  type="radio"
-                  name="fab_position_mode"
-                  checked={fabSettings.positionMode === 'temporary'}
-                  onChange={() => {
-                    const updated: FabSettings = { ...fabSettings, positionMode: 'temporary' };
-                    setFabSettings(updated);
-                    saveFabSettings(updated);
-                  }}
-                  style={{ marginTop: '2px', accentColor: 'var(--primary)' }}
-                />
-                <div>
-                  <div style={{ fontSize: '10.5px', fontWeight: 600, color: 'var(--text-primary)' }}>⏱️ Temporary</div>
-                  <div style={{ fontSize: '8.5px', color: 'var(--text-muted)' }}>Reset on reload</div>
-                </div>
-              </label>
-            </div>
+                style={{ marginTop: '2px', accentColor: 'var(--primary)' }}
+              />
+              <div>
+                <div style={{ fontSize: '10.5px', fontWeight: 600, color: 'var(--text-primary)' }}>⏱️ Temporary</div>
+                <div style={{ fontSize: '8.5px', color: 'var(--text-muted)' }}>Reset positions on reload</div>
+              </div>
+            </label>
           </div>
+        </div>
             </>
           )}
         </div>
@@ -1696,7 +1852,7 @@ export const SettingsCard: React.FC = () => {
 
       {/* ─── 3. Focus Timer & Pomodoro (Turned on from settings) ─── */}
       {hasTimer && (
-        <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: expandedCards.timer ? '10px' : '0' }}>
+        <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: isTimerExpanded ? '10px' : '0' }}>
           <div
             className="glass-card-header"
             onClick={() => toggleCard('timer')}
@@ -1706,7 +1862,7 @@ export const SettingsCard: React.FC = () => {
               justifyContent: 'space-between',
               cursor: 'pointer',
               userSelect: 'none',
-              marginBottom: expandedCards.timer ? '4px' : 0,
+              marginBottom: isTimerExpanded ? '4px' : 0,
             }}
           >
             <div className="glass-card-title">
@@ -1739,12 +1895,12 @@ export const SettingsCard: React.FC = () => {
                   color: 'var(--text-muted)',
                 }}
               >
-                {expandedCards.timer ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                {isTimerExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
               </div>
             </div>
           </div>
 
-          {expandedCards.timer && (
+          {isTimerExpanded && (
             <>
               <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '12px' }}>
                 Enable a dedicated Pomodoro countdown, intervals (25m/5m/15m), and stopwatch for deep problem solving.
@@ -1865,7 +2021,7 @@ export const SettingsCard: React.FC = () => {
 
       {/* ─── 4. Go Signaling Server Broker & Retry Connection ─── */}
       {hasServer && (
-        <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: expandedCards.server ? '10px' : '0' }}>
+        <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: isServerExpanded ? '10px' : '0' }}>
           <div
             className="glass-card-header"
             onClick={() => toggleCard('server')}
@@ -1875,7 +2031,7 @@ export const SettingsCard: React.FC = () => {
               justifyContent: 'space-between',
               cursor: 'pointer',
               userSelect: 'none',
-              marginBottom: expandedCards.server ? '4px' : 0,
+              marginBottom: isServerExpanded ? '4px' : 0,
             }}
           >
             <div className="glass-card-title">
@@ -1920,12 +2076,12 @@ export const SettingsCard: React.FC = () => {
                   color: 'var(--text-muted)',
                 }}
               >
-                {expandedCards.server ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                {isServerExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
               </div>
             </div>
           </div>
 
-          {expandedCards.server && (
+          {isServerExpanded && (
             <>
               <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '10px', lineHeight: 1.5 }}>
                 WebSocket signaling endpoint used to establish WebRTC peer meshes, negotiate SDP offers/answers, and coordinate cluster leaders.
@@ -2010,7 +2166,7 @@ export const SettingsCard: React.FC = () => {
 
       {/* ─── 5. Privacy & Local Storage ─── */}
       {hasPrivacy && (
-        <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: expandedCards.privacy ? '10px' : '0' }}>
+        <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: isPrivacyExpanded ? '10px' : '0' }}>
           <div
             className="glass-card-header"
             onClick={() => toggleCard('privacy')}
@@ -2020,7 +2176,7 @@ export const SettingsCard: React.FC = () => {
               justifyContent: 'space-between',
               cursor: 'pointer',
               userSelect: 'none',
-              marginBottom: expandedCards.privacy ? '4px' : 0,
+              marginBottom: isPrivacyExpanded ? '4px' : 0,
             }}
           >
             <div className="glass-card-title">
@@ -2043,12 +2199,12 @@ export const SettingsCard: React.FC = () => {
                   color: 'var(--text-muted)',
                 }}
               >
-                {expandedCards.privacy ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                {isPrivacyExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
               </div>
             </div>
           </div>
 
-          {expandedCards.privacy && (
+          {isPrivacyExpanded && (
             <>
               <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '10px' }}>
                 Synqto operates 100% peer-to-peer. Messages, streaks, and personal diaries are stored locally in your browser.
@@ -2075,7 +2231,7 @@ export const SettingsCard: React.FC = () => {
 
       {/* ─── 6. Diagnostics & Version ─── */}
       {hasAbout && (
-        <div className="glass-card" style={{ background: 'var(--bg-surface)', display: 'flex', flexDirection: 'column', gap: expandedCards.about ? '8px' : '0' }}>
+        <div className="glass-card" style={{ background: 'var(--bg-surface)', display: 'flex', flexDirection: 'column', gap: isAboutExpanded ? '8px' : '0' }}>
           <div
             className="glass-card-header"
             onClick={() => toggleCard('about')}
@@ -2085,7 +2241,7 @@ export const SettingsCard: React.FC = () => {
               justifyContent: 'space-between',
               cursor: 'pointer',
               userSelect: 'none',
-              marginBottom: expandedCards.about ? '4px' : 0,
+              marginBottom: isAboutExpanded ? '4px' : 0,
             }}
           >
             <div className="glass-card-title" style={{ fontSize: '12px' }}>
@@ -2108,12 +2264,12 @@ export const SettingsCard: React.FC = () => {
                   color: 'var(--text-muted)',
                 }}
               >
-                {expandedCards.about ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                {isAboutExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
               </div>
             </div>
           </div>
 
-          {expandedCards.about && (
+          {isAboutExpanded && (
             <div style={{ fontSize: '10.5px', color: 'var(--text-muted)', lineHeight: 1.6 }}>
               Version: <strong>{typeof chrome !== 'undefined' && chrome.runtime?.getManifest ? chrome.runtime.getManifest().version : '0.2.0'} (The Trinity Architecture)</strong><br />
               Network Protocol: <strong>Dual-Leader P2P Mesh with WebRTC DataChannels</strong><br />

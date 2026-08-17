@@ -199,14 +199,24 @@ export class CursorOverlay {
       el = document.createElement('div');
       el.style.cssText = `
         position: fixed !important;
+        left: 0 !important;
+        top: 0 !important;
         pointer-events: none !important;
-        transition: left 0.05s linear, top 0.05s linear, opacity 0.3s ease !important;
+        transform: translate3d(0px, 0px, 0) !important;
+        will-change: transform !important;
+        transition: transform 0.05s linear, opacity 0.3s ease !important;
         display: flex !important;
         align-items: center !important;
         gap: 5px !important;
         opacity: 1 !important;
         z-index: 2147483646 !important;
       `;
+
+      const avatarDiv = document.createElement('div');
+      const labelDiv = document.createElement('div');
+      el.appendChild(avatarDiv);
+      el.appendChild(labelDiv);
+
       this.container.appendChild(el);
       this.cursorElements.set(cursor.peerId, el);
     }
@@ -214,14 +224,16 @@ export class CursorOverlay {
     const x = Math.max(0, Math.min(window.innerWidth - 30, (cursor.xPct / 100) * window.innerWidth));
     const y = Math.max(0, Math.min(window.innerHeight - 30, (cursor.yPct / 100) * window.innerHeight));
 
-    el.style.left = `${x}px`;
-    el.style.top = `${y}px`;
+    el.style.transform = `translate3d(${x}px, ${y}px, 0)`;
     el.style.opacity = '1';
 
     const glowColor = cursor.isTutor ? '#8b5cf6' : cursor.color || '#6366f1';
+    const avatarEl = el.firstElementChild as HTMLElement;
+    const labelEl = el.lastElementChild as HTMLElement;
 
-    el.innerHTML = `
-      <div style="
+    if (avatarEl && (el as any)._lastColor !== glowColor) {
+      (el as any)._lastColor = glowColor;
+      avatarEl.style.cssText = `
         width: 18px;
         height: 18px;
         border-radius: 50%;
@@ -233,10 +245,8 @@ export class CursorOverlay {
         font-size: 11px;
         color: #fff;
         border: 2px solid #ffffff;
-      ">
-        ${cursor.avatar || '👑'}
-      </div>
-      <div style="
+      `;
+      labelEl.style.cssText = `
         background: rgba(15, 23, 42, 0.92);
         border: 1px solid ${glowColor};
         color: #f8fafc;
@@ -247,10 +257,11 @@ export class CursorOverlay {
         border-radius: 4px;
         box-shadow: 0 2px 8px rgba(0,0,0,0.6);
         white-space: nowrap;
-      ">
-        ${cursor.nickname} ${cursor.isTutor ? '🎓 (Tutor)' : '🎤 (Speaker)'}
-      </div>
-    `;
+      `;
+    }
+
+    if (avatarEl) avatarEl.textContent = cursor.avatar || '👑';
+    if (labelEl) labelEl.textContent = `${cursor.nickname} ${cursor.isTutor ? '🎓 (Tutor)' : '🎤 (Speaker)'}`;
 
     // Clear previous timeout and fade out cursor after 4s
     const oldTimeout = this.cursorTimeouts.get(cursor.peerId);

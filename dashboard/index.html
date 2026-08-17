@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Synqto Signaling Server — Real-Time Diagnostic Dashboard</title>
+  <meta name="description" content="Real-time monitoring, telemetry, room topology explorer, and diagnostic log streamer for the Synqto WebRTC signaling server.">
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220%22><text y=%2226%22 font-size=%2226%22>⚡</text></svg>">
+</head>
+<body>
+
+  <!-- Top Header Navigation -->
+  <header class="top-header">
+    <div class="brand-section">
+      <div class="brand-logo" aria-label="Synqto Logo">⚡</div>
+      <div class="brand-title-group">
+        <h1>Synqto Operations Hub</h1>
+        <span class="brand-subtitle">Distributed Signaling &amp; P2P Topology Manager</span>
+      </div>
+    </div>
+
+    <div class="header-controls">
+      <!-- Target Server Selector -->
+      <div class="server-selector-container">
+        <span class="server-label">Server Target</span>
+        <input type="text" id="input-server-url" class="server-input" value="http://localhost:8080" placeholder="https://synqto-server.onrender.com" spellcheck="false">
+        <div class="server-presets">
+          <button class="preset-btn active" id="btn-preset-local" onclick="setServerUrl('http://localhost:8080')">Local :8080</button>
+          <button class="preset-btn" id="btn-preset-prod" onclick="setServerUrl('https://synqto-server.onrender.com')">Render Prod</button>
+        </div>
+      </div>
+
+      <!-- Health & Latency Badge -->
+      <div class="connection-badge" id="badge-connection-status">
+        <div class="badge-dot" id="indicator-dot"></div>
+        <span id="label-connection-status">Connecting...</span>
+        <span class="badge-latency" id="label-ping-latency">-- ms</span>
+      </div>
+
+      <!-- Refresh Controls -->
+      <button class="action-btn" id="btn-refresh" onclick="triggerManualRefresh()">
+        <span>⟳</span> Refresh
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Dashboard View -->
+  <main class="dashboard-layout">
+    
+    <!-- Top Level Telemetry Metric Cards -->
+    <section class="metrics-grid" aria-label="Key Performance Indicators">
+      
+      <!-- Metric 1: Active Connections -->
+      <article class="metric-card" id="card-active-connections">
+        <div class="metric-header">
+          <span>Active Connections</span>
+          <span class="metric-header-tag" id="tag-active-peers">0 Active</span>
+        </div>
+        <div class="metric-value" id="val-active-peers">0</div>
+        <div class="metric-subtext">
+          <span id="val-total-peers">Total Lifetime: 0</span>
+          <span style="color: var(--accent-emerald);">● Live</span>
+        </div>
+      </article>
+
+      <!-- Metric 2: Active Rooms & Mesh -->
+      <article class="metric-card" id="card-active-rooms">
+        <div class="metric-header">
+          <span>Active Problem Rooms</span>
+          <span class="metric-header-tag" id="tag-active-rooms">0 Rooms</span>
+        </div>
+        <div class="metric-value" id="val-active-rooms">0</div>
+        <div class="metric-subtext">
+          <span id="val-total-rooms">Total Created: 0</span>
+          <span id="val-closed-rooms">Closed: 0</span>
+        </div>
+      </article>
+
+      <!-- Metric 3: Signaling Relay Throughput -->
+      <article class="metric-card" id="card-signaling-relays">
+        <div class="metric-header">
+          <span>Signaling Throughput</span>
+          <span class="metric-header-tag">WebRTC</span>
+        </div>
+        <div class="metric-value" id="val-total-relays">0</div>
+        <div class="metric-subtext">
+          <span id="val-relays-breakdown">Offers: 0 | Answers: 0 | ICE: 0</span>
+        </div>
+      </article>
+
+      <!-- Metric 4: System Health & Memory -->
+      <article class="metric-card" id="card-system-health">
+        <div class="metric-header">
+          <span>RAM / System Health</span>
+          <span class="metric-header-tag" id="tag-go-version">Go Runtime</span>
+        </div>
+        <div class="metric-value" id="val-memory-allocated">0.0 MB</div>
+        <div class="metric-subtext">
+          <span id="val-uptime">Uptime: 0s</span>
+          <span id="val-goroutines">0 Goroutines</span>
+        </div>
+      </article>
+
+    </section>
+
+    <!-- Main Content Split Grid -->
+    <div class="main-split-grid">
+      
+      <!-- Left Column: Active Rooms & Topology Explorer -->
+      <section class="panel-card" aria-label="Room Topology Explorer">
+        <div class="panel-header-bar">
+          <div class="panel-heading">
+            <span>🌐 Active Collaboration Rooms</span>
+            <span class="quorum-pill" id="badge-total-room-count">0 Active</span>
+          </div>
+          <div class="panel-actions">
+            <input type="text" id="input-room-search" class="search-input" placeholder="Search room or peer..." oninput="filterRooms()">
+          </div>
+        </div>
+
+        <div class="panel-scroll-body" id="container-rooms-list">
+          <div class="empty-placeholder">
+            No active rooms found on the selected signaling server.
+          </div>
+        </div>
+      </section>
+
+      <!-- Right Column: Real-Time Structured Log Streamer -->
+      <section class="panel-card" aria-label="Server Log Streamer">
+        <div class="panel-header-bar">
+          <div class="panel-heading">
+            <span>📜 Live Server Telemetry Logs</span>
+          </div>
+          <div class="panel-actions">
+            <!-- Filter Level Tabs -->
+            <div class="btn-group" role="group" aria-label="Log Level Filter">
+              <button class="filter-btn active" id="filter-lvl-ALL" onclick="setFilterLevel('ALL')">ALL</button>
+              <button class="filter-btn" id="filter-lvl-INFO" onclick="setFilterLevel('INFO')">INFO</button>
+              <button class="filter-btn" id="filter-lvl-WARN" onclick="setFilterLevel('WARN')">WARN</button>
+              <button class="filter-btn" id="filter-lvl-ERROR" onclick="setFilterLevel('ERROR')">ERROR</button>
+            </div>
+            <!-- Pause / Resume -->
+            <button class="action-btn" id="btn-toggle-pause" onclick="toggleLogPause()" title="Pause live log stream">
+              <span id="icon-pause">⏸</span>
+            </button>
+            <!-- Export Logs -->
+            <button class="action-btn" id="btn-export-logs" onclick="exportLogsJson()" title="Export logs as JSON">
+              ⬇ JSON
+            </button>
+          </div>
+        </div>
+
+        <div class="panel-scroll-body" style="padding: 10px;">
+          <div class="terminal-wrapper" id="terminal-log-output">
+            <div class="log-entry">
+              <span class="log-timestamp">[--:--:--]</span>
+              <span class="log-level-badge log-level-INFO">SYS</span>
+              <span class="log-message-text">Initializing client dashboard telemetry stream...</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+
+  </main>
+
+  <!-- Footer -->
+  <footer class="dashboard-footer">
+    <div>
+      <span>Synqto Signaling Cluster</span> • <span>Version 0.2.0</span>
+    </div>
+    <div class="footer-links">
+      <a href="https://github.com/mdeekshith418/synqto" target="_blank" rel="noreferrer">GitHub Repository</a>
+      <a href="#" onclick="testPingEndpoint(event)">Test Latency Ping</a>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

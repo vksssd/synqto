@@ -7,7 +7,7 @@ interface BadgeGalleryProps {
 }
 
 export const BadgeGallery: React.FC<BadgeGalleryProps> = ({ badges }) => {
-  const [isExpanded, setIsExpanded] = useState(true);
+  const [isExpanded, setIsExpanded] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<'all' | 'streak' | 'problem' | 'focus' | 'social'>('all');
 
   const filteredBadges = badges.filter(

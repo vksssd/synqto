@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Synqto Operations Hub — Real-Time Cluster Diagnostic Dashboard</title>
+  <meta name="description" content="Real-time operations dashboard, topology explorer, signaling throughput analyzer, and live telemetry log streamer for Synqto signaling nodes.">
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220%22><text y=%2226%22 font-size=%2226%22>⚡</text></svg>">
+</head>
+<body>
+
+  <!-- Top Header Navigation -->
+  <header class="top-header">
+    <div class="brand-section">
+      <div class="brand-logo" aria-label="Synqto Logo">⚡</div>
+      <div class="brand-title-group">
+        <h1>Synqto Operations Hub</h1>
+        <span class="brand-subtitle">Distributed Signaling &amp; P2P Topology Manager</span>
+      </div>
+    </div>
+
+    <!-- Navigation Tabs -->
+    <nav class="nav-tabs-bar" aria-label="Dashboard Navigation">
+      <button class="nav-tab-btn active" onclick="switchTab('overview', this)">
+        <span>📊</span> Overview
+      </button>
+      <button class="nav-tab-btn" onclick="switchTab('topology', this)">
+        <span>🌐</span> Room Topology
+      </button>
+      <button class="nav-tab-btn" onclick="switchTab('signaling', this)">
+        <span>⚡</span> Signaling &amp; Traffic
+      </button>
+      <button class="nav-tab-btn" onclick="switchTab('system', this)">
+        <span>⚙️</span> System &amp; Memory
+      </button>
+      <button class="nav-tab-btn" onclick="switchTab('logs', this)">
+        <span>📜</span> Live Logs
+      </button>
+      <button class="nav-tab-btn" onclick="switchTab('tools', this)">
+        <span>🛠️</span> DevOps Tools
+      </button>
+    </nav>
+
+    <div class="header-controls">
+      <!-- Target Server Selector -->
+      <div class="server-selector-box">
+        <span class="server-label">Server</span>
+        <input type="text" id="input-server-url" class="server-input" value="http://localhost:8080" placeholder="https://synqto-server.onrender.com" spellcheck="false">
+        <button class="preset-btn active" id="btn-preset-local" onclick="setServerUrl('http://localhost:8080')">Local :8080</button>
+        <button class="preset-btn" id="btn-preset-prod" onclick="setServerUrl('https://synqto-server.onrender.com')">Render Prod</button>
+      </div>
+
+      <!-- Health & Latency Badge -->
+      <div class="connection-badge" id="badge-connection-status">
+        <div class="badge-dot" id="indicator-dot"></div>
+        <span id="label-connection-status">Connecting...</span>
+        <span class="badge-latency" id="label-ping-latency">-- ms</span>
+      </div>
+
+      <!-- Refresh Action -->
+      <button class="btn" id="btn-refresh" onclick="triggerManualRefresh()">
+        <span>⟳</span> Refresh
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Dashboard Layout -->
+  <main class="dashboard-layout">
+
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <!-- TAB 1: OVERVIEW -->
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <section id="tab-overview" class="tab-content active">
+      
+      <!-- Primary KPI Cards Grid -->
+      <div class="metrics-grid">
+        
+        <!-- Active Connections -->
+        <article class="metric-card" id="card-active-peers">
+          <div class="metric-header">
+            <span>Active Connections</span>
+            <span class="metric-header-tag" id="tag-active-peers">0 Live</span>
+          </div>
+          <div class="metric-value" id="val-active-peers">0</div>
+          <div class="metric-subtext">
+            <span id="val-total-peers">Total Lifetime: 0</span>
+            <span style="color: var(--accent-emerald);">● Online</span>
+          </div>
+        </article>
+
+        <!-- Active Problem Rooms -->
+        <article class="metric-card" id="card-active-rooms">
+          <div class="metric-header">
+            <span>Active Collaboration Rooms</span>
+            <span class="metric-header-tag" id="tag-active-rooms">0 Rooms</span>
+          </div>
+          <div class="metric-value" id="val-active-rooms">0</div>
+          <div class="metric-subtext">
+            <span id="val-total-rooms">Created: 0</span>
+            <span id="val-closed-rooms">Closed: 0</span>
+          </div>
+        </article>
+
+        <!-- Signaling Relays -->
+        <article class="metric-card" id="card-signaling-relays">
+          <div class="metric-header">
+            <span>Signaling Throughput</span>
+            <span class="metric-header-tag" id="tag-relay-rate">0.0 msg/s</span>
+          </div>
+          <div class="metric-value" id="val-total-relays">0</div>
+          <div class="metric-subtext">
+            <span id="val-relays-breakdown">Offers: 0 | Answers: 0 | ICE: 0</span>
+          </div>
+        </article>
+
+        <!-- System Memory & Health -->
+        <article class="metric-card" id="card-system-health">
+          <div class="metric-header">
+            <span>RAM / System Health</span>
+            <span class="metric-header-tag" id="tag-go-version">Go Runtime</span>
+          </div>
+          <div class="metric-value" id="val-memory-allocated">0.0 MB</div>
+          <div class="metric-subtext">
+            <span id="val-uptime">Uptime: 0s</span>
+            <span id="val-goroutines">0 Goroutines</span>
+          </div>
+        </article>
+
+      </div>
+
+      <!-- Main Overview Split Grid -->
+      <div class="two-col-grid">
+        
+        <!-- Live Problem Rooms Summary -->
+        <section class="panel-card">
+          <div class="panel-header-bar">
+            <div class="panel-heading">
+              <span>🌐 Active Rooms Snapshot</span>
+              <span class="quorum-pill" id="badge-overview-room-count">0 Rooms</span>
+            </div>
+            <button class="btn" style="font-size: 11px; padding: 4px 8px;" onclick="switchTab('topology')">View All →</button>
+          </div>
+          <div class="panel-body" id="container-overview-rooms" style="max-height: 480px;">
+            <div class="empty-placeholder">No active collaboration rooms currently open.</div>
+          </div>
+        </section>
+
+        <!-- Real-Time Activity Feed -->
+        <section class="panel-card">
+          <div class="panel-header-bar">
+            <div class="panel-heading">
+              <span>📜 Real-Time Event Stream</span>
+            </div>
+            <button class="btn" style="font-size: 11px; padding: 4px 8px;" onclick="switchTab('logs')">Open Console →</button>
+          </div>
+          <div class="panel-body" style="padding: 10px;">
+            <div class="terminal-wrapper" id="terminal-overview-logs" style="height: 460px;">
+              <div class="log-entry">
+                <span class="log-timestamp">[--:--:--]</span>
+                <span class="log-level-badge log-level-INFO">SYS</span>
+                <span class="log-message-text">Awaiting server events...</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </div>
+
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <!-- TAB 2: ROOM TOPOLOGY EXPLORER -->
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <section id="tab-topology" class="tab-content">
+      <div class="panel-card">
+        <div class="panel-header-bar">
+          <div class="panel-heading">
+            <span>🌐 Full Cluster Room Mesh Explorer</span>
+            <span class="quorum-pill" id="badge-topology-room-count">0 Rooms</span>
+          </div>
+          <div class="panel-actions">
+            <input type="text" id="input-topology-search" class="search-input" placeholder="Search room ID or peer nickname..." oninput="filterTopologyRooms()">
+            <button class="btn" onclick="fetchRooms()">⟳ Reload</button>
+          </div>
+        </div>
+
+        <div class="panel-body" id="container-topology-rooms" style="min-height: 500px;">
+          <div class="empty-placeholder">Loading room topologies...</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <!-- TAB 3: SIGNALING & TRAFFIC -->
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <section id="tab-signaling" class="tab-content">
+      
+      <!-- Traffic Stats Cards -->
+      <div class="metrics-grid">
+        <article class="metric-card">
+          <div class="metric-header">
+            <span>Total WebRTC Offers</span>
+            <span class="metric-header-tag">signal:offer</span>
+          </div>
+          <div class="metric-value" id="val-traffic-offers" style="color: var(--accent-cyan);">0</div>
+          <div class="metric-subtext"><span>P2P Handshake Initiations</span></div>
+        </article>
+
+        <article class="metric-card">
+          <div class="metric-header">
+            <span>Total WebRTC Answers</span>
+            <span class="metric-header-tag">signal:answer</span>
+          </div>
+          <div class="metric-value" id="val-traffic-answers" style="color: var(--accent-emerald);">0</div>
+          <div class="metric-subtext"><span>Handshake Confirmations</span></div>
+        </article>
+
+        <article class="metric-card">
+          <div class="metric-header">
+            <span>Total ICE Candidates</span>
+            <span class="metric-header-tag">signal:ice</span>
+          </div>
+          <div class="metric-value" id="val-traffic-ice" style="color: var(--accent-indigo);">0</div>
+          <div class="metric-subtext"><span>NAT Traversal Pathways</span></div>
+        </article>
+
+        <article class="metric-card">
+          <div class="metric-header">
+            <span>Heartbeat Pings</span>
+            <span class="metric-header-tag">ping/pong</span>
+          </div>
+          <div class="metric-value" id="val-traffic-pings">0</div>
+          <div class="metric-subtext"><span>Client Health Probes</span></div>
+        </article>
+      </div>
+
+      <!-- Detailed Traffic Table & Clustering Events -->
+      <div class="two-col-grid">
+        <section class="panel-card">
+          <div class="panel-header-bar">
+            <div class="panel-heading"><span>📡 Protocol Message Distribution</span></div>
+          </div>
+          <div class="panel-body">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Protocol Message</th>
+                  <th>Wire Type</th>
+                  <th>Total Relayed</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>SDP Offers</td>
+                  <td><code class="table-code">signal:offer</code></td>
+                  <td id="tbl-offers">0</td>
+                </tr>
+                <tr>
+                  <td>SDP Answers</td>
+                  <td><code class="table-code">signal:answer</code></td>
+                  <td id="tbl-answers">0</td>
+                </tr>
+                <tr>
+                  <td>ICE Candidates</td>
+                  <td><code class="table-code">signal:ice</code></td>
+                  <td id="tbl-ice">0</td>
+                </tr>
+                <tr>
+                  <td>Heartbeat Watchdogs</td>
+                  <td><code class="table-code">ping</code></td>
+                  <td id="tbl-pings">0</td>
+                </tr>
+                <tr>
+                  <td>Roster Broadcasts</td>
+                  <td><code class="table-code">room:roster</code></td>
+                  <td id="tbl-rosters">0</td>
+                </tr>
+                <tr>
+                  <td>Leader Promotions</td>
+                  <td><code class="table-code">leader:promote</code></td>
+                  <td id="tbl-promotions">0</td>
+                </tr>
+                <tr>
+                  <td>Leader Demotions</td>
+                  <td><code class="table-code">leader:demote</code></td>
+                  <td id="tbl-demotions">0</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel-card">
+          <div class="panel-header-bar">
+            <div class="panel-heading"><span>🛡️ Security &amp; Rate Limiting</span></div>
+          </div>
+          <div class="panel-body">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Protection Module</th>
+                  <th>Setting</th>
+                  <th>Status / Events</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>IP Rate Limiter</td>
+                  <td>120 req/min (burst 60)</td>
+                  <td><span style="color: var(--accent-emerald);">● ACTIVE</span></td>
+                </tr>
+                <tr>
+                  <td>Rate Limited Requests</td>
+                  <td>HTTP 429 Responses</td>
+                  <td id="tbl-ratelimit-blocks" style="font-weight: 700; color: var(--accent-amber);">0 blocked</td>
+                </tr>
+                <tr>
+                  <td>Slowloris Timeout</td>
+                  <td>Handshake max 10s</td>
+                  <td><span style="color: var(--accent-emerald);">● ENFORCED</span></td>
+                </tr>
+                <tr>
+                  <td>Memory Circuit Breaker</td>
+                  <td>Threshold 460 MB</td>
+                  <td><span style="color: var(--accent-emerald);">● PROTECTED</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <!-- TAB 4: SYSTEM & RUNTIME -->
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <section id="tab-system" class="tab-content">
+      
+      <div class="two-col-grid">
+        
+        <!-- Go Runtime & OS -->
+        <section class="panel-card">
+          <div class="panel-header-bar">
+            <div class="panel-heading"><span>🖥️ Server Environment &amp; Host</span></div>
+          </div>
+          <div class="panel-body">
+            <table class="data-table">
+              <tbody>
+                <tr>
+                  <td>Operating System</td>
+                  <td><code class="table-code" id="sys-os">--</code></td>
+                </tr>
+                <tr>
+                  <td>Architecture</td>
+                  <td><code class="table-code" id="sys-arch">--</code></td>
+                </tr>
+                <tr>
+                  <td>CPU Cores Available</td>
+                  <td id="sys-cpu">--</td>
+                </tr>
+                <tr>
+                  <td>Active Goroutines</td>
+                  <td id="sys-goroutines" style="font-weight: 700;">--</td>
+                </tr>
+                <tr>
+                  <td>Go Compiler Version</td>
+                  <td><code class="table-code" id="sys-goversion">--</code></td>
+                </tr>
+                <tr>
+                  <td>Process PID</td>
+                  <td id="sys-pid">--</td>
+                </tr>
+                <tr>
+                  <td>Server Uptime</td>
+                  <td id="sys-uptime" style="color: var(--accent-emerald); font-weight: 700;">--</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Memory Breakdown -->
+        <section class="panel-card">
+          <div class="panel-header-bar">
+            <div class="panel-heading"><span>⚡ Memory Breakdown &amp; GC</span></div>
+          </div>
+          <div class="panel-body">
+            <table class="data-table">
+              <tbody>
+                <tr>
+                  <td>Allocated Heap Memory</td>
+                  <td id="mem-alloc" style="font-weight: 700; color: var(--accent-cyan);">-- MB</td>
+                </tr>
+                <tr>
+                  <td>Heap In-Use</td>
+                  <td id="mem-heap-inuse">-- MB</td>
+                </tr>
+                <tr>
+                  <td>Heap System Reserved</td>
+                  <td id="mem-heap-sys">-- MB</td>
+                </tr>
+                <tr>
+                  <td>Stack In-Use</td>
+                  <td id="mem-stack-inuse">-- MB</td>
+                </tr>
+                <tr>
+                  <td>Total System Memory (Sys)</td>
+                  <td id="mem-sys">-- MB</td>
+                </tr>
+                <tr>
+                  <td>Garbage Collector Cycles</td>
+                  <td id="mem-gc-count">-- cycles</td>
+                </tr>
+                <tr>
+                  <td>Last GC Timestamp</td>
+                  <td id="mem-last-gc">--</td>
+                </tr>
+                <tr>
+                  <td>Next GC Target</td>
+                  <td id="mem-next-gc">-- MB</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+      </div>
+
+      <!-- NATS Cluster Status Card -->
+      <div class="panel-card">
+        <div class="panel-header-bar">
+          <div class="panel-heading"><span>🌐 NATS Distributed Clustering State</span></div>
+        </div>
+        <div class="panel-body">
+          <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;">
+            <div>
+              <div style="font-size: 13px; font-weight: 600; margin-bottom: 4px;">Cluster Architecture Mode:</div>
+              <code class="table-code" id="cluster-mode" style="font-size: 13px;">in_memory_single_node</code>
+            </div>
+            <div style="font-size: 12px; color: var(--text-muted);">
+              Set <code>NATS_URL</code> environment variable on your backend to scale across multiple container instances seamlessly.
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <!-- TAB 5: LIVE LOGS -->
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <section id="tab-logs" class="tab-content">
+      <div class="panel-card">
+        <div class="panel-header-bar">
+          <div class="panel-heading">
+            <span>📜 Live Structured Server Logs (Ring Buffer)</span>
+          </div>
+          <div class="panel-actions">
+            <!-- Filter Level Tabs -->
+            <div class="btn-group" role="group" aria-label="Log Level Filter">
+              <button class="filter-btn active" id="btn-lvl-ALL" onclick="setLogsFilter('ALL')">ALL</button>
+              <button class="filter-btn" id="btn-lvl-INFO" onclick="setLogsFilter('INFO')">INFO</button>
+              <button class="filter-btn" id="btn-lvl-WARN" onclick="setLogsFilter('WARN')">WARN</button>
+              <button class="filter-btn" id="btn-lvl-ERROR" onclick="setLogsFilter('ERROR')">ERROR</button>
+            </div>
+            
+            <input type="text" id="input-log-search" class="search-input" placeholder="Search log text..." oninput="filterLogsList()">
+            
+            <button class="btn" id="btn-toggle-stream" onclick="toggleLogPause()" title="Pause live log streaming">
+              <span id="label-pause-icon">⏸</span> Pause
+            </button>
+            <button class="btn btn-danger" onclick="clearServerLogs()" title="Clear in-memory ring buffer">
+              🗑 Clear
+            </button>
+            <button class="btn" onclick="exportLogsJson()" title="Download logs as JSON file">
+              ⬇ Export JSON
+            </button>
+          </div>
+        </div>
+
+        <div class="panel-body" style="padding: 10px;">
+          <div class="terminal-wrapper" id="terminal-logs-full" style="height: 560px;">
+            <div class="log-entry">
+              <span class="log-timestamp">[--:--:--]</span>
+              <span class="log-level-badge log-level-INFO">SYS</span>
+              <span class="log-message-text">Initializing telemetry log reader...</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <!-- TAB 6: DEVOPS & TESTING SUITE -->
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <section id="tab-tools" class="tab-content">
+      
+      <div class="two-col-grid">
+        
+        <!-- Live Ping & Health Check Tool -->
+        <section class="panel-card">
+          <div class="panel-header-bar">
+            <div class="panel-heading"><span>⚡ Interactive Latency &amp; Health Probe</span></div>
+          </div>
+          <div class="panel-body" style="display: flex; flex-direction: column; gap: 14px;">
+            <p style="font-size: 13px; color: var(--text-secondary);">
+              Send immediate diagnostic HTTP probes to test server connectivity, container wake-up status, and round-trip time.
+            </p>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-primary" onclick="runHealthCheckProbe()">Run /health Probe</button>
+              <button class="btn" onclick="runPingProbe()">Run /ping Pre-Warm</button>
+            </div>
+            <div class="terminal-wrapper" id="terminal-tool-output" style="height: 240px;">
+              <div class="log-entry">
+                <span class="log-timestamp">[Ready]</span>
+                <span class="log-message-text">Click a probe button above to test endpoints.</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Simulated WebSocket Client Handshake -->
+        <section class="panel-card">
+          <div class="panel-header-bar">
+            <div class="panel-heading"><span>🔌 Simulated WebSocket Peer Connection</span></div>
+          </div>
+          <div class="panel-body" style="display: flex; flex-direction: column; gap: 14px;">
+            <p style="font-size: 13px; color: var(--text-secondary);">
+              Connect a temporary test peer directly from your browser to verify full WebSocket upgrade and roster sync.
+            </p>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <input type="text" id="input-sim-room" class="search-input" value="room:test-console-diag" placeholder="Room ID" style="flex: 1;">
+              <input type="text" id="input-sim-nick" class="search-input" value="ConsoleTester" placeholder="Nickname" style="width: 140px;">
+              <button class="btn btn-primary" id="btn-sim-connect" onclick="runSimulatedWebSocket()">Connect Test Peer</button>
+            </div>
+            <div class="terminal-wrapper" id="terminal-sim-output" style="height: 240px;">
+              <div class="log-entry">
+                <span class="log-timestamp">[Ready]</span>
+                <span class="log-message-text">Awaiting simulated connection trigger.</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- Toast Notification Area -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <!-- Footer -->
+  <footer class="dashboard-footer">
+    <div>
+      <span>Synqto Distributed Operations Hub</span> • <span>Version 0.2.0</span>
+    </div>
+    <div class="footer-links">
+      <a href="https://github.com/mdeekshith418/synqto" target="_blank" rel="noreferrer">GitHub Repository</a>
+      <a href="#" onclick="triggerManualRefresh()">Manual Refresh</a>
+      <a href="#" onclick="runPingProbe()">Ping Probe</a>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

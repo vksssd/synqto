@@ -28,6 +28,8 @@ import {
   User,
   Plus,
   Copy,
+  Clipboard,
+  MousePointer,
   X,
   ExternalLink,
   Edit2,
@@ -80,10 +82,10 @@ const BG_COLORS = [
 ];
 
 const PEN_SIZES = [
-  { label: 'S', size: 2 },
-  { label: 'M', size: 4 },
-  { label: 'L', size: 8 },
-  { label: 'XL', size: 16 },
+  { label: 'S', size: 3 },
+  { label: 'M', size: 5 },
+  { label: 'L', size: 9 },
+  { label: 'XL', size: 18 },
 ];
 
 interface ToolStyle {
@@ -93,60 +95,111 @@ interface ToolStyle {
 
 const DEFAULT_TOOL_STYLES: Record<string, ToolStyle> = {
   select: { color: '#6366f1', width: 3 },
-  pen: { color: '#6366f1', width: 3 },
-  brush: { color: '#06b6d4', width: 6 },
-  highlighter: { color: '#f59e0b', width: 16 },
-  temp_pen: { color: '#38bdf8', width: 3 },
-  laser: { color: '#ef4444', width: 3 },
-  torch: { color: '#facc15', width: 65 },
-  eraser: { color: '#ffffff', width: 18 },
-  text: { color: '#ffffff', width: 3 },
-  code_box: { color: '#38bdf8', width: 2 },
-  line: { color: '#6366f1', width: 3 },
-  arrow: { color: '#6366f1', width: 3 },
-  arrow_bi: { color: '#6366f1', width: 3 },
-  rect: { color: '#6366f1', width: 3 },
-  rounded_rect: { color: '#6366f1', width: 3 },
-  circle: { color: '#6366f1', width: 3 },
-  triangle: { color: '#10b981', width: 3 },
-  star: { color: '#f59e0b', width: 3 },
-  decision_diamond: { color: '#f59e0b', width: 3 },
-  tree_node: { color: '#10b981', width: 3 },
-  sticky_note: { color: '#fef3c7', width: 2 },
-  db_cylinder: { color: '#10b981', width: 2.5 },
-  db_nosql: { color: '#34d399', width: 2.5 },
-  cloud: { color: '#38bdf8', width: 2.5 },
-  load_balancer: { color: '#f59e0b', width: 2.5 },
-  message_queue: { color: '#a855f7', width: 2.5 },
-  server_box: { color: '#818cf8', width: 2.5 },
-  cache_mem: { color: '#f43f5e', width: 2.5 },
-  dns_router: { color: '#38bdf8', width: 2.5 },
-  firewall: { color: '#f43f5e', width: 2.5 },
-  user_client: { color: '#3b82f6', width: 2.5 },
-  mobile_client: { color: '#06b6d4', width: 2.5 },
+  hand: { color: '#6366f1', width: 3 },
+  pen: { color: '#6366f1', width: 4 },
+  brush: { color: '#06b6d4', width: 8 },
+  highlighter: { color: '#f59e0b', width: 22 },
+  temp_pen: { color: '#38bdf8', width: 4 },
+  laser: { color: '#ef4444', width: 4 },
+  torch: { color: '#facc15', width: 75 },
+  eraser: { color: '#ffffff', width: 24 },
+  text: { color: '#ffffff', width: 4 },
+  code_box: { color: '#38bdf8', width: 3 },
+  line: { color: '#6366f1', width: 3.5 },
+  arrow: { color: '#6366f1', width: 3.5 },
+  arrow_bi: { color: '#6366f1', width: 3.5 },
+  rect: { color: '#6366f1', width: 3.5 },
+  rounded_rect: { color: '#6366f1', width: 3.5 },
+  circle: { color: '#6366f1', width: 3.5 },
+  triangle: { color: '#10b981', width: 3.5 },
+  star: { color: '#f59e0b', width: 3.5 },
+  decision_diamond: { color: '#f59e0b', width: 3.5 },
+  tree_node: { color: '#10b981', width: 3.5 },
+  sticky_note: { color: '#fef3c7', width: 2.5 },
+  db_cylinder: { color: '#10b981', width: 3 },
+  db_nosql: { color: '#34d399', width: 3 },
+  cloud: { color: '#38bdf8', width: 3 },
+  load_balancer: { color: '#f59e0b', width: 3 },
+  message_queue: { color: '#a855f7', width: 3 },
+  server_box: { color: '#818cf8', width: 3 },
+  cache_mem: { color: '#f43f5e', width: 3 },
+  dns_router: { color: '#38bdf8', width: 3 },
+  firewall: { color: '#f43f5e', width: 3 },
+  user_client: { color: '#3b82f6', width: 3 },
+  mobile_client: { color: '#06b6d4', width: 3 },
   // DSA Data Structure Visualizers:
-  array_cells: { color: '#38bdf8', width: 2.5 },
-  stack_lifo: { color: '#f59e0b', width: 2.5 },
-  queue_fifo: { color: '#10b981', width: 2.5 },
-  hashmap_table: { color: '#a855f7', width: 2.5 },
-  two_pointers: { color: '#ec4899', width: 2 },
+  array_cells: { color: '#38bdf8', width: 3 },
+  stack_lifo: { color: '#f59e0b', width: 3 },
+  queue_fifo: { color: '#10b981', width: 3 },
+  hashmap_table: { color: '#a855f7', width: 3 },
+  two_pointers: { color: '#ec4899', width: 2.5 },
   // Extended Architecture Nodes:
-  cdn_edge: { color: '#06b6d4', width: 2.5 },
-  object_storage: { color: '#f97316', width: 2.5 },
-  auth_jwt: { color: '#eab308', width: 2.5 },
-  websocket_gw: { color: '#6366f1', width: 2.5 },
-  elasticsearch: { color: '#14b8a6', width: 2.5 },
-  async_arrow: { color: '#a855f7', width: 2 },
-  tradeoff_note: { color: '#facc15', width: 2 },
+  cdn_edge: { color: '#06b6d4', width: 3 },
+  object_storage: { color: '#f97316', width: 3 },
+  auth_jwt: { color: '#eab308', width: 3 },
+  websocket_gw: { color: '#6366f1', width: 3 },
+  elasticsearch: { color: '#14b8a6', width: 3 },
+  async_arrow: { color: '#a855f7', width: 2.5 },
+  tradeoff_note: { color: '#facc15', width: 2.5 },
 };
 
-// ── Geometric Collision Helpers for Precision Object Eraser ──
+// ── Geometric Collision & Bounding Box Helpers ──
 function distanceToLineSegment(px: number, py: number, x1: number, y1: number, x2: number, y2: number): number {
   const l2 = (x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1);
   if (l2 === 0) return Math.hypot(px - x1, py - y1);
   let t = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2;
   t = Math.max(0, Math.min(1, t));
   return Math.hypot(px - (x1 + t * (x2 - x1)), py - (y1 + t * (y2 - y1)));
+}
+
+function getStrokeBounds(stroke: WhiteboardStroke): { minX: number; minY: number; maxX: number; maxY: number } {
+  if (stroke.geometry) {
+    const minX = Math.min(stroke.geometry.x1, stroke.geometry.x2);
+    const maxX = Math.max(stroke.geometry.x1, stroke.geometry.x2);
+    const minY = Math.min(stroke.geometry.y1, stroke.geometry.y2);
+    const maxY = Math.max(stroke.geometry.y1, stroke.geometry.y2);
+    return { minX, minY, maxX, maxY };
+  }
+  if (stroke.text && stroke.geometry) {
+    return { minX: stroke.geometry.x1, minY: stroke.geometry.y1 - 20, maxX: stroke.geometry.x1 + 100, maxY: stroke.geometry.y1 + 10 };
+  }
+  if (stroke.points && stroke.points.length > 0) {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const p of stroke.points) {
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+    }
+    return { minX, minY, maxX, maxY };
+  }
+  return { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+}
+
+function isStrokeInRect(stroke: WhiteboardStroke, rect: { x1: number; y1: number; x2: number; y2: number }): boolean {
+  const rMinX = Math.min(rect.x1, rect.x2);
+  const rMaxX = Math.max(rect.x1, rect.x2);
+  const rMinY = Math.min(rect.y1, rect.y2);
+  const rMaxY = Math.max(rect.y1, rect.y2);
+  const b = getStrokeBounds(stroke);
+  return !(b.maxX < rMinX || b.minX > rMaxX || b.maxY < rMinY || b.minY > rMaxY);
+}
+
+function moveStroke(stroke: WhiteboardStroke, dx: number, dy: number): WhiteboardStroke {
+  const updated = { ...stroke };
+  if (updated.geometry) {
+    updated.geometry = {
+      ...updated.geometry,
+      x1: updated.geometry.x1 + dx,
+      y1: updated.geometry.y1 + dy,
+      x2: updated.geometry.x2 + dx,
+      y2: updated.geometry.y2 + dy,
+    };
+  }
+  if (updated.points && updated.points.length > 0) {
+    updated.points = updated.points.map((p) => ({ x: p.x + dx, y: p.y + dy }));
+  }
+  return updated;
 }
 
 function isStrokeIntersectingEraser(stroke: WhiteboardStroke, eraserPt: Point, radius: number): boolean {
@@ -165,7 +218,7 @@ function isStrokeIntersectingEraser(stroke: WhiteboardStroke, eraserPt: Point, r
       return false;
     }
 
-    if (stroke.tool === 'line' || stroke.tool === 'arrow' || stroke.tool === 'arrow_bi') {
+    if (stroke.tool === 'line' || stroke.tool === 'arrow' || stroke.tool === 'arrow_bi' || stroke.tool === 'async_arrow' || stroke.tool === 'two_pointers') {
       return distanceToLineSegment(eraserPt.x, eraserPt.y, x1, y1, x2, y2) <= radius + stroke.width;
     }
 
@@ -239,6 +292,14 @@ export const WhiteboardCanvas: React.FC = () => {
   const [torchPos, setTorchPos] = useState<{ x: number; y: number } | null>(null);
   const [eraserPos, setEraserPos] = useState<{ x: number; y: number } | null>(null);
 
+  // Selection, Moving & Sectioning State
+  const [selectedStrokeIds, setSelectedStrokeIds] = useState<string[]>([]);
+  const [selectionBox, setSelectionBox] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
+  const [isMovingSelection, setIsMovingSelection] = useState(false);
+  const [moveStartPoint, setMoveStartPoint] = useState<Point | null>(null);
+  const [clipboardStrokes, setClipboardStrokes] = useState<WhiteboardStroke[]>([]);
+  const initialSelectedStrokesRef = useRef<WhiteboardStroke[]>([]);
+
   // Toast / Notification for Undo on Clear / Copy
   const [undoToast, setUndoToast] = useState<string | null>(null);
   const [copiedToast, setCopiedToast] = useState(false);
@@ -254,9 +315,73 @@ export const WhiteboardCanvas: React.FC = () => {
   const [showArchDrawer, setShowArchDrawer] = useState(false);
   const [showDsaDrawer, setShowDsaDrawer] = useState(false);
   const [showGeomDrawer, setShowGeomDrawer] = useState(false);
-  const [showPresetsDrawer, setShowPresetsDrawer] = useState(false);
-  const [presetTab, setPresetTab] = useState<'dsa' | 'arch'>('dsa');
   const [showThemesDrawer, setShowThemesDrawer] = useState(false);
+
+  // Calculate overall bounding box of currently selected strokes
+  const getSelectedBounds = useCallback(() => {
+    const strokes = whiteboardService.getStrokes();
+    const selected = strokes.filter((s) => selectedStrokeIds.includes(s.id));
+    if (selected.length === 0) return null;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    selected.forEach((s) => {
+      const b = getStrokeBounds(s);
+      if (b.minX < minX) minX = b.minX;
+      if (b.maxX > maxX) maxX = b.maxX;
+      if (b.minY < minY) minY = b.minY;
+      if (b.maxY > maxY) maxY = b.maxY;
+    });
+    return { minX: minX - 8, minY: minY - 8, maxX: maxX + 8, maxY: maxY + 8 };
+  }, [selectedStrokeIds, whiteboardService]);
+
+  // Copy selected strokes to clipboard
+  const handleCopySelected = useCallback(() => {
+    const strokes = whiteboardService.getStrokes();
+    const selected = strokes.filter((s) => selectedStrokeIds.includes(s.id));
+    if (selected.length === 0) return;
+    setClipboardStrokes(selected);
+    setCopiedToast(true);
+    setTimeout(() => setCopiedToast(false), 2000);
+  }, [selectedStrokeIds, whiteboardService]);
+
+  // Paste copied strokes
+  const handlePasteSelected = useCallback(() => {
+    if (clipboardStrokes.length === 0) return;
+    const newStrokes = clipboardStrokes.map((s) => ({
+      ...moveStroke(s, 24, 24),
+      id: `stroke-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+      timestamp: Date.now(),
+    }));
+    whiteboardService.addStrokes(newStrokes);
+    setSelectedStrokeIds(newStrokes.map((s) => s.id));
+    setClipboardStrokes(newStrokes);
+  }, [clipboardStrokes, whiteboardService]);
+
+  // Duplicate selected strokes
+  const handleDuplicateSelected = useCallback(() => {
+    const strokes = whiteboardService.getStrokes();
+    const selected = strokes.filter((s) => selectedStrokeIds.includes(s.id));
+    if (selected.length === 0) return;
+    const newStrokes = selected.map((s) => ({
+      ...moveStroke(s, 24, 24),
+      id: `stroke-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+      timestamp: Date.now(),
+    }));
+    whiteboardService.addStrokes(newStrokes);
+    setSelectedStrokeIds(newStrokes.map((s) => s.id));
+  }, [selectedStrokeIds, whiteboardService]);
+
+  // Delete selected strokes
+  const handleDeleteSelected = useCallback(() => {
+    if (selectedStrokeIds.length === 0) return;
+    whiteboardService.deleteStrokes(selectedStrokeIds);
+    setSelectedStrokeIds([]);
+  }, [selectedStrokeIds, whiteboardService]);
+
+  // Deselect
+  const handleDeselect = useCallback(() => {
+    setSelectedStrokeIds([]);
+    setSelectionBox(null);
+  }, []);
 
   // Update active tool's independent color
   const updateActiveToolColor = (newColor: string) => {
@@ -317,6 +442,52 @@ export const WhiteboardCanvas: React.FC = () => {
       unsubTemp();
     };
   }, [whiteboardService]);
+
+  // Keyboard shortcuts for Section Selection, Copy, Paste, Duplicate, Delete, Deselect & Nudge
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) return;
+
+      if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+        if (selectedStrokeIds.length > 0) {
+          e.preventDefault();
+          handleCopySelected();
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+        if (clipboardStrokes.length > 0) {
+          e.preventDefault();
+          handlePasteSelected();
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key === 'd') {
+        if (selectedStrokeIds.length > 0) {
+          e.preventDefault();
+          handleDuplicateSelected();
+        }
+      } else if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selectedStrokeIds.length > 0) {
+          e.preventDefault();
+          handleDeleteSelected();
+        }
+      } else if (e.key === 'Escape') {
+        handleDeselect();
+      } else if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+        if (selectedStrokeIds.length > 0) {
+          e.preventDefault();
+          const dist = e.shiftKey ? 10 : 2;
+          const dx = e.key === 'ArrowLeft' ? -dist : e.key === 'ArrowRight' ? dist : 0;
+          const dy = e.key === 'ArrowUp' ? -dist : e.key === 'ArrowDown' ? dist : 0;
+          const strokes = whiteboardService.getStrokes();
+          const updated = strokes
+            .filter((s) => selectedStrokeIds.includes(s.id))
+            .map((s) => moveStroke(s, dx, dy));
+          whiteboardService.updateStrokes(updated);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedStrokeIds, clipboardStrokes, handleCopySelected, handlePasteSelected, handleDuplicateSelected, handleDeleteSelected, handleDeselect, whiteboardService]);
 
   // 2. Animation loop for Laser trails & Disappearing Ink
   useEffect(() => {
@@ -1239,9 +1410,67 @@ export const WhiteboardCanvas: React.FC = () => {
         ctx.restore();
       });
 
+      // Selection Box (Marquee Drag)
+      if (selectionBox) {
+        ctx.save();
+        const minX = Math.min(selectionBox.x1, selectionBox.x2);
+        const minY = Math.min(selectionBox.y1, selectionBox.y2);
+        const selW = Math.abs(selectionBox.x2 - selectionBox.x1);
+        const selH = Math.abs(selectionBox.y2 - selectionBox.y1);
+        ctx.fillStyle = isLight ? 'rgba(99, 102, 241, 0.12)' : 'rgba(99, 102, 241, 0.2)';
+        ctx.fillRect(minX, minY, selW, selH);
+        ctx.strokeStyle = '#6366f1';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([5, 4]);
+        ctx.strokeRect(minX, minY, selW, selH);
+        ctx.restore();
+      }
+
+      // Selected Strokes Highlight Bounding Box & Handles
+      if (selectedStrokeIds.length > 0) {
+        const selectedStrokes = strokes.filter((s) => selectedStrokeIds.includes(s.id));
+        if (selectedStrokes.length > 0) {
+          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+          selectedStrokes.forEach((s) => {
+            const b = getStrokeBounds(s);
+            if (b.minX < minX) minX = b.minX;
+            if (b.maxX > maxX) maxX = b.maxX;
+            if (b.minY < minY) minY = b.minY;
+            if (b.maxY > maxY) maxY = b.maxY;
+          });
+          const pad = 6;
+          const bbX = minX - pad;
+          const bbY = minY - pad;
+          const bbW = maxX - minX + pad * 2;
+          const bbH = maxY - minY + pad * 2;
+
+          ctx.save();
+          ctx.strokeStyle = '#38bdf8';
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([4, 4]);
+          ctx.strokeRect(bbX, bbY, bbW, bbH);
+          ctx.setLineDash([]);
+
+          const handles = [
+            { x: bbX, y: bbY },
+            { x: bbX + bbW, y: bbY },
+            { x: bbX, y: bbY + bbH },
+            { x: bbX + bbW, y: bbY + bbH },
+          ];
+          handles.forEach((h) => {
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(h.x - 3.5, h.y - 3.5, 7, 7);
+            ctx.strokeStyle = '#0284c7';
+            ctx.lineWidth = 1.5;
+            ctx.strokeRect(h.x - 3.5, h.y - 3.5, 7, 7);
+          });
+          ctx.restore();
+        }
+      }
+
       ctx.restore();
     },
-    [activeTool, activeColor, activeWidth, backgroundType, bgColor, drawBackground, isLightColor, laserTrails, renderSingleStroke, tempStrokes, torchPos, eraserPos, zoom, panOffset]
+    [activeTool, activeColor, activeWidth, backgroundType, bgColor, drawBackground, isLightColor, laserTrails, renderSingleStroke, tempStrokes, torchPos, eraserPos, zoom, panOffset, selectionBox, selectedStrokeIds]
   );
 
   // Resize listener
@@ -1323,10 +1552,22 @@ export const WhiteboardCanvas: React.FC = () => {
     'firewall',
     'user_client',
     'mobile_client',
+    'array_cells',
+    'stack_lifo',
+    'queue_fifo',
+    'hashmap_table',
+    'two_pointers',
+    'cdn_edge',
+    'object_storage',
+    'auth_jwt',
+    'websocket_gw',
+    'elasticsearch',
+    'async_arrow',
+    'tradeoff_note',
   ].includes(activeTool);
 
   const handlePointerDown = (e: React.MouseEvent | React.TouchEvent) => {
-    if (activeTool === 'select') {
+    if (activeTool === 'hand') {
       setIsPanning(true);
       const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
       const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
@@ -1335,6 +1576,41 @@ export const WhiteboardCanvas: React.FC = () => {
     }
 
     const pt = getCanvasCoords(e);
+
+    if (activeTool === 'select') {
+      const strokes = whiteboardService.getStrokes();
+      const selBounds = getSelectedBounds();
+
+      // Check if clicking inside current selection bounding box to drag/move
+      if (selBounds && pt.x >= selBounds.minX && pt.x <= selBounds.maxX && pt.y >= selBounds.minY && pt.y <= selBounds.maxY) {
+        setIsMovingSelection(true);
+        setMoveStartPoint(pt);
+        initialSelectedStrokesRef.current = strokes.filter((s) => selectedStrokeIds.includes(s.id)).map((s) => JSON.parse(JSON.stringify(s)));
+        return;
+      }
+
+      // Check if clicked directly on any stroke
+      const hitStroke = [...strokes].reverse().find((s) => isStrokeIntersectingEraser(s, pt, 12));
+      if (hitStroke) {
+        const isShift = (e as React.MouseEvent).shiftKey;
+        if (isShift) {
+          setSelectedStrokeIds((prev) => prev.includes(hitStroke.id) ? prev.filter((id) => id !== hitStroke.id) : [...prev, hitStroke.id]);
+        } else {
+          setSelectedStrokeIds([hitStroke.id]);
+        }
+        setIsMovingSelection(true);
+        setMoveStartPoint(pt);
+        initialSelectedStrokesRef.current = [JSON.parse(JSON.stringify(hitStroke))];
+        return;
+      }
+
+      // Clicked on empty space: start marquee selection box
+      setSelectedStrokeIds([]);
+      setSelectionBox({ x1: pt.x, y1: pt.y, x2: pt.x, y2: pt.y });
+      setStartPoint(pt);
+      setIsDrawing(true);
+      return;
+    }
 
     if (activeTool === 'text') {
       setTextModalPos(pt);
@@ -1345,7 +1621,7 @@ export const WhiteboardCanvas: React.FC = () => {
     if (activeTool === 'eraser') {
       setIsDrawing(true);
       setEraserPos(pt);
-      const radius = activeWidth * 2.2 || 18;
+      const radius = activeWidth * 2.2 || 24;
       const strokes = whiteboardService.getStrokes();
       const toDelete = strokes.filter((s) => isStrokeIntersectingEraser(s, pt, radius)).map((s) => s.id);
       if (toDelete.length > 0) {
@@ -1372,7 +1648,7 @@ export const WhiteboardCanvas: React.FC = () => {
   };
 
   const handlePointerMove = (e: React.MouseEvent | React.TouchEvent) => {
-    if (activeTool === 'select' && isPanning) {
+    if (activeTool === 'hand' && isPanning) {
       const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
       const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
       setPanOffset({ x: clientX - panStart.x, y: clientY - panStart.y });
@@ -1381,10 +1657,31 @@ export const WhiteboardCanvas: React.FC = () => {
 
     const pt = getCanvasCoords(e);
 
+    if (activeTool === 'select') {
+      if (isMovingSelection && moveStartPoint) {
+        const dx = pt.x - moveStartPoint.x;
+        const dy = pt.y - moveStartPoint.y;
+        const moved = initialSelectedStrokesRef.current.map((s) => moveStroke(s, dx, dy));
+        const updateMap = new Map(moved.map((s) => [s.id, s]));
+        const updatedAll = whiteboardService.getStrokes().map((s) => updateMap.get(s.id) || s);
+        redrawCanvas(updatedAll);
+        return;
+      }
+      if (isDrawing && startPoint) {
+        const box = { x1: startPoint.x, y1: startPoint.y, x2: pt.x, y2: pt.y };
+        setSelectionBox(box);
+        const found = whiteboardService.getStrokes().filter((s) => isStrokeInRect(s, box)).map((s) => s.id);
+        setSelectedStrokeIds(found);
+        redrawCanvas(whiteboardService.getStrokes());
+        return;
+      }
+      return;
+    }
+
     if (activeTool === 'eraser') {
       setEraserPos(pt);
       if (isDrawing) {
-        const radius = activeWidth * 2.2 || 18;
+        const radius = activeWidth * 2.2 || 24;
         const strokes = whiteboardService.getStrokes();
         const toDelete = strokes.filter((s) => isStrokeIntersectingEraser(s, pt, radius)).map((s) => s.id);
         if (toDelete.length > 0) {
@@ -1423,8 +1720,29 @@ export const WhiteboardCanvas: React.FC = () => {
   };
 
   const handlePointerUp = (e: React.MouseEvent | React.TouchEvent) => {
-    if (activeTool === 'select') {
+    if (activeTool === 'hand') {
       setIsPanning(false);
+      return;
+    }
+
+    if (activeTool === 'select') {
+      if (isMovingSelection && moveStartPoint) {
+        const pt = getCanvasCoords(e);
+        const dx = pt.x - moveStartPoint.x;
+        const dy = pt.y - moveStartPoint.y;
+        if (Math.hypot(dx, dy) > 2) {
+          const moved = initialSelectedStrokesRef.current.map((s) => moveStroke(s, dx, dy));
+          whiteboardService.updateStrokes(moved);
+        }
+        setIsMovingSelection(false);
+        setMoveStartPoint(null);
+      }
+      if (isDrawing && startPoint) {
+        setSelectionBox(null);
+        setStartPoint(null);
+        setIsDrawing(false);
+      }
+      redrawCanvas(whiteboardService.getStrokes());
       return;
     }
 
@@ -1445,7 +1763,7 @@ export const WhiteboardCanvas: React.FC = () => {
     setIsDrawing(false);
 
     const endPt = getCanvasCoords(e);
-    const strokeWidth = activeTool === 'highlighter' ? 16 : activeWidth;
+    const strokeWidth = activeTool === 'highlighter' ? 22 : activeWidth;
 
     if (isShapeTool && startPoint) {
       whiteboardService.addStroke(
@@ -1486,182 +1804,6 @@ export const WhiteboardCanvas: React.FC = () => {
 
     setTextModalPos(null);
     setTextInput('');
-  };
-
-  // Quick Architecture & Algorithm Presets Stamping
-  const handleStampPreset = (type: string) => {
-    const cx = (containerRef.current?.clientWidth || 400) / 2 / zoom - panOffset.x / zoom;
-    const cy = 180 / zoom - panOffset.y / zoom;
-
-    // ─── DSA & Algorithm Presets ───
-    if (type === 'two_pointers') {
-      whiteboardService.addStroke('array_cells', '#38bdf8', 2.5, [], { x1: cx - 110, y1: cy, x2: cx + 110, y2: cy + 34 });
-      whiteboardService.addStroke('two_pointers', '#ec4899', 2, [], { x1: cx - 90, y1: cy + 38, x2: cx - 90, y2: cy + 58, label: 'L (left=0)' });
-      whiteboardService.addStroke('two_pointers', '#10b981', 2, [], { x1: cx + 70, y1: cy + 38, x2: cx + 70, y2: cy + 58, label: 'R (right=4)' });
-      whiteboardService.addStroke('text', '#f59e0b', 3, [], { x1: cx - 100, y1: cy - 25, x2: cx - 100, y2: cy - 25 }, 'Target = nums[L] + nums[R]');
-    } else if (type === 'bst') {
-      whiteboardService.addStroke('tree_node', '#10b981', 3, [], { x1: cx, y1: cy, x2: cx, y2: cy, label: '50' });
-      whiteboardService.addStroke('tree_node', '#06b6d4', 3, [], { x1: cx - 70, y1: cy + 65, x2: cx - 70, y2: cy + 65, label: '30' });
-      whiteboardService.addStroke('tree_node', '#06b6d4', 3, [], { x1: cx + 70, y1: cy + 65, x2: cx + 70, y2: cy + 65, label: '70' });
-      whiteboardService.addStroke('tree_node', '#818cf8', 2.5, [], { x1: cx - 105, y1: cy + 130, x2: cx - 105, y2: cy + 130, label: '20' });
-      whiteboardService.addStroke('tree_node', '#818cf8', 2.5, [], { x1: cx - 35, y1: cy + 130, x2: cx - 35, y2: cy + 130, label: '40' });
-      whiteboardService.addStroke('tree_node', '#818cf8', 2.5, [], { x1: cx + 35, y1: cy + 130, x2: cx + 35, y2: cy + 130, label: '60' });
-      whiteboardService.addStroke('tree_node', '#818cf8', 2.5, [], { x1: cx + 105, y1: cy + 130, x2: cx + 105, y2: cy + 130, label: '80' });
-      // Edges
-      whiteboardService.addStroke('arrow', '#6366f1', 2, [], { x1: cx - 12, y1: cy + 12, x2: cx - 55, y2: cy + 52 });
-      whiteboardService.addStroke('arrow', '#6366f1', 2, [], { x1: cx + 12, y1: cy + 12, x2: cx + 55, y2: cy + 52 });
-      whiteboardService.addStroke('arrow', '#6366f1', 1.5, [], { x1: cx - 75, y1: cy + 78, x2: cx - 95, y2: cy + 118 });
-      whiteboardService.addStroke('arrow', '#6366f1', 1.5, [], { x1: cx - 65, y1: cy + 78, x2: cx - 45, y2: cy + 118 });
-      whiteboardService.addStroke('arrow', '#6366f1', 1.5, [], { x1: cx + 65, y1: cy + 78, x2: cx + 45, y2: cy + 118 });
-      whiteboardService.addStroke('arrow', '#6366f1', 1.5, [], { x1: cx + 75, y1: cy + 78, x2: cx + 95, y2: cy + 118 });
-      whiteboardService.addStroke('text', '#34d399', 2.5, [], { x1: cx - 100, y1: cy - 25, x2: cx - 100, y2: cy - 25 }, 'BST Property: Left < Root < Right');
-    } else if (type === 'floyd_cycle') {
-      const startX = cx - 140;
-      for (let i = 0; i < 4; i++) {
-        const nx = startX + i * 65;
-        whiteboardService.addStroke('rounded_rect', '#38bdf8', 2.5, [], { x1: nx, y1: cy, x2: nx + 45, y2: cy + 28, label: `Node ${i + 1}` });
-        whiteboardService.addStroke('arrow', '#f59e0b', 2, [], { x1: nx + 45, y1: cy + 14, x2: nx + 65, y2: cy + 14 });
-      }
-      // Loop cycle nodes
-      whiteboardService.addStroke('rounded_rect', '#ec4899', 2.5, [], { x1: startX + 260, y1: cy + 45, x2: startX + 305, y2: cy + 73, label: 'Node 5' });
-      whiteboardService.addStroke('rounded_rect', '#ec4899', 2.5, [], { x1: startX + 195, y1: cy + 60, x2: startX + 240, y2: cy + 88, label: 'Node 6' });
-      whiteboardService.addStroke('arrow', '#ec4899', 2, [], { x1: startX + 240, y1: cy + 28, x2: startX + 260, y2: cy + 45 });
-      whiteboardService.addStroke('arrow', '#ec4899', 2, [], { x1: startX + 260, y1: cy + 65, x2: startX + 240, y2: cy + 75 });
-      whiteboardService.addStroke('arrow', '#ec4899', 2, [], { x1: startX + 195, y1: cy + 70, x2: startX + 195, y2: cy + 28 });
-      // Pointers
-      whiteboardService.addStroke('two_pointers', '#10b981', 2, [], { x1: startX + 85, y1: cy - 25, x2: startX + 85, y2: cy - 5, label: '🐢 Slow' });
-      whiteboardService.addStroke('two_pointers', '#f59e0b', 2, [], { x1: startX + 215, y1: cy - 25, x2: startX + 215, y2: cy - 5, label: '🐇 Fast' });
-      whiteboardService.addStroke('text', '#38bdf8', 2.5, [], { x1: cx - 120, y1: cy - 40, x2: cx - 120, y2: cy - 40 }, "Floyd's Cycle Detection (Fast & Slow Pointers)");
-    } else if (type === 'mono_stack') {
-      whiteboardService.addStroke('array_cells', '#38bdf8', 2.5, [], { x1: cx - 140, y1: cy + 20, x2: cx - 20, y2: cy + 54 });
-      whiteboardService.addStroke('stack_lifo', '#f59e0b', 2.5, [], { x1: cx + 30, y1: cy, x2: cx + 90, y2: cy + 90 });
-      whiteboardService.addStroke('arrow', '#ec4899', 2, [], { x1: cx - 30, y1: cy + 25, x2: cx + 25, y2: cy + 35 });
-      whiteboardService.addStroke('text', '#f59e0b', 2.5, [], { x1: cx - 120, y1: cy - 25, x2: cx - 120, y2: cy - 25 }, 'Monotonic Stack: Push if cur < top, else Pop & evaluate');
-    } else if (type === 'dp_table') {
-      whiteboardService.setBackground('matrix');
-      whiteboardService.addStroke('text', '#38bdf8', 3, [], { x1: cx - 110, y1: cy - 30, x2: cx - 110, y2: cy - 30 }, 'DP[i][j] = DP[i-1][j] + DP[i][j-1]');
-      whiteboardService.addStroke('tradeoff_note', '#facc15', 2, [], { x1: cx - 100, y1: cy + 30, x2: cx + 100, y2: cy + 90, label: 'Base Case: DP[0][j]=1, DP[i][0]=1' });
-    } else if (type === 'trie') {
-      whiteboardService.addStroke('tree_node', '#10b981', 3, [], { x1: cx, y1: cy, x2: cx, y2: cy, label: '*' });
-      whiteboardService.addStroke('tree_node', '#38bdf8', 2.5, [], { x1: cx - 70, y1: cy + 60, x2: cx - 70, y2: cy + 60, label: 'c' });
-      whiteboardService.addStroke('tree_node', '#38bdf8', 2.5, [], { x1: cx - 70, y1: cy + 120, x2: cx - 70, y2: cy + 120, label: 'a' });
-      whiteboardService.addStroke('tree_node', '#ec4899', 2.5, [], { x1: cx - 105, y1: cy + 180, x2: cx - 105, y2: cy + 180, label: 't (end)' });
-      whiteboardService.addStroke('tree_node', '#ec4899', 2.5, [], { x1: cx - 35, y1: cy + 180, x2: cx - 35, y2: cy + 180, label: 'r (end)' });
-      whiteboardService.addStroke('arrow', '#6366f1', 2, [], { x1: cx - 10, y1: cy + 10, x2: cx - 60, y2: cy + 48 });
-      whiteboardService.addStroke('arrow', '#6366f1', 2, [], { x1: cx - 70, y1: cy + 75, x2: cx - 70, y2: cy + 105 });
-      whiteboardService.addStroke('arrow', '#6366f1', 2, [], { x1: cx - 75, y1: cy + 135, x2: cx - 95, y2: cy + 165 });
-      whiteboardService.addStroke('arrow', '#6366f1', 2, [], { x1: cx - 65, y1: cy + 135, x2: cx - 45, y2: cy + 165 });
-      whiteboardService.addStroke('text', '#38bdf8', 2.5, [], { x1: cx - 100, y1: cy - 25, x2: cx - 100, y2: cy - 25 }, 'Prefix Trie (Insert / Search / StartsWith)');
-    } else if (type === 'graph_bfs') {
-      whiteboardService.addStroke('tree_node', '#10b981', 3, [], { x1: cx - 90, y1: cy, x2: cx - 90, y2: cy, label: '1' });
-      whiteboardService.addStroke('tree_node', '#38bdf8', 3, [], { x1: cx - 40, y1: cy + 50, x2: cx - 40, y2: cy + 50, label: '2' });
-      whiteboardService.addStroke('tree_node', '#38bdf8', 3, [], { x1: cx - 40, y1: cy - 50, x2: cx - 40, y2: cy - 50, label: '3' });
-      whiteboardService.addStroke('tree_node', '#818cf8', 3, [], { x1: cx + 20, y1: cy + 50, x2: cx + 20, y2: cy + 50, label: '4' });
-      whiteboardService.addStroke('tree_node', '#818cf8', 3, [], { x1: cx + 20, y1: cy - 50, x2: cx + 20, y2: cy - 50, label: '5' });
-      whiteboardService.addStroke('arrow', '#6366f1', 2, [], { x1: cx - 75, y1: cy + 10, x2: cx - 50, y2: cy + 38 });
-      whiteboardService.addStroke('arrow', '#6366f1', 2, [], { x1: cx - 75, y1: cy - 10, x2: cx - 50, y2: cy - 38 });
-      whiteboardService.addStroke('arrow', '#6366f1', 2, [], { x1: cx - 25, y1: cy + 50, x2: cx + 5, y2: cy + 50 });
-      whiteboardService.addStroke('arrow', '#6366f1', 2, [], { x1: cx - 25, y1: cy - 50, x2: cx + 5, y2: cy - 50 });
-      whiteboardService.addStroke('queue_fifo', '#10b981', 2, [], { x1: cx + 70, y1: cy - 20, x2: cx + 160, y2: cy + 15, label: 'Queue' });
-      whiteboardService.addStroke('text', '#34d399', 2.5, [], { x1: cx - 110, y1: cy - 75, x2: cx - 110, y2: cy - 75 }, 'BFS Traversal (Visited Set + FIFO Queue)');
-    } else if (type === 'min_heap') {
-      whiteboardService.addStroke('tree_node', '#10b981', 3, [], { x1: cx, y1: cy, x2: cx, y2: cy, label: '10' });
-      whiteboardService.addStroke('tree_node', '#38bdf8', 2.5, [], { x1: cx - 50, y1: cy + 50, x2: cx - 50, y2: cy + 50, label: '15' });
-      whiteboardService.addStroke('tree_node', '#38bdf8', 2.5, [], { x1: cx + 50, y1: cy + 50, x2: cx + 50, y2: cy + 50, label: '20' });
-      whiteboardService.addStroke('arrow', '#6366f1', 2, [], { x1: cx - 10, y1: cy + 10, x2: cx - 40, y2: cy + 40 });
-      whiteboardService.addStroke('arrow', '#6366f1', 2, [], { x1: cx + 10, y1: cy + 10, x2: cx + 40, y2: cy + 40 });
-      whiteboardService.addStroke('array_cells', '#f59e0b', 2.5, [], { x1: cx - 80, y1: cy + 90, x2: cx + 80, y2: cy + 120 });
-      whiteboardService.addStroke('text', '#f59e0b', 2.5, [], { x1: cx - 100, y1: cy - 25, x2: cx - 100, y2: cy - 25 }, 'Min-Heap: Parent(i) <= Left(2i+1) & Right(2i+2)');
-    } else if (type === 'intervals') {
-      whiteboardService.addStroke('line', '#38bdf8', 4, [], { x1: cx - 120, y1: cy, x2: cx - 40, y2: cy, label: '[1, 4]' });
-      whiteboardService.addStroke('line', '#ec4899', 4, [], { x1: cx - 70, y1: cy + 25, x2: cx + 20, y2: cy + 25, label: '[2, 6]' });
-      whiteboardService.addStroke('line', '#10b981', 4, [], { x1: cx + 40, y1: cy, x2: cx + 110, y2: cy, label: '[8, 10]' });
-      whiteboardService.addStroke('arrow', '#f59e0b', 2, [], { x1: cx - 30, y1: cy + 45, x2: cx - 30, y2: cy + 70 });
-      whiteboardService.addStroke('line', '#10b981', 6, [], { x1: cx - 120, y1: cy + 85, x2: cx + 20, y2: cy + 85, label: 'Merged: [1, 6]' });
-      whiteboardService.addStroke('text', '#38bdf8', 2.5, [], { x1: cx - 110, y1: cy - 25, x2: cx - 110, y2: cy - 25 }, 'Merge Overlapping Intervals (Sort by Start)');
-    } else if (type === 'recursion_tree') {
-      whiteboardService.addStroke('code_box', '#818cf8', 2, [], { x1: cx - 40, y1: cy, x2: cx + 40, y2: cy + 30, label: 'solve(N)' });
-      whiteboardService.addStroke('code_box', '#38bdf8', 2, [], { x1: cx - 100, y1: cy + 60, x2: cx - 30, y2: cy + 90, label: 'solve(N/2)' });
-      whiteboardService.addStroke('code_box', '#38bdf8', 2, [], { x1: cx + 30, y1: cy + 60, x2: cx + 100, y2: cy + 90, label: 'solve(N/2)' });
-      whiteboardService.addStroke('arrow', '#6366f1', 2, [], { x1: cx - 20, y1: cy + 30, x2: cx - 60, y2: cy + 60 });
-      whiteboardService.addStroke('arrow', '#6366f1', 2, [], { x1: cx + 20, y1: cy + 30, x2: cx + 60, y2: cy + 60 });
-      whiteboardService.addStroke('text', '#34d399', 2.5, [], { x1: cx - 100, y1: cy - 25, x2: cx - 100, y2: cy - 25 }, 'Divide & Conquer: T(N) = 2T(N/2) + O(N)');
-    }
-
-    // ─── System Design Architecture Presets ───
-    else if (type === 'url_shortener') {
-      whiteboardService.addStroke('user_client', '#3b82f6', 2.5, [], { x1: cx - 140, y1: cy, x2: cx - 100, y2: cy + 40, label: 'Client' });
-      whiteboardService.addStroke('arrow', '#6366f1', 2, [], { x1: cx - 100, y1: cy + 20, x2: cx - 70, y2: cy + 20 });
-      whiteboardService.addStroke('load_balancer', '#f59e0b', 2.5, [], { x1: cx - 70, y1: cy - 5, x2: cx - 20, y2: cy + 45, label: 'LB' });
-      whiteboardService.addStroke('arrow', '#6366f1', 2, [], { x1: cx - 20, y1: cy + 20, x2: cx + 10, y2: cy + 20 });
-      whiteboardService.addStroke('server_box', '#818cf8', 2.5, [], { x1: cx + 10, y1: cy - 5, x2: cx + 80, y2: cy + 40, label: 'App Servers' });
-      whiteboardService.addStroke('arrow', '#10b981', 2, [], { x1: cx + 80, y1: cy + 10, x2: cx + 115, y2: cy - 20 });
-      whiteboardService.addStroke('cache_mem', '#f43f5e', 2.5, [], { x1: cx + 115, y1: cy - 45, x2: cx + 180, y2: cy - 5, label: 'Redis Cache' });
-      whiteboardService.addStroke('arrow', '#10b981', 2, [], { x1: cx + 80, y1: cy + 30, x2: cx + 115, y2: cy + 50 });
-      whiteboardService.addStroke('db_cylinder', '#10b981', 2.5, [], { x1: cx + 115, y1: cy + 30, x2: cx + 180, y2: cy + 85, label: 'SQL Shards' });
-      whiteboardService.addStroke('tradeoff_note', '#facc15', 2, [], { x1: cx - 130, y1: cy + 70, x2: cx - 10, y2: cy + 120, label: 'Base62 (7 chars) | 100:1 Read Heavy' });
-    } else if (type === 'rate_limiter') {
-      whiteboardService.addStroke('user_client', '#3b82f6', 2.5, [], { x1: cx - 140, y1: cy, x2: cx - 100, y2: cy + 40, label: 'Client' });
-      whiteboardService.addStroke('arrow', '#6366f1', 2, [], { x1: cx - 100, y1: cy + 20, x2: cx - 60, y2: cy + 20 });
-      whiteboardService.addStroke('cloud', '#38bdf8', 2.5, [], { x1: cx - 60, y1: cy - 10, x2: cx + 10, y2: cy + 50, label: 'API Gateway' });
-      whiteboardService.addStroke('arrow', '#f59e0b', 2, [], { x1: cx - 25, y1: cy + 50, x2: cx - 25, y2: cy + 85 });
-      whiteboardService.addStroke('cache_mem', '#f43f5e', 2.5, [], { x1: cx - 60, y1: cy + 85, x2: cx + 10, y2: cy + 125, label: 'Redis Tokens' });
-      whiteboardService.addStroke('arrow', '#10b981', 2, [], { x1: cx + 10, y1: cy + 20, x2: cx + 55, y2: cy + 20 });
-      whiteboardService.addStroke('server_box', '#818cf8', 2.5, [], { x1: cx + 55, y1: cy - 5, x2: cx + 130, y2: cy + 40, label: 'Microservices' });
-      whiteboardService.addStroke('tradeoff_note', '#facc15', 2, [], { x1: cx - 140, y1: cy + 70, x2: cx - 75, y2: cy + 120, label: 'Token Bucket | 429 Too Many Requests' });
-    } else if (type === 'chat_system') {
-      whiteboardService.addStroke('user_client', '#3b82f6', 2.5, [], { x1: cx - 140, y1: cy - 30, x2: cx - 100, y2: cy + 10, label: 'User A' });
-      whiteboardService.addStroke('user_client', '#3b82f6', 2.5, [], { x1: cx - 140, y1: cy + 40, x2: cx - 100, y2: cy + 80, label: 'User B' });
-      whiteboardService.addStroke('arrow_bi', '#6366f1', 2, [], { x1: cx - 100, y1: cy - 10, x2: cx - 50, y2: cy + 10 });
-      whiteboardService.addStroke('arrow_bi', '#6366f1', 2, [], { x1: cx - 100, y1: cy + 50, x2: cx - 50, y2: cy + 30 });
-      whiteboardService.addStroke('websocket_gw', '#6366f1', 2.5, [], { x1: cx - 50, y1: cy, x2: cx + 20, y2: cy + 50, label: 'WS Gateway' });
-      whiteboardService.addStroke('arrow', '#a855f7', 2, [], { x1: cx + 20, y1: cy + 25, x2: cx + 60, y2: cy + 25 });
-      whiteboardService.addStroke('message_queue', '#a855f7', 2.5, [], { x1: cx + 60, y1: cy + 5, x2: cx + 140, y2: cy + 45, label: 'Redis PubSub' });
-      whiteboardService.addStroke('arrow', '#10b981', 2, [], { x1: cx + 100, y1: cy + 45, x2: cx + 100, y2: cy + 75 });
-      whiteboardService.addStroke('db_nosql', '#34d399', 2.5, [], { x1: cx + 70, y1: cy + 75, x2: cx + 130, y2: cy + 135, label: 'Cassandra' });
-      whiteboardService.addStroke('tradeoff_note', '#facc15', 2, [], { x1: cx - 140, y1: cy + 95, x2: cx - 40, y2: cy + 140, label: 'Persistent WebSocket + Heartbeat' });
-    } else if (type === 'distributed_cache') {
-      whiteboardService.addStroke('server_box', '#818cf8', 2.5, [], { x1: cx - 110, y1: cy, x2: cx - 40, y2: cy + 45, label: 'App Server' });
-      whiteboardService.addStroke('arrow', '#f43f5e', 2, [], { x1: cx - 40, y1: cy + 20, x2: cx + 10, y2: cy + 20 });
-      whiteboardService.addStroke('cache_mem', '#f43f5e', 2.5, [], { x1: cx + 10, y1: cy, x2: cx + 80, y2: cy + 45, label: 'Redis Cluster' });
-      whiteboardService.addStroke('async_arrow', '#10b981', 2, [], { x1: cx + 80, y1: cy + 20, x2: cx + 120, y2: cy + 20 });
-      whiteboardService.addStroke('db_cylinder', '#10b981', 2.5, [], { x1: cx + 120, y1: cy - 10, x2: cx + 180, y2: cy + 50, label: 'Postgres DB' });
-      whiteboardService.addStroke('tradeoff_note', '#facc15', 2, [], { x1: cx - 100, y1: cy + 65, x2: cx + 60, y2: cy + 115, label: 'Cache-Aside (Read-Through) | LRU Eviction' });
-    } else if (type === 'ecommerce_saga') {
-      whiteboardService.addStroke('server_box', '#818cf8', 2.5, [], { x1: cx - 130, y1: cy, x2: cx - 60, y2: cy + 40, label: 'Order API' });
-      whiteboardService.addStroke('arrow', '#a855f7', 2, [], { x1: cx - 60, y1: cy + 20, x2: cx - 15, y2: cy + 20 });
-      whiteboardService.addStroke('message_queue', '#a855f7', 2.5, [], { x1: cx - 15, y1: cy, x2: cx + 65, y2: cy + 40, label: 'Kafka Bus' });
-      whiteboardService.addStroke('arrow', '#10b981', 2, [], { x1: cx + 65, y1: cy + 10, x2: cx + 100, y2: cy - 20 });
-      whiteboardService.addStroke('server_box', '#10b981', 2, [], { x1: cx + 100, y1: cy - 40, x2: cx + 165, y2: cy - 5, label: 'Payment' });
-      whiteboardService.addStroke('arrow', '#10b981', 2, [], { x1: cx + 65, y1: cy + 30, x2: cx + 100, y2: cy + 55 });
-      whiteboardService.addStroke('server_box', '#10b981', 2, [], { x1: cx + 100, y1: cy + 40, x2: cx + 165, y2: cy + 75, label: 'Inventory' });
-      whiteboardService.addStroke('tradeoff_note', '#facc15', 2, [], { x1: cx - 120, y1: cy + 60, x2: cx + 20, y2: cy + 110, label: 'Choreographed Saga | Compensating Tx' });
-    } else if (type === 'web_crawler') {
-      whiteboardService.addStroke('message_queue', '#a855f7', 2.5, [], { x1: cx - 130, y1: cy, x2: cx - 50, y2: cy + 40, label: 'URL Frontier' });
-      whiteboardService.addStroke('arrow', '#6366f1', 2, [], { x1: cx - 50, y1: cy + 20, x2: cx - 10, y2: cy + 20 });
-      whiteboardService.addStroke('server_box', '#818cf8', 2.5, [], { x1: cx - 10, y1: cy, x2: cx + 55, y2: cy + 40, label: 'Fetcher Pool' });
-      whiteboardService.addStroke('arrow', '#f59e0b', 2, [], { x1: cx + 55, y1: cy + 20, x2: cx + 90, y2: cy + 20 });
-      whiteboardService.addStroke('object_storage', '#f97316', 2.5, [], { x1: cx + 90, y1: cy - 10, x2: cx + 150, y2: cy + 50, label: 'S3 Raw Docs' });
-      whiteboardService.addStroke('tradeoff_note', '#facc15', 2, [], { x1: cx - 110, y1: cy + 60, x2: cx + 30, y2: cy + 110, label: 'Bloom Filter Dedup | Politeness Delay' });
-    } else if (type === 'microservices_3tier') {
-      whiteboardService.addStroke('cdn_edge', '#06b6d4', 2.5, [], { x1: cx - 140, y1: cy - 10, x2: cx - 85, y2: cy + 40, label: 'Cloudflare' });
-      whiteboardService.addStroke('arrow', '#6366f1', 2, [], { x1: cx - 85, y1: cy + 15, x2: cx - 50, y2: cy + 15 });
-      whiteboardService.addStroke('load_balancer', '#f59e0b', 2.5, [], { x1: cx - 50, y1: cy - 10, x2: cx + 5, y2: cy + 40, label: 'ALB Gateway' });
-      whiteboardService.addStroke('arrow', '#6366f1', 2, [], { x1: cx + 5, y1: cy + 15, x2: cx + 40, y2: cy + 15 });
-      whiteboardService.addStroke('server_box', '#818cf8', 2.5, [], { x1: cx + 40, y1: cy - 10, x2: cx + 110, y2: cy + 35, label: 'Microservices' });
-      whiteboardService.addStroke('arrow', '#10b981', 2, [], { x1: cx + 110, y1: cy + 15, x2: cx + 135, y2: cy + 15 });
-      whiteboardService.addStroke('db_cylinder', '#10b981', 2.5, [], { x1: cx + 135, y1: cy - 20, x2: cx + 190, y2: cy + 45, label: 'Primary DB' });
-      whiteboardService.addStroke('tradeoff_note', '#facc15', 2, [], { x1: cx - 110, y1: cy + 65, x2: cx + 40, y2: cy + 115, label: 'Stateless Web Tier + Read Replicas + Redis' });
-    } else if (type === 'search_analytics') {
-      whiteboardService.addStroke('server_box', '#818cf8', 2.5, [], { x1: cx - 140, y1: cy, x2: cx - 75, y2: cy + 40, label: 'App Logs' });
-      whiteboardService.addStroke('arrow', '#a855f7', 2, [], { x1: cx - 75, y1: cy + 20, x2: cx - 35, y2: cy + 20 });
-      whiteboardService.addStroke('message_queue', '#a855f7', 2.5, [], { x1: cx - 35, y1: cy, x2: cx + 40, y2: cy + 40, label: 'Kafka Ingest' });
-      whiteboardService.addStroke('arrow', '#14b8a6', 2, [], { x1: cx + 40, y1: cy + 20, x2: cx + 80, y2: cy + 20 });
-      whiteboardService.addStroke('elasticsearch', '#14b8a6', 2.5, [], { x1: cx + 80, y1: cy - 5, x2: cx + 150, y2: cy + 45, label: 'Elasticsearch' });
-      whiteboardService.addStroke('tradeoff_note', '#facc15', 2, [], { x1: cx - 100, y1: cy + 60, x2: cx + 60, y2: cy + 110, label: 'Inverted Index | Kibana Dashboards' });
-    }
-
-    setShowPresetsDrawer(false);
   };
 
   // Background Pattern Selector
@@ -1914,17 +2056,18 @@ export const WhiteboardCanvas: React.FC = () => {
           alignItems: 'center',
           justifyContent: 'space-between',
           padding: '4px 8px',
-          background: 'rgba(15, 23, 42, 0.95)',
+          background: 'var(--bg-surface-elevated)',
           borderBottom: '1px solid var(--border-subtle)',
           flexWrap: 'wrap',
           gap: '4px',
           flexShrink: 0,
         }}
       >
-        {/* Left Tools: Freehand, Presenter & Essential Tools */}
+        {/* Left Tools: Freehand, Selection, Presenter & Essential Tools */}
         <div style={{ display: 'flex', gap: '3px', alignItems: 'center', flexWrap: 'wrap' }}>
           {[
-            { id: 'select', icon: Hand, label: '🖐️ Pan Hand', defaultColor: '#6366f1' },
+            { id: 'select', icon: MousePointer, label: '↖️ Select & Move / Copy-Paste (Ctrl+C/V/D)', defaultColor: '#6366f1' },
+            { id: 'hand', icon: Hand, label: '🖐️ Pan Hand (Drag Canvas)', defaultColor: '#6366f1' },
             { id: 'pen', icon: Pencil, label: 'Fine Pen (Smooth)', defaultColor: '#6366f1' },
             { id: 'brush', icon: PenTool, label: 'Brush Pen', defaultColor: '#06b6d4' },
             { id: 'highlighter', icon: Highlighter, label: 'Highlighter', defaultColor: '#f59e0b' },
@@ -1947,19 +2090,19 @@ export const WhiteboardCanvas: React.FC = () => {
                 onClick={() => setActiveTool(t.id as any)}
                 title={`${t.label}`}
                 style={{
-                  padding: '2px 5px',
+                  padding: '3px 6px',
                   borderRadius: '4px',
                   border: isActive ? '1px solid var(--primary)' : '1px solid transparent',
-                  background: isActive ? 'rgba(99, 102, 241, 0.25)' : 'transparent',
-                  color: isActive ? '#ffffff' : 'var(--text-muted)',
+                  background: isActive ? 'var(--primary-glow, rgba(99, 102, 241, 0.25))' : 'transparent',
+                  color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '3px',
                 }}
               >
-                <Icon size={11} color={isActive ? toolColor : 'var(--text-muted)'} />
-                {t.id !== 'eraser' && t.id !== 'torch' && t.id !== 'select' && (
+                <Icon size={13} color={isActive ? toolColor : 'currentColor'} />
+                {t.id !== 'eraser' && t.id !== 'torch' && t.id !== 'select' && t.id !== 'hand' && (
                   <span
                     style={{
                       width: '6px',
@@ -1983,7 +2126,6 @@ export const WhiteboardCanvas: React.FC = () => {
               setShowGeomDrawer(!showGeomDrawer);
               setShowDsaDrawer(false);
               setShowArchDrawer(false);
-              setShowPresetsDrawer(false);
               setShowThemesDrawer(false);
             }}
             style={{
@@ -2006,7 +2148,6 @@ export const WhiteboardCanvas: React.FC = () => {
               setShowDsaDrawer(!showDsaDrawer);
               setShowGeomDrawer(false);
               setShowArchDrawer(false);
-              setShowPresetsDrawer(false);
               setShowThemesDrawer(false);
             }}
             style={{
@@ -2029,7 +2170,6 @@ export const WhiteboardCanvas: React.FC = () => {
               setShowArchDrawer(!showArchDrawer);
               setShowGeomDrawer(false);
               setShowDsaDrawer(false);
-              setShowPresetsDrawer(false);
               setShowThemesDrawer(false);
             }}
             style={{
@@ -2049,34 +2189,10 @@ export const WhiteboardCanvas: React.FC = () => {
           <button
             type="button"
             onClick={() => {
-              setShowPresetsDrawer(!showPresetsDrawer);
-              setShowGeomDrawer(false);
-              setShowDsaDrawer(false);
-              setShowArchDrawer(false);
-              setShowThemesDrawer(false);
-            }}
-            style={{
-              padding: '2px 6px',
-              fontSize: '9.5px',
-              fontWeight: 600,
-              borderRadius: '4px',
-              border: '1px solid var(--border-subtle)',
-              background: showPresetsDrawer ? 'rgba(16, 185, 129, 0.2)' : 'transparent',
-              color: showPresetsDrawer ? '#34d399' : 'var(--text-muted)',
-              cursor: 'pointer',
-            }}
-          >
-            ⚡ Presets {showPresetsDrawer ? '▲' : '▼'}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
               setShowThemesDrawer(!showThemesDrawer);
               setShowGeomDrawer(false);
               setShowDsaDrawer(false);
               setShowArchDrawer(false);
-              setShowPresetsDrawer(false);
             }}
             style={{
               padding: '2px 6px',
@@ -2099,34 +2215,14 @@ export const WhiteboardCanvas: React.FC = () => {
             <button
               type="button"
               onClick={() => {
-                setPrivacyMode('collaborative');
-                whiteboardService.setPrivacyMode('collaborative');
-              }}
-              title="👥 Collaborative Room Board (Synced across all peers and windows)"
-              style={{
-                fontSize: '8.5px',
-                fontWeight: 700,
-                padding: '2px 4px',
-                borderRadius: '3px',
-                background: privacyMode === 'collaborative' ? 'linear-gradient(135deg, #10b981, #06b6d4)' : 'transparent',
-                color: privacyMode === 'collaborative' ? '#ffffff' : 'var(--text-muted)',
-                border: 'none',
-                cursor: 'pointer',
-              }}
-            >
-              👥 Collab
-            </button>
-            <button
-              type="button"
-              onClick={() => {
                 setPrivacyMode('personal');
                 whiteboardService.setPrivacyMode('personal');
               }}
-              title="🔒 Personal Scratchpad"
+              title="🔒 Private Scratchpad (Offline, Independent)"
               style={{
                 fontSize: '8.5px',
                 fontWeight: 700,
-                padding: '2px 4px',
+                padding: '2px 5px',
                 borderRadius: '3px',
                 background: privacyMode === 'personal' ? 'linear-gradient(135deg, #f59e0b, #f43f5e)' : 'transparent',
                 color: privacyMode === 'personal' ? '#ffffff' : 'var(--text-muted)',
@@ -2135,6 +2231,26 @@ export const WhiteboardCanvas: React.FC = () => {
               }}
             >
               🔒 Private
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setPrivacyMode('collaborative');
+                whiteboardService.setPrivacyMode('collaborative');
+              }}
+              title="👥 Collaborative Room Board (Synced across all peers and windows)"
+              style={{
+                fontSize: '8.5px',
+                fontWeight: 700,
+                padding: '2px 5px',
+                borderRadius: '3px',
+                background: privacyMode === 'collaborative' ? 'linear-gradient(135deg, #10b981, #06b6d4)' : 'transparent',
+                color: privacyMode === 'collaborative' ? '#ffffff' : 'var(--text-muted)',
+                border: 'none',
+                cursor: 'pointer',
+              }}
+            >
+              👥 Collab
             </button>
           </div>
 
@@ -2371,128 +2487,7 @@ export const WhiteboardCanvas: React.FC = () => {
         </div>
       )}
 
-      {/* ─── 6. Drawer: Categorized DSA & System Design Presets (18 High-Yield Blueprints) ─── */}
-      {showPresetsDrawer && (
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '4px',
-            padding: '4px 8px',
-            background: 'rgba(6, 44, 36, 0.96)',
-            borderBottom: '1px solid rgba(16, 185, 129, 0.35)',
-            flexShrink: 0,
-          }}
-        >
-          {/* Preset Category Switcher */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ display: 'flex', gap: '3px' }}>
-              <button
-                type="button"
-                onClick={() => setPresetTab('dsa')}
-                style={{
-                  fontSize: '9px',
-                  fontWeight: 700,
-                  padding: '2px 8px',
-                  borderRadius: '4px',
-                  border: 'none',
-                  background: presetTab === 'dsa' ? '#10b981' : 'rgba(255,255,255,0.08)',
-                  color: presetTab === 'dsa' ? '#ffffff' : '#a7f3d0',
-                  cursor: 'pointer',
-                }}
-              >
-                🔲 DSA &amp; Algorithms (10)
-              </button>
-              <button
-                type="button"
-                onClick={() => setPresetTab('arch')}
-                style={{
-                  fontSize: '9px',
-                  fontWeight: 700,
-                  padding: '2px 8px',
-                  borderRadius: '4px',
-                  border: 'none',
-                  background: presetTab === 'arch' ? '#10b981' : 'rgba(255,255,255,0.08)',
-                  color: presetTab === 'arch' ? '#ffffff' : '#a7f3d0',
-                  cursor: 'pointer',
-                }}
-              >
-                🏛️ System Design (8)
-              </button>
-            </div>
-            <span style={{ fontSize: '8.5px', color: '#6ee7b7' }}>1-Click Blueprint Stamp</span>
-          </div>
 
-          {/* Preset Buttons Grid */}
-          <div style={{ display: 'flex', gap: '4px', overflowX: 'auto', paddingBottom: '2px' }}>
-            {presetTab === 'dsa' &&
-              [
-                { id: 'two_pointers', label: '👆 Two Pointers', desc: 'Array [2,7,11,15] with Left/Right pointers & Target check' },
-                { id: 'bst', label: '🌲 BST Balanced Tree', desc: '3-level binary search tree with property validation' },
-                { id: 'floyd_cycle', label: '🐢 Floyd Cycle (Fast/Slow)', desc: 'Linked list cycle with Slow (1x) & Fast (2x) pointers' },
-                { id: 'mono_stack', label: '📥 Monotonic Stack', desc: 'Stack LIFO evaluation for Next Greater Element' },
-                { id: 'dp_table', label: '📊 2D DP Recurrence', desc: '4x4 DP matrix with base cases and recurrence formulas' },
-                { id: 'trie', label: '🌳 Prefix Trie', desc: 'Multi-branch prefix tree for insert/search/startsWith' },
-                { id: 'graph_bfs', label: '🔵 Graph BFS + Queue', desc: '5-node graph with Visited hashset and FIFO queue' },
-                { id: 'min_heap', label: '🏔️ Min-Heap / Priority Queue', desc: 'Heap tree with array indices (2i+1, 2i+2)' },
-                { id: 'intervals', label: '📏 Overlapping Intervals', desc: 'Interval timeline sorting & merge strategy' },
-                { id: 'recursion_tree', label: '🌿 Recursion Tree (D&C)', desc: 'Merge sort / Divide & Conquer recursion tree' },
-              ].map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => handleStampPreset(p.id)}
-                  title={p.desc}
-                  style={{
-                    fontSize: '9px',
-                    fontWeight: 600,
-                    padding: '3px 7px',
-                    borderRadius: '4px',
-                    border: '1px solid rgba(16, 185, 129, 0.4)',
-                    background: 'rgba(16, 185, 129, 0.25)',
-                    color: '#ffffff',
-                    cursor: 'pointer',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {p.label}
-                </button>
-              ))}
-
-            {presetTab === 'arch' &&
-              [
-                { id: 'url_shortener', label: '🔗 URL Shortener (TinyURL)', desc: 'Client -> LB -> App Servers -> Base62 KGS + Redis + SQL DB' },
-                { id: 'rate_limiter', label: '🚦 API Rate Limiter', desc: 'API Gateway -> Token Bucket Redis -> Backend (429 Too Many Requests)' },
-                { id: 'chat_system', label: '💬 Real-Time Chat (WhatsApp)', desc: 'WebSocket Gateway -> Redis PubSub -> Cassandra Messages' },
-                { id: 'distributed_cache', label: '⚡ Distributed Cache', desc: 'App Server -> Redis Cluster -> Invalidation Worker -> PostgreSQL' },
-                { id: 'ecommerce_saga', label: '🛒 E-Commerce Saga', desc: 'Order API -> Kafka Stream -> Payment + Inventory Workers' },
-                { id: 'web_crawler', label: '🕷️ Distributed Web Crawler', desc: 'URL Frontier Queue -> Fetcher Workers -> DNS -> S3 Storage' },
-                { id: 'microservices_3tier', label: '🏛️ 3-Tier Microservices', desc: 'CDN -> ALB -> Auth + User Services -> Master DB + Read Replicas' },
-                { id: 'search_analytics', label: '🔍 Log & Search Cluster', desc: 'App Logs -> Kafka Ingest -> Elasticsearch -> Kibana' },
-              ].map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => handleStampPreset(p.id)}
-                  title={p.desc}
-                  style={{
-                    fontSize: '9px',
-                    fontWeight: 600,
-                    padding: '3px 7px',
-                    borderRadius: '4px',
-                    border: '1px solid rgba(16, 185, 129, 0.4)',
-                    background: 'rgba(16, 185, 129, 0.25)',
-                    color: '#ffffff',
-                    cursor: 'pointer',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {p.label}
-                </button>
-              ))}
-          </div>
-        </div>
-      )}
 
       {/* ─── 7. Drawer: Independent Tool Styling & Background Themes ─── */}
       {showThemesDrawer && (
@@ -2655,6 +2650,133 @@ export const WhiteboardCanvas: React.FC = () => {
 
       {/* ─── 7. Master Canvas Drawing Workspace ─── */}
       <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+        {/* Floating Selection Action Bar for Copy, Duplicate, Paste, Delete & Deselect */}
+        {selectedStrokeIds.length > 0 && (() => {
+          const b = getSelectedBounds();
+          if (!b) return null;
+          const screenX = Math.max(10, Math.min((containerRef.current?.clientWidth || 400) - 240, b.minX * zoom + panOffset.x));
+          const screenY = Math.max(10, b.minY * zoom + panOffset.y - 36);
+
+          return (
+            <div
+              style={{
+                position: 'absolute',
+                left: `${screenX}px`,
+                top: `${screenY}px`,
+                zIndex: 60,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                background: 'var(--bg-surface-elevated)',
+                border: '1px solid var(--border-medium, var(--border-subtle))',
+                borderRadius: '6px',
+                padding: '3px 6px',
+                boxShadow: '0 4px 15px rgba(0, 0, 0, 0.4)',
+                backdropFilter: 'blur(8px)',
+              }}
+            >
+              <span style={{ fontSize: '9px', fontWeight: 700, color: 'var(--primary)', paddingRight: '2px' }}>
+                {selectedStrokeIds.length} sel
+              </span>
+              <button
+                type="button"
+                onClick={handleCopySelected}
+                title="Copy Selection (Ctrl+C)"
+                style={{
+                  background: 'var(--bg-hover)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: '4px',
+                  color: 'var(--text-primary)',
+                  fontSize: '9.5px',
+                  padding: '2px 6px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '3px',
+                }}
+              >
+                <Copy size={10} />
+                <span>Copy</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleDuplicateSelected}
+                title="Duplicate Selection (Ctrl+D)"
+                style={{
+                  background: 'var(--bg-hover)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: '4px',
+                  color: 'var(--text-primary)',
+                  fontSize: '9.5px',
+                  padding: '2px 6px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '3px',
+                }}
+              >
+                <Plus size={10} />
+                <span>Dup</span>
+              </button>
+              {clipboardStrokes.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handlePasteSelected}
+                  title="Paste (Ctrl+V)"
+                  style={{
+                    background: 'var(--bg-hover)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: '4px',
+                    color: 'var(--text-primary)',
+                    fontSize: '9.5px',
+                    padding: '2px 6px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '3px',
+                  }}
+                >
+                  <Clipboard size={10} />
+                  <span>Paste</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleDeleteSelected}
+                title="Delete Selection (Del)"
+                style={{
+                  background: 'rgba(244, 63, 94, 0.15)',
+                  border: '1px solid rgba(244, 63, 94, 0.35)',
+                  borderRadius: '4px',
+                  color: '#f43f5e',
+                  fontSize: '9.5px',
+                  padding: '2px 6px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '3px',
+                }}
+              >
+                <Trash2 size={10} />
+              </button>
+              <button
+                type="button"
+                onClick={handleDeselect}
+                title="Deselect (Esc)"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--text-muted)',
+                  padding: '2px 4px',
+                  cursor: 'pointer',
+                }}
+              >
+                <X size={11} />
+              </button>
+            </div>
+          );
+        })()}
+
         <canvas
           ref={canvasRef}
           onMouseDown={handlePointerDown}
@@ -2667,7 +2789,7 @@ export const WhiteboardCanvas: React.FC = () => {
             width: '100%',
             height: '100%',
             display: 'block',
-            cursor: activeTool === 'select' ? (isPanning ? 'grabbing' : 'grab') : activeTool === 'text' ? 'text' : activeTool === 'eraser' ? 'cell' : 'crosshair',
+            cursor: activeTool === 'hand' ? (isPanning ? 'grabbing' : 'grab') : activeTool === 'select' ? 'default' : activeTool === 'text' ? 'text' : activeTool === 'eraser' ? 'cell' : 'crosshair',
           }}
         />
 

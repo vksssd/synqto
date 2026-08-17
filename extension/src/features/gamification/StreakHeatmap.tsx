@@ -7,7 +7,7 @@ interface StreakHeatmapProps {
 }
 
 export const StreakHeatmap: React.FC<StreakHeatmapProps> = ({ stats }) => {
-  const [isExpanded, setIsExpanded] = useState(true);
+  const [isExpanded, setIsExpanded] = useState(false);
   const [hoveredDate, setHoveredDate] = useState<string | null>(null);
 
   // Generate array of past 60 days

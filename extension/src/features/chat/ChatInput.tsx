@@ -1,6 +1,6 @@
 // ─── WhatsApp-style Chat Composer (Mentions Autocomplete, Image Paste, Screenshot, Code, Poll, Quiz, Files) ───
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   Send,
   X,
@@ -12,11 +12,9 @@ import {
   BarChart2,
   HelpCircle,
   Paperclip,
-  Sparkles,
   Users,
   Radio,
   Volume2,
-  Mic,
 } from 'lucide-react';
 import { ChatMessageItem } from './chat.service';
 import { PeerIdentity } from '@/core/network/packet';
@@ -153,29 +151,146 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     e.target.value = '';
   };
 
-  const handleSend = () => {
-    if (stagedImage) {
-      onSendImage(stagedImage, stagedCaption);
-      setStagedImage(null);
-      setStagedCaption('');
-      return;
-    }
+//   const handleSend = () => {
+//     if (stagedImage) {
+//       onSendImage(stagedImage, stagedCaption);
+//       setStagedImage(null);
+//       setStagedCaption('');
+//       return;
+//     }
 
-    if (!text.trim()) return;
+//     if (!text.trim()) return;
 
-    const replyData = replyingTo
-      ? {
-          id: replyingTo.id,
-          preview: `${replyingTo.from.nickname}: ${replyingTo.text.slice(0, 40)}`,
-        }
-      : undefined;
+//     // const replyData = replyingTo
+//     //   ? {
+//     //       id: replyingTo.id,
+//     //       preview: `${replyingTo.from.nickname}: ${replyingTo.text.slice(0, 40)}`,
+//     //     }
+//     //   : undefined;
+// const replyData = replyingTo
+//   ? {
+//       id: replyingTo.id,
+//       preview: replyingTo.text?.trim()
+//         ? replyingTo.text.slice(0, 120)
+//         : replyingTo.imageUrl
+//           ? '📷 Image'
+//           : replyingTo.codeSnippet
+//             ? '💻 Code snippet'
+//             : replyingTo.poll
+//               ? '📊 Poll'
+//               : replyingTo.quiz
+//                 ? '❓ Quiz'
+//                 : replyingTo.fileAttachment
+//                   ? `📎 ${replyingTo.fileAttachment.name}`
+//                   : 'Message',
+//     }
+//   : undefined;
 
-    onSendMessage(text, replyData);
-    setText('');
-    onCancelReply();
-    setShowMentionPopup(false);
-  };
+//     onSendMessage(text, replyData);
+//     setText('');
+//     onCancelReply();
+//     setShowMentionPopup(false);
+//   };
 
+// const handleSend = () => {
+//   if (stagedImage) {
+//     onSendImage(
+//       stagedImage,
+//       stagedCaption
+//     );
+
+//     setStagedImage(null);
+//     setStagedCaption('');
+
+//     return;
+//   }
+
+//   if (!text.trim()) {
+//     return;
+//   }
+
+//   const replyData = replyingTo
+//     ? {
+//         id: replyingTo.id,
+
+//         preview: replyingTo.text?.trim()
+//           ? replyingTo.text.slice(
+//               0,
+//               120
+//             )
+//           : replyingTo.imageUrl
+//             ? '📷 Image'
+//             : replyingTo.codeSnippet
+//               ? '💻 Code snippet'
+//               : replyingTo.poll
+//                 ? '📊 Poll'
+//                 : replyingTo.quiz
+//                   ? '❓ Quiz'
+//                   : replyingTo.fileAttachment
+//                     ? `📎 ${replyingTo.fileAttachment.name}`
+//                     : 'Message',
+//       }
+//     : undefined;
+
+//   onSendMessage(
+//     text,
+//     replyData
+//   );
+
+//   setText('');
+
+//   onCancelReply();
+
+//   setShowMentionPopup(false);
+// };
+const handleSend = () => {
+  if (stagedImage) {
+    onSendImage(
+      stagedImage,
+      stagedCaption
+    );
+
+    setStagedImage(null);
+    setStagedCaption('');
+
+    return;
+  }
+
+  const trimmedText = text.trim();
+
+  if (!trimmedText) {
+    return;
+  }
+
+  const replyData = replyingTo
+    ? {
+        id: replyingTo.id,
+        preview:
+          replyingTo.text?.trim()
+            ? replyingTo.text.slice(0, 120)
+            : replyingTo.imageUrl
+              ? '📷 Image'
+              : replyingTo.codeSnippet
+                ? '💻 Code snippet'
+                : replyingTo.poll
+                  ? '📊 Poll'
+                  : replyingTo.quiz
+                    ? '❓ Quiz'
+                    : replyingTo.fileAttachment
+                      ? `📎 ${replyingTo.fileAttachment.name}`
+                      : 'Message',
+      }
+    : undefined;
+
+  onSendMessage(
+    trimmedText,
+    replyData
+  );
+
+  setText('');
+  setShowMentionPopup(false);
+  onCancelReply();
+};
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -225,7 +340,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
       </div>
 
       {/* Reply indicator banner */}
-      {replyingTo && (
+      {/* {replyingTo && (
         <div
           style={{
             display: 'flex',
@@ -246,8 +361,89 @@ export const ChatInput: React.FC<ChatInputProps> = ({
             <X size={12} />
           </button>
         </div>
-      )}
+      )} */}
+{/* WhatsApp-style reply composer */}
+{/* {replyingTo && (
+  <div className="composer-reply">
+    <div className="composer-reply-accent" />
 
+    <div className="composer-reply-content">
+      <div className="composer-reply-title">
+        Replying to {replyingTo.isSelf ? 'You' : replyingTo.from.nickname}
+      </div>
+
+      <div className="composer-reply-text">
+        {replyingTo.text?.trim()
+          ? replyingTo.text
+          : replyingTo.imageUrl
+            ? '📷 Image'
+            : replyingTo.codeSnippet
+              ? '💻 Code snippet'
+              : replyingTo.poll
+                ? '📊 Poll'
+                : replyingTo.quiz
+                  ? '❓ Quiz'
+                  : replyingTo.fileAttachment
+                    ? `📎 ${replyingTo.fileAttachment.name}`
+                    : 'Message'}
+      </div>
+    </div>
+
+    <button
+      type="button"
+      className="composer-reply-close"
+      onClick={onCancelReply}
+      title="Cancel reply"
+      aria-label="Cancel reply"
+    >
+      <X size={13} />
+    </button>
+  </div>
+)} */}
+{/* WhatsApp-style reply composer */}
+{replyingTo && (
+  <div className="composer-reply">
+    <div className="composer-reply-accent" />
+
+    <div className="composer-reply-content">
+      <div className="composer-reply-title">
+        Replying to{' '}
+        {replyingTo.isSelf
+          ? 'You'
+          : replyingTo.from.nickname}
+      </div>
+
+      <div className="composer-reply-text">
+        {replyingTo.text?.trim()
+          ? replyingTo.text.slice(
+              0,
+              120
+            )
+          : replyingTo.imageUrl
+            ? '📷 Image'
+            : replyingTo.codeSnippet
+              ? '💻 Code snippet'
+              : replyingTo.poll
+                ? '📊 Poll'
+                : replyingTo.quiz
+                  ? '❓ Quiz'
+                  : replyingTo.fileAttachment
+                    ? `📎 ${replyingTo.fileAttachment.name}`
+                    : 'Message'}
+      </div>
+    </div>
+
+    <button
+      type="button"
+      className="composer-reply-close"
+      onClick={onCancelReply}
+      title="Cancel reply"
+      aria-label="Cancel reply"
+    >
+      <X size={13} />
+    </button>
+  </div>
+)}
       {/* Staged Image Preview (Pasted or Selected) */}
       {stagedImage && (
         <div

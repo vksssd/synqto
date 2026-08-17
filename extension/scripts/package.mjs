@@ -23,13 +23,17 @@ if (!fs.existsSync(outputDir)) {
 
 // Read version from manifest.json
 const manifestPath = path.resolve(distDir, 'manifest.json');
-let version = '0.1.0';
+let version = '0.2.0.0';
 if (fs.existsSync(manifestPath)) {
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-  version = manifest.version || '0.1.0';
+  version = manifest.version || '0.2.0.0';
 }
 
-const zipFileName = `synqto-v${version}.zip`;
+const vParts = version.split('.');
+const version4 = vParts.length >= 4 ? vParts.slice(0, 4).join('.') : `${version}.0`;
+const version3 = vParts.slice(0, 3).join('.');
+
+const zipFileName = `synqto-v${version4}.zip`;
 const zipFilePath = path.resolve(outputDir, zipFileName);
 
 if (fs.existsSync(zipFilePath)) {
@@ -52,7 +56,14 @@ const copyTargets = [
   path.resolve(extensionRoot, '..', 'downloads'),
 ];
 
-const aliasNames = [`synqto-v${version}.zip`, `synqme-v${version}.zip`, `nerd-buddy-v${version}.zip`];
+const aliasNames = [
+  `synqto-v${version4}.zip`,
+  `synqto-v${version3}.zip`,
+  `synqme-v${version4}.zip`,
+  `synqme-v${version3}.zip`,
+  `nerd-buddy-v${version4}.zip`,
+  `nerd-buddy-v${version3}.zip`,
+];
 const latestAliases = ['synqto-latest.zip', 'synqme-latest.zip', 'nerd-buddy-latest.zip'];
 
 for (const dir of copyTargets) {

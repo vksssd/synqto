@@ -6,7 +6,6 @@ import { TopologyService, TopologyState } from './topology.service';
 export class NetworkService {
   private static instance: NetworkService | null = null;
   private topology: TopologyService;
-  private localBroadcastChannel: BroadcastChannel | null = null;
 
   private myIdentity: PeerIdentity | null = null;
   private currentRoomId = '';
@@ -33,38 +32,13 @@ export class NetworkService {
     this.myIdentity = identity;
     this.currentRoomId = roomId;
 
-    // 1. Initialize local tab IPC channel
-    this.setupLocalBroadcast(roomId);
-
-    // 2. Initialize P2P topology network
+    // Initialize P2P topology network exclusively
     this.topology.init(identity, roomId);
   }
 
   public leave() {
-    if (this.localBroadcastChannel) {
-      this.localBroadcastChannel.close();
-      this.localBroadcastChannel = null;
-    }
     this.topology.leave();
     this.currentRoomId = '';
-  }
-
-  private setupLocalBroadcast(roomId: string) {
-    if (this.localBroadcastChannel) {
-      this.localBroadcastChannel.close();
-    }
-
-    try {
-      this.localBroadcastChannel = new BroadcastChannel(`nerd-buddy:room:${roomId}`);
-      this.localBroadcastChannel.onmessage = (event) => {
-        const packet: NetworkPacket = event.data;
-        if (packet && packet.from && packet.from.peerId !== this.myIdentity?.peerId) {
-          this.dispatchPacket(packet);
-        }
-      };
-    } catch (e) {
-      console.warn('[NetworkService] BroadcastChannel not supported in this environment');
-    }
   }
 
   public broadcast<T = unknown>(
@@ -75,13 +49,6 @@ export class NetworkService {
     if (!this.myIdentity || !this.currentRoomId) return null;
 
     const packet = createPacket(type, this.myIdentity, this.currentRoomId, payload, undefined, options);
-
-    // Send across local tabs
-    if (this.localBroadcastChannel) {
-      try {
-        this.localBroadcastChannel.postMessage(packet);
-      } catch (e) {}
-    }
 
     // Send across P2P topology
     this.topology.broadcastPacket(packet);
@@ -98,13 +65,6 @@ export class NetworkService {
     if (!this.myIdentity || !this.currentRoomId) return null;
 
     const packet = createPacket(type, this.myIdentity, this.currentRoomId, payload, targetPeerId, options);
-
-    // Send across local tabs
-    if (this.localBroadcastChannel) {
-      try {
-        this.localBroadcastChannel.postMessage(packet);
-      } catch (e) {}
-    }
 
     // Send to target peer via topology
     this.topology.sendPacket(targetPeerId, packet);

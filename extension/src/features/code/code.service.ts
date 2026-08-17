@@ -256,17 +256,27 @@ export class CodeService {
         };
         this.broadcastToContentTabs({ type: 'CODE_SYNC_REMOTE', payload: this.state });
         this.emitState();
+      } else if (payload.version < this.state.version) {
+        // Lagging peer sent stale sync; heal with our current state
+        this.broadcastFullSync();
       }
     });
 
-    // 2. Incremental delta update
+    // 2. Incremental delta update with deterministic tie-breaking & anti-entropy
     this.network.on<CodeDeltaPayload>('code:delta', (payload, packet) => {
-      if (payload.version >= this.state.version) {
+      const myPeerId = this.identityService.getMyIdentity().peerId;
+      const isNewer = payload.version > this.state.version;
+      const isSameVersion = payload.version === this.state.version;
+      const shouldApplyConflict =
+        isSameVersion && payload.code !== this.state.code && packet.from.peerId > myPeerId;
+
+      if (isNewer || shouldApplyConflict) {
+        const resolvedVersion = isNewer ? payload.version : this.state.version + 1;
         this.state = {
           ...this.state,
           code: payload.code,
           language: (payload.language as CodeLanguage) || this.state.language,
-          version: payload.version,
+          version: resolvedVersion,
           lastEditedBy: packet.from.nickname,
           lastEditedAt: Date.now(),
         };
@@ -288,13 +298,19 @@ export class CodeService {
           payload: {
             code: payload.code,
             language: payload.language,
-            version: payload.version,
+            version: this.state.version,
             sender: packet.from,
             cursorLine: payload.cursorLine,
             cursorCol: payload.cursorCol,
           },
         });
         this.emitState();
+      } else if (
+        payload.version < this.state.version ||
+        (isSameVersion && payload.code !== this.state.code && packet.from.peerId < myPeerId)
+      ) {
+        // Remote peer is behind or lost conflict tie-break; heal with our authoritative state
+        this.broadcastFullSync();
       }
     });
 

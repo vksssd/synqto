@@ -3,6 +3,7 @@
 import { NetworkPacket, PeerIdentity, createPacket } from './packet';
 import { SignalingService, RosterData, PromoteData, DemoteData } from './signaling.service';
 import { WebRTCService } from './webrtc.service';
+import { TopologyEpoch } from '../types/identifiers';
 
 export interface TopologyState {
   isLeader: boolean;
@@ -12,6 +13,7 @@ export interface TopologyState {
   standbyPeers: string[];
   backboneLeaders: string[];
   allPeers: string[];
+  epoch: TopologyEpoch;
 }
 
 export class TopologyService {
@@ -28,6 +30,7 @@ export class TopologyService {
   private standbyPeers: Set<string> = new Set();
   private backboneLeaders: Set<string> = new Set();
   private allPeers: Set<string> = new Set();
+  private topologyEpoch: TopologyEpoch = 1;
 
   // Deduplication sliding window (max 1500 items)
   private seenPacketIds: Set<string> = new Set();
@@ -226,6 +229,7 @@ export class TopologyService {
 
     // 2. Leader Promotion event from server
     this.signaling.on('promote', (data: PromoteData) => {
+      this.topologyEpoch++;
       this.isLeader = true;
       this.assignedLeader = this.myIdentity?.peerId || null;
       this.assignedStandbyLeader = null;
@@ -247,6 +251,7 @@ export class TopologyService {
 
     // 3. Leader Demotion event from server
     this.signaling.on('demote', (data: DemoteData) => {
+      this.topologyEpoch++;
       this.isLeader = false;
       this.assignedLeader = data.newLeader;
       this.assignedStandbyLeader = data.newStandbyLeader || null;
@@ -507,6 +512,7 @@ export class TopologyService {
       standbyPeers: Array.from(this.standbyPeers),
       backboneLeaders: Array.from(this.backboneLeaders),
       allPeers: Array.from(this.allPeers),
+      epoch: this.topologyEpoch,
     };
   }
 

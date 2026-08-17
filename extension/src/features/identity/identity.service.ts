@@ -39,6 +39,7 @@ const LEGACY_STORAGE_KEY = 'nerd_buddy_identity';
 export class IdentityService {
   private static instance: IdentityService | null = null;
   private currentIdentity: PeerIdentity | null = null;
+  private initPromise: Promise<PeerIdentity> | null = null;
   private listeners: Set<(identity: PeerIdentity) => void> = new Set();
 
   private constructor() {
@@ -61,32 +62,46 @@ export class IdentityService {
       return this.currentIdentity;
     }
 
-    // Try loading from storage (support both modern synqto_ and legacy nerd_buddy_ keys)
-    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-      try {
-        const result = await chrome.storage.local.get([STORAGE_KEY, LEGACY_STORAGE_KEY]);
-        const identity = result[STORAGE_KEY] || result[LEGACY_STORAGE_KEY];
-        if (identity) {
-          this.currentIdentity = identity;
-          return this.currentIdentity!;
-        }
-      } catch (e) {
-        console.warn('[IdentityService] Failed to load from chrome.storage.local');
-      }
-    } else if (typeof localStorage !== 'undefined') {
-      const stored = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
-      if (stored) {
-        try {
-          this.currentIdentity = JSON.parse(stored);
-          return this.currentIdentity!;
-        } catch (e) {}
-      }
+    if (this.initPromise) {
+      return this.initPromise;
     }
 
-    // Generate new random identity
-    const newIdentity = this.generateIdentity();
-    await this.saveIdentity(newIdentity);
-    return newIdentity;
+    this.initPromise = (async () => {
+      try {
+        // Try loading from storage (support both modern synqto_ and legacy nerd_buddy_ keys)
+        if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+          try {
+            const result = await chrome.storage.local.get([STORAGE_KEY, LEGACY_STORAGE_KEY]);
+            const identity = result[STORAGE_KEY] || result[LEGACY_STORAGE_KEY];
+            if (identity) {
+              this.currentIdentity = identity;
+              return this.currentIdentity!;
+            }
+          } catch (e) {
+            console.warn('[IdentityService] Failed to load from chrome.storage.local', e);
+          }
+        } else if (typeof localStorage !== 'undefined') {
+          const stored = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
+          if (stored) {
+            try {
+              this.currentIdentity = JSON.parse(stored);
+              return this.currentIdentity!;
+            } catch (e) {
+              console.warn('[IdentityService] Failed to parse identity from localStorage', e);
+            }
+          }
+        }
+
+        // Generate new random identity if none exists in storage
+        const newIdentity = this.generateIdentity();
+        await this.saveIdentity(newIdentity);
+        return newIdentity;
+      } finally {
+        this.initPromise = null;
+      }
+    })();
+
+    return this.initPromise;
   }
 
   public async regenerateIdentity(): Promise<PeerIdentity> {
@@ -154,6 +169,11 @@ export class IdentityService {
   public getMyIdentity(): PeerIdentity {
     if (this.currentIdentity) {
       return this.currentIdentity;
+    }
+
+    // If async initialization is currently in flight, do not overwrite storage with a new fallback identity
+    if (this.initPromise) {
+      return this.generateIdentity();
     }
 
     const fallback = this.generateIdentity();

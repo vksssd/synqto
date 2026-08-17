@@ -50,17 +50,9 @@ export class TimerService {
         }
         if (res[POMODORO_STATE_STORAGE_KEY]) {
           const savedState: TimerState = res[POMODORO_STATE_STORAGE_KEY];
-          // Account for elapsed time if it was running
-          if (savedState.isRunning) {
-            const elapsed = Math.floor((Date.now() - savedState.lastUpdated) / 1000);
-            if (savedState.mode === 'stopwatch') {
-              savedState.timeLeftSec += elapsed;
-            } else {
-              savedState.timeLeftSec = Math.max(0, savedState.timeLeftSec - elapsed);
-              if (savedState.timeLeftSec === 0) {
-                savedState.isRunning = false;
-              }
-            }
+          savedState.timeLeftSec = this.computeCurrentTimeLeft(savedState);
+          if (savedState.isRunning && savedState.mode !== 'stopwatch' && savedState.timeLeftSec === 0) {
+            savedState.isRunning = false;
           }
           this.state = savedState;
         } else {
@@ -70,6 +62,24 @@ export class TimerService {
         console.warn('[TimerService] Failed to load state:', err);
       }
     }
+  }
+
+  private computeCurrentTimeLeft(state: TimerState = this.state): number {
+    if (!state.isRunning) {
+      return state.pausedRemainingSec ?? state.timeLeftSec;
+    }
+    const now = Date.now();
+    if (state.mode === 'stopwatch') {
+      if (state.startedAt) {
+        return Math.floor((now - state.startedAt) / 1000);
+      }
+      return state.timeLeftSec;
+    }
+    // Countdown modes (pomodoro, short_break, long_break)
+    if (state.targetEndTime) {
+      return Math.max(0, Math.ceil((state.targetEndTime - now) / 1000));
+    }
+    return state.timeLeftSec;
   }
 
   private listenToStorageChanges() {
@@ -83,6 +93,7 @@ export class TimerService {
           if (changes[POMODORO_STATE_STORAGE_KEY]) {
             const incoming: TimerState = changes[POMODORO_STATE_STORAGE_KEY].newValue;
             if (incoming) {
+              incoming.timeLeftSec = this.computeCurrentTimeLeft(incoming);
               this.state = incoming;
               this.emit();
             }
@@ -96,23 +107,13 @@ export class TimerService {
     if (this.intervalId) clearInterval(this.intervalId);
     this.intervalId = setInterval(() => {
       if (this.state.isRunning) {
-        if (this.state.mode === 'stopwatch') {
-          this.state.timeLeftSec += 1;
-          this.state.lastUpdated = Date.now();
-          this.emit();
-          this.saveState();
-        } else {
-          if (this.state.timeLeftSec > 0) {
-            this.state.timeLeftSec -= 1;
-            this.state.lastUpdated = Date.now();
-            this.emit();
+        const computed = this.computeCurrentTimeLeft();
+        this.state.timeLeftSec = computed;
 
-            if (this.state.timeLeftSec === 0) {
-              this.handleSessionComplete();
-            } else if (this.state.timeLeftSec % 5 === 0) {
-              this.saveState();
-            }
-          }
+        if (this.state.mode !== 'stopwatch' && computed === 0) {
+          this.handleSessionComplete();
+        } else {
+          this.emit();
         }
       }
     }, 1000);
@@ -120,6 +121,9 @@ export class TimerService {
 
   private handleSessionComplete() {
     this.state.isRunning = false;
+    this.state.targetEndTime = undefined;
+    this.state.startedAt = undefined;
+    this.state.pausedRemainingSec = undefined;
     this.state.lastUpdated = Date.now();
 
     if (this.config.soundAlerts) {
@@ -133,7 +137,8 @@ export class TimerService {
       this.resetToMode(nextMode);
 
       if (this.config.autoStartBreaks) {
-        this.state.isRunning = true;
+        this.start();
+        return;
       }
     } else {
       // Break completed -> back to pomodoro
@@ -145,14 +150,30 @@ export class TimerService {
   }
 
   public start() {
+    const currentRemaining = this.computeCurrentTimeLeft();
+    const now = Date.now();
+    if (this.state.mode === 'stopwatch') {
+      this.state.startedAt = now - currentRemaining * 1000;
+      this.state.targetEndTime = undefined;
+    } else {
+      this.state.targetEndTime = now + currentRemaining * 1000;
+      this.state.startedAt = undefined;
+    }
     this.state.isRunning = true;
-    this.state.lastUpdated = Date.now();
+    this.state.pausedRemainingSec = undefined;
+    this.state.timeLeftSec = currentRemaining;
+    this.state.lastUpdated = now;
     this.emit();
     this.saveState();
   }
 
   public pause() {
+    const currentRemaining = this.computeCurrentTimeLeft();
     this.state.isRunning = false;
+    this.state.pausedRemainingSec = currentRemaining;
+    this.state.timeLeftSec = currentRemaining;
+    this.state.targetEndTime = undefined;
+    this.state.startedAt = undefined;
     this.state.lastUpdated = Date.now();
     this.emit();
     this.saveState();
@@ -168,6 +189,9 @@ export class TimerService {
 
   public reset() {
     this.state.isRunning = false;
+    this.state.targetEndTime = undefined;
+    this.state.startedAt = undefined;
+    this.state.pausedRemainingSec = undefined;
     this.resetToMode(this.state.mode);
     this.emit();
     this.saveState();
@@ -175,24 +199,44 @@ export class TimerService {
 
   public setMode(mode: TimerMode) {
     this.state.isRunning = false;
+    this.state.targetEndTime = undefined;
+    this.state.startedAt = undefined;
+    this.state.pausedRemainingSec = undefined;
     this.resetToMode(mode);
     this.emit();
     this.saveState();
   }
 
   public addTime(seconds: number) {
-    if (this.state.mode !== 'stopwatch') {
-      this.state.timeLeftSec = Math.max(0, this.state.timeLeftSec + seconds);
-      this.state.targetDurationSec = Math.max(this.state.timeLeftSec, this.state.targetDurationSec + seconds);
+    const currentRemaining = this.computeCurrentTimeLeft();
+    const newRemaining = Math.max(0, currentRemaining + seconds);
+    const now = Date.now();
+
+    if (this.state.isRunning) {
+      if (this.state.mode === 'stopwatch') {
+        this.state.startedAt = now - newRemaining * 1000;
+      } else {
+        this.state.targetEndTime = now + newRemaining * 1000;
+      }
     } else {
-      this.state.timeLeftSec = Math.max(0, this.state.timeLeftSec + seconds);
+      this.state.pausedRemainingSec = newRemaining;
     }
+
+    this.state.timeLeftSec = newRemaining;
+    if (this.state.mode !== 'stopwatch') {
+      this.state.targetDurationSec = Math.max(newRemaining, this.state.targetDurationSec + seconds);
+    }
+    this.state.lastUpdated = now;
     this.emit();
     this.saveState();
   }
 
   private resetToMode(mode: TimerMode) {
     this.state.mode = mode;
+    this.state.targetEndTime = undefined;
+    this.state.startedAt = undefined;
+    this.state.pausedRemainingSec = undefined;
+
     let durationSec = 25 * 60;
     if (mode === 'pomodoro') {
       durationSec = (this.config.workDurationMin || 25) * 60;

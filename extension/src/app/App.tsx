@@ -29,10 +29,17 @@ import { MicPermissionTab } from '@/features/voice/MicPermissionTab';
 
 export const App: React.FC = () => {
   const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
-  if (urlParams?.get('requestMic') === '1' || urlParams?.get('micPermission') === '1') {
+  const isMicPermission = urlParams?.get('requestMic') === '1' || urlParams?.get('micPermission') === '1';
+
+  if (isMicPermission) {
     return <MicPermissionTab />;
   }
 
+  return <MainApp />;
+};
+
+const MainApp: React.FC = () => {
+  const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
   const themeService = ThemeService.getInstance();
   const identityService = IdentityService.getInstance();
   const roomService = RoomService.getInstance();
@@ -296,10 +303,7 @@ export const App: React.FC = () => {
     if (isReconnecting) return;
     setIsReconnecting(true);
     showToast('🔄 Connecting to signaling server...');
-    signalingService.reconnect();
-    if (room && identity) {
-      signalingService.connect(room.roomId, identity.peerId, identity.nickname);
-    }
+    signalingService.reconnect(room?.roomId, identity?.peerId, identity?.nickname);
     setTimeout(() => {
       setIsReconnecting(false);
       if (signalingService.getIsConnected()) {

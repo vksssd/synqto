@@ -59,10 +59,13 @@ const copyTargets = [
 const aliasNames = [
   `synqto-v${version4}.zip`,
   `synqto-v${version3}.zip`,
+  `synqto-v0.0.0.0.zip`,
   `synqme-v${version4}.zip`,
   `synqme-v${version3}.zip`,
+  `synqme-v0.0.0.0.zip`,
   `nerd-buddy-v${version4}.zip`,
   `nerd-buddy-v${version3}.zip`,
+  `nerd-buddy-v0.0.0.0.zip`,
 ];
 const latestAliases = ['synqto-latest.zip', 'synqme-latest.zip', 'nerd-buddy-latest.zip'];
 

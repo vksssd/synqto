@@ -2,10 +2,13 @@
 
 import { NetworkPacket, PacketType, PeerIdentity, createPacket } from './packet';
 import { TopologyService, TopologyState } from './topology.service';
+import { ReliableTransport, DeliveryReceipt, TransportAckPayload } from './reliable-transport';
+import { NetworkEnvelope, createEnvelope, envelopeToPacket, inferDeliveryClass } from './envelope';
 
 export class NetworkService {
   private static instance: NetworkService | null = null;
   private topology: TopologyService;
+  private reliableTransport: ReliableTransport;
 
   private myIdentity: PeerIdentity | null = null;
   private currentRoomId = '';
@@ -14,8 +17,19 @@ export class NetworkService {
 
   private constructor() {
     this.topology = TopologyService.getInstance();
+    this.reliableTransport = ReliableTransport.getInstance();
 
-    // Listen to topology packets
+    // Bind reliable transport sender to topology broadcast / direct send
+    this.reliableTransport.bindSender((env: NetworkEnvelope) => {
+      const pkt = envelopeToPacket(env);
+      if (env.targetPeerId) {
+        this.topology.sendPacket(env.targetPeerId, pkt);
+      } else {
+        this.topology.broadcastPacket(pkt);
+      }
+    });
+
+    // Listen to incoming packets from P2P topology
     this.topology.onPacket((packet) => {
       this.dispatchPacket(packet);
     });
@@ -37,6 +51,7 @@ export class NetworkService {
   }
 
   public leave() {
+    this.reliableTransport.clear();
     this.topology.leave();
     this.currentRoomId = '';
   }
@@ -72,6 +87,29 @@ export class NetworkService {
     return packet;
   }
 
+  public async sendReliable<T = unknown>(
+    targetPeerId: string | undefined,
+    type: PacketType | string,
+    payload: T,
+    options?: { seq?: number; lamportTime?: number; maxAttempts?: number }
+  ): Promise<DeliveryReceipt> {
+    if (!this.myIdentity || !this.currentRoomId) {
+      throw new Error('[NetworkService] Cannot send reliable packet: uninitialized');
+    }
+
+    const envelope = createEnvelope({
+      type,
+      from: this.myIdentity,
+      roomId: this.currentRoomId,
+      targetPeerId,
+      payload,
+      seq: options?.seq,
+      lamport: options?.lamportTime,
+    });
+
+    return this.reliableTransport.sendReliable(envelope, options?.maxAttempts);
+  }
+
   public on<T = unknown>(type: PacketType, handler: (payload: T, packet: NetworkPacket) => void): () => void {
     if (!this.packetHandlers.has(type)) {
       this.packetHandlers.set(type, new Set());
@@ -103,7 +141,33 @@ export class NetworkService {
   }
 
   private dispatchPacket(packet: NetworkPacket) {
-    // Specific type handlers
+    // 1. Deduplication check via ReliableTransport
+    if (!this.reliableTransport.filterDuplicate(packet.id)) {
+      return; // Drop duplicate packet
+    }
+
+    // 2. Intercept ACK packets for reliable transport
+    if (packet.type === ('transport:ack' as any) || packet.type === ('transport:nack' as any)) {
+      this.reliableTransport.handleAck(packet.payload as TransportAckPayload, packet.from.peerId);
+      return;
+    }
+
+    // 3. Auto-reply ACK for directed reliable packets
+    if (packet.to && this.myIdentity && packet.to === this.myIdentity.peerId) {
+      const deliveryClass = inferDeliveryClass(packet.type);
+      if (deliveryClass === 'reliable' || deliveryClass === 'durable') {
+        const ackPacket = createPacket(
+          'transport:ack' as any,
+          this.myIdentity,
+          this.currentRoomId,
+          { messageId: packet.id, status: 'ack' } as TransportAckPayload,
+          packet.from.peerId
+        );
+        this.topology.sendPacket(packet.from.peerId, ackPacket);
+      }
+    }
+
+    // 4. Dispatch to registered type handlers
     const handlers = this.packetHandlers.get(packet.type);
     if (handlers) {
       handlers.forEach((fn) => {
@@ -115,7 +179,7 @@ export class NetworkService {
       });
     }
 
-    // Global handlers
+    // 5. Global handlers
     this.allPacketHandlers.forEach((fn) => {
       try {
         fn(packet);

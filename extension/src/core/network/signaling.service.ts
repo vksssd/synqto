@@ -34,6 +34,11 @@ export interface ServerMessage {
   payload?: any;
 }
 
+interface QueuedSignalingMessage {
+  raw: string;
+  timestamp: number;
+}
+
 export class SignalingService {
   private static instance: SignalingService | null = null;
   private ws: WebSocket | null = null;
@@ -43,10 +48,12 @@ export class SignalingService {
   private nickname = '';
   private isConnected = false;
   private reconnectAttempts = 0;
+  private connectionGeneration = 0;
+  private activeAttemptId: string | null = null;
   private reconnectTimer: any = null;
   private pingInterval: any = null;
   private pongTimeoutTimer: any = null;
-  private messageQueue: string[] = [];
+  private messageQueue: QueuedSignalingMessage[] = [];
   private listeners: Map<string, Set<(data: any) => void>> = new Map();
 
   private constructor() {
@@ -137,9 +144,18 @@ export class SignalingService {
     } catch (e) {}
   }
 
-  public reconnect() {
+  public reconnect(roomId?: string, peerId?: string, nickname?: string) {
     this.reconnectAttempts = 0;
-    this.disconnect();
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.cleanupState(true);
+
+    if (roomId) this.currentRoomId = roomId;
+    if (peerId) this.peerId = peerId;
+    if (nickname) this.nickname = nickname;
+
     if (!this.currentRoomId) {
       this.currentRoomId = 'room:lobby';
     }
@@ -160,11 +176,21 @@ export class SignalingService {
   private establishConnection() {
     if (!this.currentRoomId || !this.peerId) return;
 
+    const currentGen = ++this.connectionGeneration;
+    const attemptId = `att-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    this.activeAttemptId = attemptId;
+
     try {
       const url = `${this.serverUrl.replace(/\/$/, '')}/${encodeURIComponent(this.currentRoomId)}`;
-      this.ws = new WebSocket(url);
+      const ws = new WebSocket(url);
+      this.ws = ws;
 
-      this.ws.onopen = () => {
+      ws.onopen = () => {
+        if (this.connectionGeneration !== currentGen || this.activeAttemptId !== attemptId) {
+          try { ws.close(); } catch (e) {}
+          return;
+        }
+
         this.isConnected = true;
         this.reconnectAttempts = 0;
         if (typeof chrome !== 'undefined' && chrome.storage?.local) {
@@ -186,16 +212,23 @@ export class SignalingService {
           },
         });
 
-        // Flush any queued signaling messages
+        // Flush any valid queued signaling messages (drop stale items older than 30 seconds)
+        const now = Date.now();
         while (this.messageQueue.length > 0 && this.ws?.readyState === WebSocket.OPEN) {
-          const raw = this.messageQueue.shift();
-          if (raw) this.ws.send(raw);
+          const item = this.messageQueue.shift();
+          if (item && now - item.timestamp < 30000) {
+            this.ws.send(item.raw);
+          }
         }
 
         this.startHeartbeat();
       };
 
-      this.ws.onmessage = (event) => {
+      ws.onmessage = (event) => {
+        if (this.connectionGeneration !== currentGen || this.activeAttemptId !== attemptId) {
+          return;
+        }
+
         try {
           const lines = event.data.split('\n');
           for (const line of lines) {
@@ -208,8 +241,12 @@ export class SignalingService {
         }
       };
 
-      this.ws.onclose = () => {
-        this.cleanupState();
+      ws.onclose = () => {
+        if (this.connectionGeneration !== currentGen || this.activeAttemptId !== attemptId) {
+          return;
+        }
+
+        this.cleanupState(true);
         if (typeof chrome !== 'undefined' && chrome.storage?.local) {
           chrome.storage.local.set({
             synqto_server_connected: false,
@@ -220,14 +257,20 @@ export class SignalingService {
         this.scheduleReconnect();
       };
 
-      this.ws.onerror = () => {
+      ws.onerror = () => {
+        if (this.connectionGeneration !== currentGen || this.activeAttemptId !== attemptId) {
+          return;
+        }
+
         if (this.reconnectAttempts === 0) {
           console.info(`[SignalingService] Signaling server not reachable at ${this.serverUrl}. Operating in offline/local peer mode.`);
         }
       };
     } catch (err) {
-      console.info(`[SignalingService] WebSocket connection attempt failed for ${this.serverUrl}.`);
-      this.scheduleReconnect();
+      if (this.connectionGeneration === currentGen) {
+        console.info(`[SignalingService] WebSocket connection attempt failed for ${this.serverUrl}.`);
+        this.scheduleReconnect();
+      }
     }
   }
 
@@ -296,9 +339,9 @@ export class SignalingService {
     const raw = JSON.stringify(msg);
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(raw);
-    } else if (this.ws && this.ws.readyState === WebSocket.CONNECTING) {
+    } else {
       if (this.messageQueue.length < 100) {
-        this.messageQueue.push(raw);
+        this.messageQueue.push({ raw, timestamp: Date.now() });
       }
     }
   }
@@ -352,10 +395,16 @@ export class SignalingService {
     }, delay);
   }
 
-  private cleanupState() {
+  private cleanupState(preserveRecentQueue = false) {
     this.isConnected = false;
     this.stopHeartbeat();
-    this.messageQueue = [];
+    if (!preserveRecentQueue) {
+      this.messageQueue = [];
+    } else {
+      // Retain messages within 30-second window across brief reconnects
+      const now = Date.now();
+      this.messageQueue = this.messageQueue.filter((item) => now - item.timestamp < 30000);
+    }
     if (this.ws) {
       try {
         if (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) {
@@ -382,7 +431,7 @@ export class SignalingService {
         roomId: this.currentRoomId,
       });
     }
-    this.cleanupState();
+    this.cleanupState(false);
     this.currentRoomId = '';
     this.emit('connection:change', { connected: false, roomId: '' });
   }

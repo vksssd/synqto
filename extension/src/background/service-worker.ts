@@ -18,11 +18,23 @@ chrome.sidePanel
   .setPanelBehavior({ openPanelOnActionClick: true })
   .catch((error) => console.error(error));
 
+import { ContextRegistry } from '@/core/runtime/context-registry';
+import { Capability } from '@/core/types/identifiers';
+
+const registry = ContextRegistry.getInstance();
+
+// Clean up tab tracking when closed
+chrome.tabs.onRemoved.addListener((tabId) => {
+  registry.unregister(tabId);
+});
+
 // 3. Listen for tab switches to keep active problem context updated
 chrome.tabs.onActivated.addListener(async (activeInfo) => {
   try {
     const tab = await chrome.tabs.get(activeInfo.tabId);
     if (tab.url) {
+      registry.updateUrl(activeInfo.tabId, tab.url);
+
       chrome.storage.local.set({
         synqto_active_url: tab.url,
         nerd_buddy_active_url: tab.url,
@@ -32,6 +44,9 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.url) {
+    registry.updateUrl(tabId, changeInfo.url);
+  }
   if (tab.active && changeInfo.url) {
     chrome.storage.local.set({
       synqto_active_url: changeInfo.url,
@@ -40,9 +55,25 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   }
 });
 
+function getRequiredCapability(messageType: string): Capability | undefined {
+  if (messageType.startsWith('CODE_')) return 'code';
+  if (messageType.startsWith('WHITEBOARD_')) return 'whiteboard';
+  if (messageType.startsWith('LOCAL_CURSOR_') || messageType.startsWith('LOCAL_CLICK_')) return 'cursor';
+  if (messageType === 'TIMER_STATE_SYNC') return 'timer';
+  return undefined;
+}
+
 // 4. Listen for messages from content scripts and floating widgets
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'PROBLEM_DETECTED') {
+    if (sender.tab?.id) {
+      registry.register({
+        tabId: sender.tab.id,
+        url: message.payload?.url || sender.tab.url,
+        roomId: message.payload?.roomId,
+        isProblemTab: true,
+      });
+    }
     // Only accept from active foreground tab
     if (sender.tab?.active) {
       chrome.storage.local.set({
@@ -51,6 +82,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         nerd_buddy_active_problem: message.payload,
         nerd_buddy_active_url: message.payload.url,
       });
+    }
+  } else if (message.type === 'SET_TAB_ROOM_CONTEXT') {
+    const targetTabId = message.tabId || sender.tab?.id;
+    if (targetTabId && message.roomId) {
+      registry.updateRoom(targetTabId, message.roomId);
     }
   } else if (
     message.type === 'LOCAL_CURSOR_MOVE' ||
@@ -71,13 +107,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // 1. Forward to sidepanel / extension views / offscreen
     chrome.runtime.sendMessage(message).catch(() => {});
 
-    // 2. Broadcast to all active content script tabs
-    chrome.tabs.query({}, (tabs) => {
-      tabs.forEach((tab) => {
-        if (tab.id && tab.id !== sender.tab?.id) {
-          chrome.tabs.sendMessage(tab.id, message).catch(() => {});
-        }
-      });
+    // 2. Route only to relevant tabs matching this room/session and capability
+    const targetRoomId =
+      message.roomId ||
+      message.payload?.roomId ||
+      (sender.tab?.id ? registry.getContext(sender.tab.id)?.roomId : undefined);
+
+    const capability = getRequiredCapability(message.type);
+    const targetTabs = targetRoomId
+      ? registry.getTabsForRoom(targetRoomId, capability)
+      : registry.getAllProblemTabs();
+
+    targetTabs.forEach((tabId) => {
+      if (tabId !== sender.tab?.id) {
+        chrome.tabs.sendMessage(tabId, message).catch(() => {});
+      }
     });
   } else if (message.type === 'OPEN_SIDEPANEL') {
     const tabId = sender.tab?.id;

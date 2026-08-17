@@ -17,18 +17,11 @@ export const ShareGroupModal: React.FC<ShareGroupModalProps> = ({
   onClose,
 }) => {
   const groupService = GroupService.getInstance();
-
-  const [includePassword, setIncludePassword] = useState(false);
-  const [passwordForInvite, setPasswordForInvite] = useState('');
   const [copied, setCopied] = useState(false);
 
   if (!isOpen || !group) return null;
 
-  const inviteCode = groupService.generateInviteCode(
-    group,
-    includePassword,
-    passwordForInvite
-  );
+  const inviteCode = groupService.generateInviteCode(group);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(inviteCode);
@@ -84,7 +77,7 @@ export const ShareGroupModal: React.FC<ShareGroupModalProps> = ({
           </div>
         </div>
 
-        {/* Private password embed option */}
+        {/* Zero-knowledge private squad notice */}
         {group.isPrivate && (
           <div
             style={{
@@ -93,30 +86,14 @@ export const ShareGroupModal: React.FC<ShareGroupModalProps> = ({
               background: 'rgba(139, 92, 246, 0.08)',
               border: '1px solid rgba(139, 92, 246, 0.2)',
               display: 'flex',
-              flexDirection: 'column',
-              gap: '6px',
+              alignItems: 'center',
+              gap: '8px',
+              fontSize: '11px',
+              color: '#e2e8f0',
             }}
           >
-            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '11px', color: '#e2e8f0' }}>
-              <input
-                type="checkbox"
-                checked={includePassword}
-                onChange={(e) => setIncludePassword(e.target.checked)}
-              />
-              <KeyRound size={13} color="var(--accent-purple)" />
-              <span>Embed password for 1-click buddy onboarding</span>
-            </label>
-
-            {includePassword && (
-              <input
-                type="password"
-                className="input-glass"
-                placeholder="Enter squad password to embed..."
-                value={passwordForInvite}
-                onChange={(e) => setPasswordForInvite(e.target.value)}
-                style={{ fontSize: '11px', padding: '6px 8px' }}
-              />
-            )}
+            <KeyRound size={14} color="var(--accent-purple)" style={{ flexShrink: 0 }} />
+            <span>Private squad passwords remain confidential and are required when buddies join with this token.</span>
           </div>
         )}
 

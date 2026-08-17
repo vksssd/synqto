@@ -324,9 +324,7 @@ export class GroupService {
    * Generates a portable zero-friction invite token.
    */
   public generateInviteCode(
-    group: StudyGroup,
-    includePassword = false,
-    password = ''
+    group: StudyGroup
   ): string {
     const payload: GroupInvitePayload = {
       version: 1,
@@ -336,7 +334,6 @@ export class GroupService {
       isPrivate: group.isPrivate,
       topicTag: group.topicTag,
       description: group.description,
-      pwd: includePassword && password ? password : undefined,
     };
 
     try {

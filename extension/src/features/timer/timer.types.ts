@@ -9,6 +9,9 @@ export interface TimerState {
   isRunning: boolean;
   sessionsCompleted: number;
   lastUpdated: number;
+  targetEndTime?: number;      // Epoch timestamp (ms) when active countdown completes
+  startedAt?: number;          // Epoch timestamp (ms) when active stopwatch started
+  pausedRemainingSec?: number; // Snapshot of remaining seconds when paused
 }
 
 export interface PomodoroConfig {

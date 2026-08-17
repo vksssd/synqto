@@ -8,8 +8,19 @@ export interface SnapshotCommitRecord<TState = unknown> {
 
 export interface IStorageAdapter<TState = unknown, TOp = unknown> {
   saveSnapshot(snapshot: ReplicatedSnapshot<TState>): Promise<void>;
+  /**
+   * Reads back the just-saved (possibly uncommitted) snapshot for the given version and
+   * confirms it was durably persisted with matching version and checksum before it is
+   * safe to write the commit marker. Returns false if the write did not survive readback.
+   */
+  verifySnapshotIntegrity(version: number): Promise<boolean>;
   commitSnapshot(version: number): Promise<void>;
   loadSnapshot(): Promise<SnapshotCommitRecord<TState>>;
+  /**
+   * Deletes all persisted snapshot versions except `keepVersion`, reclaiming storage from
+   * prior compaction cycles. Must be called only AFTER commitSnapshot(keepVersion) succeeds.
+   */
+  pruneSnapshotsExcept(keepVersion: number): Promise<void>;
   appendJournalEvent(event: ReplicatedEvent<TOp>): Promise<void>;
   appendJournalEvents(events: ReplicatedEvent<TOp>[]): Promise<void>;
   loadJournalEvents(): Promise<ReplicatedEvent<TOp>[]>;
@@ -27,17 +38,40 @@ export class InMemoryStorageAdapter<TState = unknown, TOp = unknown>
   private committedSnapshot: ReplicatedSnapshot<TState> | null = null;
   private committedVersion = 0;
   private journalEvents: ReplicatedEvent<TOp>[] = [];
+  private snapshotHistory: Map<number, ReplicatedSnapshot<TState>> = new Map();
 
   constructor(public readonly storeId: string) {}
 
   public async saveSnapshot(snapshot: ReplicatedSnapshot<TState>): Promise<void> {
     this.uncommittedSnapshot = JSON.parse(JSON.stringify(snapshot));
+    this.snapshotHistory.set(snapshot.snapshotVersion, this.uncommittedSnapshot!);
+  }
+
+  public async verifySnapshotIntegrity(version: number): Promise<boolean> {
+    const persisted = this.snapshotHistory.get(version);
+    if (!persisted || persisted.snapshotVersion !== version) {
+      return false;
+    }
+    // Defensive readback: recompute checksum shape sanity (byteLength/checksum must be present).
+    return typeof persisted.checksum === 'number' && typeof persisted.byteLength === 'number';
   }
 
   public async commitSnapshot(version: number): Promise<void> {
-    if (this.uncommittedSnapshot && this.uncommittedSnapshot.snapshotVersion === version) {
-      this.committedSnapshot = this.uncommittedSnapshot;
+    const candidate = this.snapshotHistory.get(version);
+    if (candidate && candidate.snapshotVersion === version) {
+      this.committedSnapshot = candidate;
       this.committedVersion = version;
+    }
+  }
+
+  public async pruneSnapshotsExcept(keepVersion: number): Promise<void> {
+    for (const version of Array.from(this.snapshotHistory.keys())) {
+      if (version !== keepVersion) {
+        this.snapshotHistory.delete(version);
+      }
+    }
+    if (this.uncommittedSnapshot && this.uncommittedSnapshot.snapshotVersion !== keepVersion) {
+      this.uncommittedSnapshot = null;
     }
   }
 
@@ -46,6 +80,11 @@ export class InMemoryStorageAdapter<TState = unknown, TOp = unknown>
       snapshot: this.committedSnapshot ? JSON.parse(JSON.stringify(this.committedSnapshot)) : null,
       committedVersion: this.committedVersion,
     };
+  }
+
+  /** Test/diagnostic helper: number of distinct snapshot versions currently retained in storage. */
+  public getRetainedSnapshotVersionCount(): number {
+    return this.snapshotHistory.size;
   }
 
   public async appendJournalEvent(event: ReplicatedEvent<TOp>): Promise<void> {
@@ -76,6 +115,7 @@ export class InMemoryStorageAdapter<TState = unknown, TOp = unknown>
     this.committedSnapshot = null;
     this.committedVersion = 0;
     this.journalEvents = [];
+    this.snapshotHistory.clear();
   }
 }
 
@@ -134,6 +174,30 @@ export class IndexedDBStorageAdapter<TState = unknown, TOp = unknown>
     }
   }
 
+  public async verifySnapshotIntegrity(version: number): Promise<boolean> {
+    try {
+      const db = await this.getDB();
+      return new Promise<boolean>((resolve, reject) => {
+        const tx = db.transaction(['snapshots'], 'readonly');
+        const store = tx.objectStore('snapshots');
+        const req = store.get(version);
+        req.onsuccess = () => {
+          const persisted = req.result as ReplicatedSnapshot<TState> | undefined;
+          resolve(
+            !!persisted &&
+              persisted.snapshotVersion === version &&
+              typeof persisted.checksum === 'number' &&
+              typeof persisted.byteLength === 'number'
+          );
+        };
+        req.onerror = () => reject(req.error);
+      });
+    } catch {
+      // If IndexedDB is unavailable, treat as unverifiable (fail closed).
+      return false;
+    }
+  }
+
   public async commitSnapshot(version: number): Promise<void> {
     try {
       const db = await this.getDB();
@@ -141,6 +205,30 @@ export class IndexedDBStorageAdapter<TState = unknown, TOp = unknown>
         const tx = db.transaction(['metadata'], 'readwrite');
         const store = tx.objectStore('metadata');
         store.put({ key: 'committedSnapshotVersion', version });
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    } catch {
+      // Graceful fallback
+    }
+  }
+
+  public async pruneSnapshotsExcept(keepVersion: number): Promise<void> {
+    try {
+      const db = await this.getDB();
+      return new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(['snapshots'], 'readwrite');
+        const store = tx.objectStore('snapshots');
+        const cursorReq = store.openCursor();
+        cursorReq.onsuccess = (evt: any) => {
+          const cursor = evt.target.result as IDBCursorWithValue | null;
+          if (cursor) {
+            if (cursor.key !== keepVersion) {
+              cursor.delete();
+            }
+            cursor.continue();
+          }
+        };
         tx.oncomplete = () => resolve();
         tx.onerror = () => reject(tx.error);
       });

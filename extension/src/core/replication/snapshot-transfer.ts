@@ -115,14 +115,50 @@ export class SnapshotTransferManager<TState = unknown, TOp = unknown> {
       // 2. Monotonicity: Reject if local snapshot or contiguous vector already dominates incoming snapshot
       const localSnapshot = this.journal.getLatestSnapshot();
       if (localSnapshot && dominates(localSnapshot.vector, payload.vectorClock)) {
+        if (this.hooks.onSnapshotRejected) {
+          this.hooks.onSnapshotRejected('STALE_SNAPSHOT', payload);
+        }
         return false;
       }
       const currentContiguous = this.journal.getContiguousVectorClock();
       if (Object.keys(currentContiguous).length > 0 && dominates(currentContiguous, payload.vectorClock)) {
+        if (this.hooks.onSnapshotRejected) {
+          this.hooks.onSnapshotRejected('STALE_SNAPSHOT', payload);
+        }
         return false;
       }
 
-      // 3. Extract local uncommitted operations that are strictly newer than the snapshot
+      // 3. CAUSAL SAFETY GATE — refuse to install a snapshot that is CONCURRENT with our own.
+      //
+      // A snapshot is a fully materialized state up to payload.vectorClock. Adopting it is only
+      // lossless when it causally covers everything our own baseline already folded in. If our
+      // local snapshot contains compacted history the incoming snapshot does NOT (i.e. the two
+      // vectors are concurrent), there is no way to combine them at this layer: the operations
+      // behind our baseline have already been truncated out of the journal, so they cannot be
+      // replayed on top of the incoming state.
+      //
+      // The previous implementation tried to paper over this by "merging" the two states with a
+      // shape-guessing heuristic — a special case for `{ keys: {...} }` and an untyped shallow
+      // spread for everything else. For any other shape (e.g. `{ items: [...] }`) the spread let
+      // the incoming field wholly REPLACE the local one, silently discarding local history. It
+      // then recorded `mergedVector = merge(local, payload)`, asserting the state covered BOTH
+      // histories when it actually only reflected `payload`. That inflated vector is what made
+      // the loss permanent and undetectable: every later anti-entropy round read the vector,
+      // concluded "I already have everything up to V", and never re-requested the dropped ops.
+      //
+      // Deciding how to reconcile two genuinely divergent application states is application-level
+      // conflict-resolution (CRDT) semantics — a P4 concern. The P3 substrate must not invent it.
+      // Rejecting here is lossless and honest: local state is left fully intact and the peers
+      // reconcile through ordinary delta-based anti-entropy instead.
+      if (localSnapshot && !dominates(payload.vectorClock, localSnapshot.vector)) {
+        if (this.hooks.onSnapshotRejected) {
+          this.hooks.onSnapshotRejected('CONCURRENT_SNAPSHOT', payload);
+        }
+        return false;
+      }
+
+      // 4. Extract local operations strictly newer than the incoming snapshot; these are still
+      // live in the journal and will be replayed on top of the adopted baseline.
       const localEvents = this.journal.getEvents();
       const concurrentUncommitted: ReplicatedEvent<TOp>[] = [];
 
@@ -133,44 +169,29 @@ export class SnapshotTransferManager<TState = unknown, TOp = unknown> {
         }
       }
 
-      // 4. Construct snapshot model with state and vector union
-      let mergedState = payload.state;
-      if (localSnapshot && typeof localSnapshot.state === 'object' && typeof payload.state === 'object' && !Array.isArray(payload.state)) {
-        if ((localSnapshot.state as any).keys && (payload.state as any).keys) {
-          mergedState = {
-            ...payload.state,
-            keys: { ...(localSnapshot.state as any).keys, ...(payload.state as any).keys },
-          };
-        } else {
-          mergedState = { ...localSnapshot.state, ...payload.state };
-        }
-      }
-
-      const mergedVector = localSnapshot
-        ? mergeVectorClocks(localSnapshot.vector, payload.vectorClock)
-        : { ...payload.vectorClock };
-
+      // 5. Adopt the incoming snapshot verbatim as the new baseline. Its vector describes exactly
+      // what its state contains — no synthetic union, so the vector never over-claims coverage.
       const snapshot: ReplicatedSnapshot<TState> = {
         storeId: this.storeId,
         snapshotVersion: Math.max(localSnapshot?.snapshotVersion || 0, payload.snapshotVersion) + 1,
-        vector: mergedVector,
-        state: mergedState,
+        vector: { ...payload.vectorClock },
+        state: payload.state,
         checksum: payload.checksum,
         byteLength: payload.byteLength,
         timestamp: payload.timestamp,
       };
 
-      // 5. Atomically install baseline snapshot and reset cut vector
+      // 6. Atomically install baseline snapshot and reset cut vector
       this.journal.setSnapshot(snapshot);
       this.memoryManager.setStableCutVector(snapshot.vector);
 
-      // 6. Re-apply concurrent local uncommitted operations on top of new baseline
+      // 7. Re-apply local operations that postdate the snapshot on top of the new baseline
       this.journal.truncateBefore(snapshot.vector);
       for (const evt of concurrentUncommitted) {
         this.journal.applyRemote(evt);
       }
 
-      // 7. Materialize new state
+      // 8. Materialize new state
       const materialized = this.journal.reduceState(reducer, initialState);
 
       if (this.hooks.onSnapshotInstalled) {

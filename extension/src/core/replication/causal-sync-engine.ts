@@ -154,9 +154,25 @@ export class CausalSyncEngine<TState = unknown, TOp = unknown> {
   ): StateSyncResponsePayload<TOp> {
     this.peerVectorClocks.set(request.requestingPeerId, request.vectorClock);
 
-    // Check if remote peer is behind the stable cut (needs full snapshot)
-    const requiresSnapshot = isBehindStableCut(request.vectorClock);
     const snapshot = this.journal.getLatestSnapshot();
+
+    // A requester needs the snapshot (not just live deltas) whenever ANY portion of what it's
+    // missing is already baked into OUR snapshot rather than present as a live journal event.
+    // getDeltasSince() only scans the LIVE journal — if we already compacted the requester's gap
+    // away into our snapshot, a plain delta response would silently omit it with no error and no
+    // way for the requester to detect the omission, causing permanent non-convergence for that
+    // data. This check is a direct, provably-correct test of that condition (unlike the
+    // `isBehindStableCut` heuristic below, which tracks a separately-maintained cut vector that
+    // can drift out of sync with what's actually still live vs. snapshot-only).
+    const requiresSnapshotForBakedData = snapshot
+      ? Object.entries(snapshot.vector).some(
+          ([author, seq]) => (request.vectorClock[author] || 0) < seq
+        )
+      : false;
+
+    // Also respect the stable-cut heuristic (e.g. hard memory-bound tail cuts not yet reflected
+    // in a snapshot vector comparison) as an additional trigger.
+    const requiresSnapshot = requiresSnapshotForBakedData || isBehindStableCut(request.vectorClock);
 
     if (requiresSnapshot) {
       return {

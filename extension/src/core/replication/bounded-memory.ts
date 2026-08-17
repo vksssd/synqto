@@ -114,9 +114,20 @@ export class BoundedMemoryManager<TState = unknown, TOp = unknown> {
       timestamp: Date.now(),
     };
 
-    // 4. Update snapshot and truncate live journal strictly up to cutVector (preserving live tail)
+    // 4. Update snapshot and truncate live journal.
+    //
+    // SAFETY INVARIANT: truncation must NEVER remove an event beyond what is actually baked
+    // into the snapshot's materialized state (contiguousVector). cutVector (from computeTailCut
+    // or the peer-consensus frontier) is index/seq based and does NOT know about causal gaps —
+    // e.g. if author X's seq 3 is still missing but seq 4/5 already arrived out of order, a raw
+    // tail-cut can report cutVector[X] = 5 even though the snapshot only captured up to seq 2
+    // (contiguousVector[X] = 2). Truncating live events 4/5 in that case would permanently lose
+    // them: they are not in the snapshot state AND no longer in the journal to be replayed on
+    // top of it. Clamping to min(cutVector, contiguousVector) per-author guarantees we only ever
+    // discard events that are provably already represented in the snapshot.
+    const safeCutVector = minVectorClocks([cutVector, contiguousVector]);
     this.journal.setSnapshot(snapshot);
-    this.stableCutVector = { ...cutVector };
+    this.stableCutVector = { ...safeCutVector };
     const pruned = this.journal.truncateBefore(this.stableCutVector);
 
     this.opsSinceLastCheckpoint = 0;

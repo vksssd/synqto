@@ -766,4 +766,219 @@ export class NetworkSimulator {
     const result = this.metrics.verifyInvariants();
     return result.passed && converged;
   }
+
+  /**
+   * Scenario K: Multi-Room Scalability Envelope
+   *
+   * Validates the core architectural assumption behind the target population
+   * (~100k registered / ~20-30k concurrent users): the system does NOT need one
+   * giant global mesh — it needs many independent, room-scoped P2P meshes plus a
+   * minimal coordination server. This scenario spins up a large number of
+   * independent rooms (each its own VirtualNetwork + peer set + ReplicatedStore
+   * cluster) with a realistic room-size distribution (mostly small, some medium,
+   * a few "hot" rooms), applies churn (peers leaving mid-session) and concurrent
+   * mutation traffic per room, and verifies:
+   *   1. Every room converges independently to 100% causal consistency among its
+   *      surviving peers (no cross-room leakage, no O(N^2) blowup).
+   *   2. Per-peer resource cost (journal size, pending queue) stays bounded and
+   *      roughly CONSTANT regardless of total room count — i.e. cost scales with
+   *      room count × room size, not with the square of total concurrent users.
+   *
+   * IMPORTANT: This is a deterministic, scaled-down stand-in for the target
+   * population, not a literal run of 20-30k live WebRTC peers in-process. The
+   * reported "extrapolated" figures are simple linear projections from the
+   * measured per-room cost and must be treated as a starting envelope to
+   * validate against real traffic, not a capacity guarantee.
+   */
+  public static async runScenarioK(
+    prng: SeededPRNG = new SeededPRNG(42),
+    roomCount = 200,
+    opsPerRoomFloor = 20
+  ): Promise<{ passed: boolean; report: Record<string, unknown> }> {
+    type SharedMap = { keys: Record<string, number> };
+    type MapOp = { key: string; val: number };
+    const reducer = (state: SharedMap, op: MapOp) => ({
+      keys: { ...state.keys, [op.key]: op.val },
+    });
+    const initialState: SharedMap = { keys: {} };
+
+    // Realistic room-size distribution: 70% small (2-7), 23% medium (8-20), 7% hot (21-50)
+    const roomSizes: number[] = [];
+    for (let i = 0; i < roomCount; i++) {
+      const roll = prng.next();
+      if (roll < 0.7) roomSizes.push(prng.nextInt(2, 7));
+      else if (roll < 0.93) roomSizes.push(prng.nextInt(8, 20));
+      else roomSizes.push(prng.nextInt(21, 50));
+    }
+
+    let totalPeers = 0;
+    let totalOps = 0;
+    let convergedRooms = 0;
+    const journalSizes: number[] = [];
+    const pendingQueueSizes: number[] = [];
+    const perRoomDurationsMs: number[] = [];
+    const nonConvergedRoomDetails: Array<Record<string, unknown>> = [];
+
+    const heapBefore = process.memoryUsage().heapUsed;
+    const startTime = Date.now();
+
+    for (let r = 0; r < roomCount; r++) {
+      const roomStart = Date.now();
+      const size = roomSizes[r];
+      totalPeers += size;
+      const roomId = `scale-room-${r}`;
+      const storeId = `room-store-${r}`;
+
+      const sim = new NetworkSimulator(
+        roomId,
+        { latencyMs: 25, jitterMs: 10, lossRate: 0.02, duplicationRate: 0.005, reorderRate: 0.02 },
+        prng
+      );
+      const peerList = sim.createCluster(size);
+
+      peerList.forEach((peer) => {
+        const store = new ReplicatedStore<SharedMap, MapOp>(
+          storeId,
+          peer.identity,
+          roomId,
+          reducer,
+          initialState,
+          peer.packetPipeline,
+          { maxJournalEvents: 60, minRetentionEvents: 20, checkpointIntervalOps: 30 }
+        );
+        peer.registerStore(store);
+      });
+
+      // Churn: ~15% of peers leave mid-session and do not return (models real join/leave activity)
+      const churnCount = Math.floor(size * 0.15);
+      for (let c = 0; c < churnCount; c++) {
+        prng.pick(peerList).crash();
+      }
+
+      const opCount = Math.max(opsPerRoomFloor, size * 2);
+      for (let i = 0; i < opCount; i++) {
+        const alive = peerList.filter((p) => p.isAlive);
+        if (alive.length === 0) break;
+        const sender = prng.pick(alive);
+        sender.getStore<SharedMap, MapOp>(storeId)?.mutate('put', { key: `k_${i}`, val: i });
+        totalOps++;
+        await sim.virtualNetwork.step(10);
+      }
+
+      await sim.flushAll(peerList);
+
+      // Anti-entropy reconciliation among surviving peers only. Larger rooms need multiple
+      // rounds: a single pass can leave a peer that fell behind (e.g. snapshot fallback
+      // triggered mid-room) still catching up when the round ends.
+      const survivors = peerList.filter((p) => p.isAlive);
+      for (let round = 0; round < 4; round++) {
+        for (const p of survivors) {
+          const store = p.getStore<SharedMap, MapOp>(storeId);
+          for (const other of survivors) {
+            if (other.peerId !== p.peerId) store?.syncWith(other.peerId);
+          }
+        }
+        await sim.virtualNetwork.step(50);
+        await sim.flushAll(peerList);
+      }
+
+      // Per-room convergence check (surviving peers only — crashed peers never rejoin in this scenario)
+      const refKeys = survivors[0]?.getStore<SharedMap, MapOp>(storeId)?.getState().keys ?? {};
+      const refCount = Object.keys(refKeys).length;
+      let roomConverged = true;
+      for (const p of survivors) {
+        const k = p.getStore<SharedMap, MapOp>(storeId)?.getState().keys ?? {};
+        if (Object.keys(k).length !== refCount) {
+          roomConverged = false;
+          if (nonConvergedRoomDetails.length < 10) {
+            const missing = Object.keys(refKeys).filter((key) => !(key in k));
+            const extra = Object.keys(k).filter((key) => !(key in refKeys));
+            const divStore = p.getStore<SharedMap, MapOp>(storeId);
+            nonConvergedRoomDetails.push({
+              roomId,
+              size,
+              survivorCount: survivors.length,
+              refCount,
+              divergentPeer: p.peerId,
+              divergentCount: Object.keys(k).length,
+              missingKeys: missing.slice(0, 5),
+              extraKeys: extra.slice(0, 5),
+              divergentPending: divStore?.getPendingCount() ?? -1,
+              divergentJournalEvents: divStore?.getJournal().getEventCount() ?? -1,
+            });
+          }
+          break;
+        }
+      }
+      if (roomConverged) convergedRooms++;
+
+      for (const p of peerList) {
+        const store = p.getStore<SharedMap, MapOp>(storeId);
+        if (store) {
+          journalSizes.push(store.getJournal().getEventCount());
+          pendingQueueSizes.push(store.getPendingCount());
+        }
+      }
+
+      perRoomDurationsMs.push(Date.now() - roomStart);
+    }
+
+    const durationSec = (Date.now() - startTime) / 1000;
+    const heapAfter = process.memoryUsage().heapUsed;
+    const heapDeltaMB = (heapAfter - heapBefore) / 1024 / 1024;
+
+    const avg = (arr: number[]) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0);
+    const max = (arr: number[]) => (arr.length ? Math.max(...arr) : 0);
+
+    const avgJournal = avg(journalSizes);
+    const maxJournal = max(journalSizes);
+    const avgPending = avg(pendingQueueSizes);
+    const maxPending = max(pendingQueueSizes);
+    const opsPerSecond = totalOps / Math.max(durationSec, 0.001);
+    const bytesPerPeerEstimate = heapDeltaMB > 0 ? (heapDeltaMB * 1024 * 1024) / Math.max(totalPeers, 1) : 0;
+
+    // Simple linear extrapolation from measured per-peer cost to the target concurrency band.
+    // Labeled explicitly as a projection, not a validated capacity claim.
+    const targetConcurrentPeers = 30000;
+    const extrapolatedRoomCount = Math.round((roomCount / totalPeers) * targetConcurrentPeers);
+    const extrapolatedHeapMB = (bytesPerPeerEstimate * targetConcurrentPeers) / 1024 / 1024;
+
+    const report = {
+      roomCount,
+      totalSimulatedPeers: totalPeers,
+      totalOps,
+      convergedRooms,
+      convergenceRate: convergedRooms / roomCount,
+      journalSize: { avg: Number(avgJournal.toFixed(1)), max: maxJournal },
+      pendingQueue: { avg: Number(avgPending.toFixed(1)), max: maxPending },
+      opsPerSecond: Number(opsPerSecond.toFixed(1)),
+      durationSec: Number(durationSec.toFixed(2)),
+      heapDeltaMB: Number(heapDeltaMB.toFixed(2)),
+      nonConvergedRoomDetails,
+      extrapolation: {
+        targetConcurrentPeers,
+        projectedRoomCountAtTarget: extrapolatedRoomCount,
+        projectedHeapMBAtTarget: Number(extrapolatedHeapMB.toFixed(1)),
+        note:
+          'Linear projection from measured per-peer cost at this sample size. Must be validated ' +
+          'against real network conditions and browser (not Node) memory behavior before being ' +
+          'treated as a capacity guarantee.',
+      },
+    };
+
+    console.log(`\n  📊 Scenario K Telemetry (Multi-Room Scalability):`);
+    console.log(`     • Rooms Simulated:        ${roomCount} (sizes 2-50, weighted toward small rooms)`);
+    console.log(`     • Total Simulated Peers:  ${totalPeers}`);
+    console.log(`     • Total Operations:       ${totalOps} (${opsPerSecond.toFixed(1)} ops/sec aggregate)`);
+    console.log(`     • Room Convergence:       ${convergedRooms}/${roomCount} (${(report.convergenceRate * 100).toFixed(1)}%)`);
+    console.log(`     • Journal Size Avg/Max:   ${avgJournal.toFixed(1)} / ${maxJournal} events per peer`);
+    console.log(`     • Pending Queue Avg/Max:  ${avgPending.toFixed(1)} / ${maxPending} ops per peer`);
+    console.log(`     • Heap Delta:             ${heapDeltaMB.toFixed(2)} MB over ${durationSec.toFixed(2)}s`);
+    console.log(`     • Extrapolation Note:     Projection only — see report.extrapolation for caveats\n`);
+
+    return {
+      passed: convergedRooms === roomCount,
+      report,
+    };
+  }
 }

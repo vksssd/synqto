@@ -2,6 +2,7 @@
 
 import assert from 'assert';
 import { TierCoordinator } from '../src/core/topology/tier-coordinator.ts';
+import { TOPOLOGY_THRESHOLDS } from '../src/core/topology/topology.types.ts';
 import { LeaderElectionEngine } from '../src/core/topology/leader-election.ts';
 import { LeaderMesh } from '../src/core/topology/leader-mesh.ts';
 import {
@@ -202,18 +203,58 @@ test('TierCoordinator initial state is STABLE_TIER1', () => {
   assert.strictEqual(coordinator.getLifecycleState(), 'STABLE_TIER1');
 });
 
-test('TierCoordinator starts evaluating on 5 peers and cancels on drop', () => {
+test('TierCoordinator starts evaluating at the TIER1 promote threshold and cancels on drop', () => {
+  // Derived from the configured thresholds rather than hardcoded, so retuning tier
+  // capacity does not silently invalidate this test's intent.
+  const promoteAt = TOPOLOGY_THRESHOLDS.TIER1_PROMOTE_AT;
+  const belowPromote = promoteAt - 1;
+
   const coordinator = new TierCoordinator();
-  coordinator.updatePeerCount(5);
+  coordinator.updatePeerCount(promoteAt);
   assert.strictEqual(coordinator.getLifecycleState(), 'TIER1_EVALUATING');
   assert.ok(coordinator.getActiveTransaction());
   assert.strictEqual(coordinator.getActiveTransaction().phase, 'EVALUATING');
 
-  // Drops to 4 peers before evaluation finishes -> cancels
-  coordinator.updatePeerCount(4);
+  // Drops back below the promote threshold before evaluation finishes -> cancels
+  coordinator.updatePeerCount(belowPromote);
   assert.strictEqual(coordinator.getLifecycleState(), 'STABLE_TIER1');
   assert.strictEqual(coordinator.getCurrentTier(), 'TIER1_FULL_MESH');
   assert.strictEqual(coordinator.getActiveTransaction().phase, 'ABORTED');
+});
+
+test('Tier thresholds keep a real hysteresis margin so boundary churn cannot flap topology', () => {
+  const t = TOPOLOGY_THRESHOLDS;
+
+  // Promote must sit strictly above demote for every tier, or a room parked at the
+  // boundary would promote and demote on every single join/leave — each transition
+  // renegotiating every DataChannel in the room.
+  assert.ok(t.TIER1_PROMOTE_AT > t.TIER1_DEMOTE_AT, 'TIER1 promote must exceed demote');
+  assert.ok(t.TIER2_PROMOTE_AT > t.TIER2_DEMOTE_AT, 'TIER2 promote must exceed demote');
+
+  // Margin must be more than a single peer, otherwise one flaky connection is enough
+  // to drive continuous tier migration.
+  assert.ok(t.TIER1_PROMOTE_AT - t.TIER1_DEMOTE_AT >= 2, 'TIER1 margin too narrow');
+  assert.ok(t.TIER2_PROMOTE_AT - t.TIER2_DEMOTE_AT >= 5, 'TIER2 margin too narrow');
+
+  // Tier bands must be ordered and contiguous.
+  assert.strictEqual(t.TIER1_PROMOTE_AT, t.TIER1_MAX + 1, 'TIER1 band must be contiguous');
+  assert.strictEqual(t.TIER2_PROMOTE_AT, t.TIER2_MAX + 1, 'TIER2 band must be contiguous');
+  assert.ok(t.TIER2_MAX > t.TIER1_MAX, 'TIER2 must hold more peers than TIER1');
+
+  // Demote thresholds must stay inside their own tier's band.
+  assert.ok(t.TIER1_DEMOTE_AT < t.TIER1_MAX, 'TIER1 demote must fall inside the TIER1 band');
+  assert.ok(t.TIER2_DEMOTE_AT > t.TIER1_MAX, 'TIER2 demote must not cross below the TIER1 band');
+
+  // A full TIER2 room must be servable by the allowed leader count at the server's
+  // cluster high watermark (hub.MaxClusterHighWatermark = 8), otherwise clusters would be
+  // forced past their split point with no leader slot left to split into. This couples the
+  // client tier ceiling to the server watermark, so raising one without the other fails here.
+  const SERVER_CLUSTER_HIGH_WATERMARK = 8;
+  assert.ok(
+    t.MAX_LEADERS * SERVER_CLUSTER_HIGH_WATERMARK >= t.TIER2_MAX,
+    `MAX_LEADERS (${t.MAX_LEADERS}) x cluster watermark (${SERVER_CLUSTER_HIGH_WATERMARK}) must cover TIER2_MAX (${t.TIER2_MAX})`
+  );
+  assert.ok(t.MIN_LEADERS >= 3, 'Trinity quorum requires at least 3 leaders');
 });
 
 // ─── 6. TopologyView & Monotonic Ordering ───
@@ -1157,6 +1198,53 @@ test('SnapshotTransferManager rejects corrupted snapshots and atomically install
   assert.deepStrictEqual(finalState.strokes, ['stroke-1', 'stroke-2', 'stroke-3', 'stroke-local-concurrent']);
 });
 
+test('SnapshotTransferManager rejects stale snapshots dominated by local baseline (STALE_SNAPSHOT)', () => {
+  const mockRouter = { broadcast: () => true, sendTo: () => true, onPacket: () => () => {} };
+  const pipeline = new PacketPipeline(mockRouter);
+  pipeline.init({ peerId: 'node-B', nickname: 'NodeB', avatar: '', color: '' }, 'room-1');
+
+  const journal = new OperationJournal('stale-store', 'node-B');
+  const memoryManager = new BoundedMemoryManager('stale-store', journal);
+
+  let rejectedReason = '';
+  const transferManager = new SnapshotTransferManager('stale-store', 'node-B', 'room-1', journal, memoryManager, pipeline, {
+    onSnapshotRejected: (r) => { rejectedReason = r; },
+  });
+
+  const reducer = (state, op) => ({ count: state.count + op.val });
+  const initialState = { count: 0 };
+
+  // Install an advanced baseline snapshot first (vector: node-remote:10)
+  const advancedState = { count: 10 };
+  const advancedSerialized = JSON.stringify(advancedState);
+  const advancedPayload = {
+    storeId: 'stale-store',
+    snapshotVersion: 1,
+    vectorClock: { 'node-remote': 10 },
+    state: advancedState,
+    checksum: PayloadChunker.calculateCRC32(advancedSerialized),
+    byteLength: advancedSerialized.length,
+    timestamp: Date.now(),
+  };
+  assert.strictEqual(transferManager.installSnapshot(advancedPayload, reducer, initialState), true);
+
+  // A snapshot strictly dominated by the already-installed baseline must be rejected as stale
+  const staleState = { count: 3 };
+  const staleSerialized = JSON.stringify(staleState);
+  const stalePayload = {
+    storeId: 'stale-store',
+    snapshotVersion: 0,
+    vectorClock: { 'node-remote': 3 },
+    state: staleState,
+    checksum: PayloadChunker.calculateCRC32(staleSerialized),
+    byteLength: staleSerialized.length,
+    timestamp: Date.now(),
+  };
+  const staleResult = transferManager.installSnapshot(stalePayload, reducer, initialState);
+  assert.strictEqual(staleResult, false, 'Stale snapshot dominated by local baseline must be rejected');
+  assert.strictEqual(rejectedReason, 'STALE_SNAPSHOT');
+});
+
 console.log('\n📦 Section 23: Authoritative Input Fencing & Quarantine');
 test('ReplicationValidator enforces structural sanity, sequence, and Lamport constraints', () => {
   const journal = new OperationJournal('fencing-store', 'node-local');
@@ -1236,6 +1324,81 @@ test('ReplicationValidator detects known dependency cycles without falsely rejec
   assert.strictEqual(unknownRes.accepted, true, 'Unknown remote dependency must be accepted for causal buffering, not rejected as cyclic');
 });
 
+test('ReplicationValidator rejects oversized snapshots and CRC32 mismatches independently of installation', () => {
+  // Oversized snapshot (> 4MB ceiling)
+  const oversizedPayload = {
+    storeId: 'size-store',
+    state: { blob: 'x' },
+    vectorClock: { 'node-a': 1 },
+    checksum: 0,
+    byteLength: 5 * 1024 * 1024,
+  };
+  const oversizedRes = ReplicationValidator.validateSnapshot(oversizedPayload);
+  assert.strictEqual(oversizedRes.accepted, false);
+  assert.strictEqual(oversizedRes.reason, 'OVERSIZED_SNAPSHOT');
+
+  // CRC32 mismatch
+  const state = { count: 42 };
+  const serialized = JSON.stringify(state);
+  const crcPayload = {
+    storeId: 'crc-store',
+    state,
+    vectorClock: { 'node-a': 1 },
+    checksum: 999999999,
+    byteLength: new TextEncoder().encode(serialized).length,
+  };
+  const crcRes = ReplicationValidator.validateSnapshot(crcPayload);
+  assert.strictEqual(crcRes.accepted, false);
+  assert.strictEqual(crcRes.reason, 'CRC32_CHECKSUM_MISMATCH');
+
+  // Well-formed snapshot within bounds with correct CRC32 is accepted
+  const validCRC = PayloadChunker.calculateCRC32(serialized);
+  const validPayload = { ...crcPayload, checksum: validCRC };
+  const validRes = ReplicationValidator.validateSnapshot(validPayload);
+  assert.strictEqual(validRes.accepted, true);
+});
+
+test('CausalSyncEngine rejects and quarantines operations beyond the 128 pending-queue bound', () => {
+  const journal = new OperationJournal('overflow-store', 'node-local');
+  let quarantineReasons = [];
+  const engine = new CausalSyncEngine('overflow-store', 'node-local', journal, {
+    onQuarantine: (reason) => quarantineReasons.push(reason),
+  });
+
+  // Fill the pending queue with 128 operations depending on an ancestor that never arrives.
+  for (let i = 0; i < 128; i++) {
+    const op = {
+      storeId: 'overflow-store',
+      opId: `remote:${i}`,
+      author: 'node-remote',
+      seq: i + 2,
+      lamport: i + 2,
+      dependencies: ['remote:never-arrives'],
+      type: 'draw',
+      op: {},
+    };
+    engine.ingestOperation(op, { kind: 'direct-origin', senderPeerId: 'node-remote' });
+  }
+  assert.strictEqual(engine.getPendingCount(), 128, 'Pending queue must fill to exactly the 128 bound');
+
+  // The 129th operation must be rejected and quarantined, never silently dropped or exceeding the bound.
+  const overflowOp = {
+    storeId: 'overflow-store',
+    opId: 'remote:overflow',
+    author: 'node-remote',
+    seq: 130,
+    lamport: 130,
+    dependencies: ['remote:never-arrives'],
+    type: 'draw',
+    op: {},
+  };
+  const applied = engine.ingestOperation(overflowOp, { kind: 'direct-origin', senderPeerId: 'node-remote' });
+  assert.strictEqual(applied, false);
+  assert.strictEqual(engine.getPendingCount(), 128, 'Pending queue must remain bounded at 128');
+  assert.strictEqual(engine.getPendingOverflowCount(), 1);
+  assert.ok(quarantineReasons.includes('PENDING_QUEUE_OVERFLOW'));
+});
+
 console.log('\n📦 Section 24: Transactional Durability & Process Hydration');
 await testAsync('ReplicatedStore persists mutations before network broadcast and hydrates exact state', async () => {
   const storeId = 'durable-store-1';
@@ -1302,7 +1465,147 @@ await testAsync('BoundedMemoryManager maintains bounded journal within compactio
   assert.strictEqual(store.getState().count, 250);
 });
 
-console.log('\n📦 Section 26: Crash-at-Every-Phase Invariants (J1 to J8)');
+await testAsync('5-step transactional compaction verifies persistence and prunes prior snapshot versions', async () => {
+  const storeId = 'prune-store';
+  const identity = { peerId: 'peer-prune-1', nickname: 'Tester', avatar: '', color: '#fff' };
+  const reducer = (state, op) => ({ count: state.count + 1 });
+  const storage = new InMemoryStorageAdapter(storeId);
+
+  const mockPipeline = {
+    sendPacket: async () => ({ messageId: 'm1', status: 'delivered', attempts: 1 }),
+  };
+
+  const store = new ReplicatedStore(
+    storeId,
+    identity,
+    'room-1',
+    reducer,
+    { count: 0 },
+    mockPipeline,
+    { maxJournalEvents: 20, minRetentionEvents: 5, checkpointIntervalOps: 10 },
+    storage
+  );
+
+  // Trigger multiple compaction cycles across several batches of mutations.
+  for (let batch = 0; batch < 3; batch++) {
+    for (let i = 0; i < 30; i++) {
+      await store.mutateAsync('inc', { i });
+    }
+    await store.compactAsync(true);
+  }
+
+  // Storage must retain ONLY the latest committed snapshot version, not one per compaction cycle.
+  assert.strictEqual(
+    storage.getRetainedSnapshotVersionCount(),
+    1,
+    'Storage must prune all prior snapshot versions, retaining only the current committed snapshot'
+  );
+
+  const { snapshot, committedVersion } = await storage.loadSnapshot();
+  assert.ok(snapshot, 'A committed snapshot must exist after forced compaction');
+  assert.strictEqual(snapshot.snapshotVersion, committedVersion);
+  assert.strictEqual(store.getState().count, 90);
+});
+
+console.log('\n📦 Section 26: Snapshot-Aware Anti-Entropy Convergence Regressions');
+test('handleSyncRequest requires a snapshot when the requester is missing data already compacted into our snapshot', () => {
+  const journal = new OperationJournal('anti-entropy-store', 'node-local');
+  const engine = new CausalSyncEngine('anti-entropy-store', 'node-local', journal);
+
+  // Bake operations from node-remote up to seq 5 into our snapshot baseline, so they are NO
+  // LONGER present as live journal events (exactly the post-compaction steady state).
+  const snapshotState = { keys: { a: 1 } };
+  const serialized = JSON.stringify(snapshotState);
+  journal.setSnapshot({
+    storeId: 'anti-entropy-store',
+    snapshotVersion: 1,
+    vector: { 'node-remote': 5 },
+    state: snapshotState,
+    checksum: PayloadChunker.calculateCRC32(serialized),
+    byteLength: serialized.length,
+    timestamp: Date.now(),
+  });
+
+  // A requester that has only seen node-remote up to seq 2 is missing seq 3-5, which exist
+  // ONLY inside our snapshot. Delta extraction scans the live journal and would return an
+  // empty/incomplete set, silently losing those ops forever.
+  const request = {
+    storeId: 'anti-entropy-store',
+    requestingPeerId: 'node-requester',
+    vectorClock: { 'node-remote': 2 },
+  };
+
+  // Force the stable-cut heuristic to report "not behind" so this test isolates the
+  // snapshot-vector check rather than passing incidentally via the heuristic.
+  const response = engine.handleSyncRequest(request, () => false);
+  assert.strictEqual(
+    response.requiresSnapshot,
+    true,
+    'Requester missing ops that live only in our snapshot must be told to take a full snapshot'
+  );
+
+  // A fully caught-up requester must NOT be forced through a snapshot transfer.
+  const caughtUp = engine.handleSyncRequest(
+    { storeId: 'anti-entropy-store', requestingPeerId: 'node-requester', vectorClock: { 'node-remote': 5 } },
+    () => false
+  );
+  assert.strictEqual(caughtUp.requiresSnapshot, false, 'Caught-up requester must receive deltas, not a snapshot');
+});
+
+test('Compaction never truncates journal events that are not captured in the snapshot (causal gap safety)', () => {
+  const journal = new OperationJournal('gap-store', 'node-local');
+  const memoryManager = new BoundedMemoryManager('gap-store', journal, {
+    maxJournalEvents: 5,
+    minRetentionEvents: 1,
+    checkpointIntervalOps: 1,
+  });
+  const reducer = (state, op) => ({ applied: [...state.applied, op.tag] });
+  const initialState = { applied: [] };
+
+  // Author node-remote has a CAUSAL GAP: seq 1 and 2 arrive, seq 3 is missing, seq 4 and 5 arrive.
+  // The contiguous vector for node-remote is therefore 2, but a naive index-based tail cut can
+  // compute a cut of 5 and delete events 4 and 5 — which are NOT in the snapshot state.
+  const mk = (seq, tag) => ({
+    storeId: 'gap-store',
+    opId: `node-remote:${seq}:${seq}`,
+    author: 'node-remote',
+    seq,
+    lamport: seq,
+    dependencies: [],
+    type: 'put',
+    op: { tag },
+    timestamp: Date.now(),
+  });
+
+  journal.applyRemote(mk(1, 'op1'));
+  journal.applyRemote(mk(2, 'op2'));
+  journal.applyRemote(mk(4, 'op4')); // seq 3 deliberately never arrives
+  journal.applyRemote(mk(5, 'op5'));
+  journal.applyRemote(mk(6, 'op6'));
+
+  assert.strictEqual(journal.getContiguousVectorClock()['node-remote'], 2, 'Contiguous vector must stop at the gap');
+
+  const snapshot = memoryManager.maybeCompact(reducer, initialState, [], [], true);
+  assert.ok(snapshot, 'Compaction must produce a snapshot');
+  assert.strictEqual(snapshot.vector['node-remote'], 2, 'Snapshot must only capture up to the contiguous frontier');
+
+  // The post-gap events MUST still be replayable from the live journal.
+  const survivingSeqs = journal.getEvents().map((e) => e.seq).sort((a, b) => a - b);
+  for (const seq of [4, 5, 6]) {
+    assert.ok(
+      survivingSeqs.includes(seq),
+      `Event seq ${seq} is beyond the snapshot frontier and must NOT be truncated (surviving: [${survivingSeqs}])`
+    );
+  }
+
+  // End-to-end: materialized state must still contain every op that was ever applied.
+  const materialized = journal.reduceState(reducer, initialState);
+  for (const tag of ['op4', 'op5', 'op6']) {
+    assert.ok(materialized.applied.includes(tag), `${tag} must survive compaction`);
+  }
+});
+
+console.log('\n📦 Section 27: Crash-at-Every-Phase Invariants (J1 to J8)');
 await testAsync('Crash injection across all 8 mutation & compaction lifecycle phases guarantees exact recovery', async () => {
   const storeId = 'crash-inject-store';
   const identity = { peerId: 'peer-crash-1', nickname: 'Tester', avatar: '', color: '#fff' };
@@ -1341,6 +1644,16 @@ await testAsync('Crash injection across all 8 mutation & compaction lifecycle ph
   const j2Store = new ReplicatedStore(storeId, identity, 'room-1', reducer, { ops: [] }, mockPipeline, {}, storage);
   await j2Store.hydrate();
   assert.deepStrictEqual(j2Store.getState().ops, ['op-base-1', 'op-base-2', 'op-base-3', 'op-base-4']);
+
+  // J3: Crash pre-snapshot-write (compaction begins materializing but crashes before storage.saveSnapshot
+  // is ever called) -> no snapshot record exists yet, so the previous committed baseline (none) + full
+  // journal remains the sole recovery authority. Simulated here by simply NOT calling saveSnapshot.
+  const { snapshot: preSnapshot, committedVersion: preCommitted } = await storage.loadSnapshot();
+  assert.strictEqual(preSnapshot, null, 'No snapshot must exist before any saveSnapshot call');
+  assert.strictEqual(preCommitted, 0);
+  const j3Store = new ReplicatedStore(storeId, identity, 'room-1', reducer, { ops: [] }, mockPipeline, {}, storage);
+  await j3Store.hydrate();
+  assert.deepStrictEqual(j3Store.getState().ops, ['op-base-1', 'op-base-2', 'op-base-3', 'op-base-4'], 'Crash before any snapshot write must recover purely from journal');
 
   // J4: Crash post-snapshot write (uncommitted) -> uncommitted snapshot is discarded, journal remains authoritative
   const uncommittedSnapshot = {

@@ -176,6 +176,14 @@ async function runAll() {
     });
   }
 
+  if (targetScenario === 'K' || targetScenario === 'ALL') {
+    await executeScenario('Scenario K: Multi-Room Scalability Envelope', async () => {
+      const { passed, report } = await NetworkSimulator.runScenarioK(new SeededPRNG(seed), 200, 20);
+      console.log('   Scenario K Report:', JSON.stringify(report, null, 2));
+      return passed;
+    });
+  }
+
   console.log(`\n============================================================`);
   console.log(`🏁 Soak & Replication Simulation Summary: ${totalPassed}/${totalScenarios} Scenarios Passed (${Math.round((totalPassed / totalScenarios) * 100)}%)`);
   console.log(`============================================================\n`);

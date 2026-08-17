@@ -233,15 +233,34 @@ export class SignalingService {
           return;
         }
 
+        // The server coalesces queued messages into one frame, newline-delimited.
+        // Each line MUST be parsed and dispatched independently: a single try/catch
+        // around the whole loop meant one malformed line aborted the rest of the
+        // batch, silently discarding every message behind it — including rosters and
+        // SDP. Isolating per line means one bad frame can never cascade.
+        let lines: string[];
         try {
-          const lines = event.data.split('\n');
-          for (const line of lines) {
-            if (!line.trim()) continue;
-            const msg: ServerMessage = JSON.parse(line);
-            this.handleIncomingMessage(msg);
-          }
+          lines = String(event.data).split('\n');
         } catch (err) {
-          console.warn('[SignalingService] Failed to parse message:', err, event.data);
+          console.warn('[SignalingService] Unreadable frame:', err);
+          return;
+        }
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          let msg: ServerMessage;
+          try {
+            msg = JSON.parse(line);
+          } catch (err) {
+            console.warn('[SignalingService] Skipping unparseable line in batch:', err, line.slice(0, 200));
+            continue;
+          }
+          try {
+            this.handleIncomingMessage(msg);
+          } catch (err) {
+            // A throwing handler must not prevent delivery of later messages.
+            console.error('[SignalingService] Handler error for', msg?.type, err);
+          }
         }
       };
 

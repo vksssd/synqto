@@ -38,6 +38,8 @@ export class ReplicatedStore<TState = unknown, TOp = unknown> {
   private currentState: TState;
   private listeners: Set<(state: TState, event?: ReplicatedEvent<TOp>) => void> = new Set();
   private activeParticipants: Set<PeerId> = new Set();
+  /** FIFO serialization queue for storage-side compaction transactions (see enqueueCompactionTransaction). */
+  private compactionQueue: Promise<void> = Promise.resolve();
 
   constructor(
     public readonly storeId: string,
@@ -134,7 +136,7 @@ export class ReplicatedStore<TState = unknown, TOp = unknown> {
       this.roomId,
       payload,
       undefined,
-      { priority: 'DATA', topologyEpoch }
+      { priority: 'SYNC', topologyEpoch }
     );
 
     this.pipeline.sendPacket(packet, undefined, { isReliable: true }).catch((err) => {
@@ -187,7 +189,7 @@ export class ReplicatedStore<TState = unknown, TOp = unknown> {
       this.roomId,
       payload,
       undefined,
-      { priority: 'DATA', topologyEpoch }
+      { priority: 'SYNC', topologyEpoch }
     );
 
     await this.pipeline.sendPacket(packet, undefined, { isReliable: true });
@@ -241,7 +243,7 @@ export class ReplicatedStore<TState = unknown, TOp = unknown> {
         const response = this.syncEngine.handleSyncRequest(payload, isBehindCut);
 
         if (response.requiresSnapshot) {
-          const snapshot = this.compact(true);
+          const snapshot = this.getOrComputeTransferSnapshot();
           if (snapshot) {
             this.snapshotTransfer.sendSnapshot(packet.from.peerId, snapshot, this.localIdentity);
           }
@@ -257,7 +259,14 @@ export class ReplicatedStore<TState = unknown, TOp = unknown> {
 
         this.activeParticipants.add(packet.from.peerId);
         if (payload.requiresSnapshot) {
-          if (!dominates(this.journal.getVectorClock(), payload.vectorClock)) {
+          // NOTE: must compare using the CONTIGUOUS vector clock, not the raw merged one.
+          // The raw vector clock advances to the max seq seen per author on ANY accepted
+          // op (including causally-independent, out-of-order arrivals), so it cannot detect
+          // a causal gap (e.g. seq 3 missing while seq 5 already arrived). Using it here would
+          // let a peer with such a gap wrongly conclude it "dominates" the responder's vector
+          // and skip requesting the snapshot needed to fill the gap, causing permanent
+          // non-convergence for the missing operation.
+          if (!dominates(this.journal.getContiguousVectorClock(), payload.vectorClock)) {
             this.requestSnapshot(packet.from.peerId);
           }
           return true;
@@ -276,7 +285,7 @@ export class ReplicatedStore<TState = unknown, TOp = unknown> {
         const payload = packet.payload as StateSnapshotRequestPayload;
         if (payload.storeId !== this.storeId) return false;
 
-        const snapshot = this.compact(true);
+        const snapshot = this.getOrComputeTransferSnapshot();
         if (snapshot) {
           this.snapshotTransfer.sendSnapshot(packet.from.peerId, snapshot, this.localIdentity);
         }
@@ -332,6 +341,25 @@ export class ReplicatedStore<TState = unknown, TOp = unknown> {
   }
 
   /**
+   * Returns a snapshot suitable for serving to a peer that requested one, forcing a fresh
+   * compaction if there is new journal data to fold in, or falling back to the existing
+   * baseline snapshot when there is nothing new to compact.
+   *
+   * BUG THIS FIXES: `compact(true)` (force=true) still returns null whenever the live journal
+   * has shrunk to <= minRetentionEvents (the common steady state right after any compaction) —
+   * there is simply nothing NEW to fold in. Callers that did `if (snapshot) sendSnapshot(...)`
+   * on the RAW compact() result would silently send NOTHING back to a peer that explicitly
+   * asked for a snapshot because it detected it was behind the stable cut. With no retry
+   * mechanism on the requesting side beyond further anti-entropy rounds (which just repeat the
+   * same silently-dropped request), that peer's gap could never be filled — a permanent
+   * convergence failure. Falling back to the already-computed `getLatestSnapshot()` fixes this:
+   * the previous snapshot is still valid and sufficient to answer the request.
+   */
+  private getOrComputeTransferSnapshot(): ReplicatedSnapshot<TState> | null {
+    return this.compact(true) ?? this.journal.getLatestSnapshot();
+  }
+
+  /**
    * Evaluates compaction and checkpoints synchronously if bounds exceeded.
    */
   public compact(force = false): ReplicatedSnapshot<TState> | null {
@@ -347,11 +375,9 @@ export class ReplicatedStore<TState = unknown, TOp = unknown> {
     );
 
     if (snapshot) {
-      this.storage.saveSnapshot(snapshot).then(() => {
-        return this.storage.commitSnapshot(snapshot.snapshotVersion);
-      }).then(() => {
-        return this.storage.truncateJournalBefore(snapshot.vector);
-      }).catch(() => {});
+      this.enqueueCompactionTransaction(snapshot).catch((err) => {
+        console.error(`[ReplicatedStore:${this.storeId}] Compaction transaction failed`, err);
+      });
     }
 
     return snapshot;
@@ -373,15 +399,62 @@ export class ReplicatedStore<TState = unknown, TOp = unknown> {
     );
 
     if (snapshot) {
-      // Step 1: Write uncommitted snapshot V
-      await this.storage.saveSnapshot(snapshot);
-      // Step 2: Write commit marker V
-      await this.storage.commitSnapshot(snapshot.snapshotVersion);
-      // Step 3: Truncate storage journal before snapshot.vector
-      await this.storage.truncateJournalBefore(snapshot.vector);
+      await this.enqueueCompactionTransaction(snapshot);
     }
 
     return snapshot;
+  }
+
+  /**
+   * Serializes all storage-side compaction transactions for this store onto a single FIFO
+   * queue. Multiple mutate()/mutateAsync() calls in flight can each independently trigger
+   * maybeCompact() and produce a NEW snapshot version before the PREVIOUS snapshot's storage
+   * transaction has finished; without serialization, an in-flight transaction's step 5
+   * (pruneSnapshotsExcept) can race ahead and delete a newer, not-yet-committed snapshot's
+   * storage record out from under it, causing step 2 (verify) to spuriously fail. The
+   * in-memory journal/materialized state is unaffected either way (maybeCompact() already
+   * applied the snapshot synchronously) — this queue protects only the durability path.
+   */
+  private enqueueCompactionTransaction(snapshot: ReplicatedSnapshot<TState>): Promise<void> {
+    const task = this.compactionQueue.then(() => this.commitCompactionTransaction(snapshot));
+    // Keep the chain alive even if this transaction fails, so subsequent compactions still run.
+    this.compactionQueue = task.catch(() => {});
+    return task;
+  }
+
+  /**
+   * 5-step transactional compaction commit protocol:
+   *   1. Persist snapshot V (uncommitted)
+   *   2. Verify persistence (readback + integrity check)
+   *   3. Write commit marker V (only after verification succeeds)
+   *   4. Truncate journal before snapshot.vector
+   *   5. Prune all prior snapshot versions from storage
+   *
+   * If verification fails, the commit marker is NEVER written, so a crash or corruption
+   * during persist leaves the previously committed snapshot + journal as the recovery
+   * authority (hydrate() ignores any snapshot whose version != committedVersion).
+   */
+  private async commitCompactionTransaction(snapshot: ReplicatedSnapshot<TState>): Promise<void> {
+    // Step 1: Write new snapshot V (uncommitted)
+    await this.storage.saveSnapshot(snapshot);
+
+    // Step 2: Verify persistence before committing
+    const verified = await this.storage.verifySnapshotIntegrity(snapshot.snapshotVersion);
+    if (!verified) {
+      console.error(
+        `[ReplicatedStore:${this.storeId}] Snapshot v${snapshot.snapshotVersion} failed persistence verification — commit aborted, previous committed baseline remains authoritative`
+      );
+      return;
+    }
+
+    // Step 3: Write commit marker V (this becomes the sole recovery authority)
+    await this.storage.commitSnapshot(snapshot.snapshotVersion);
+
+    // Step 4: Truncate journal strictly before snapshot.vector
+    await this.storage.truncateJournalBefore(snapshot.vector);
+
+    // Step 5: Prune all prior snapshot versions now that V is committed and journal is truncated
+    await this.storage.pruneSnapshotsExcept(snapshot.snapshotVersion);
   }
 
   /**

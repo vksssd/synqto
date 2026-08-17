@@ -33,6 +33,14 @@ export interface TransportCapabilities {
   maxPayloadSize: number;
 }
 
+export type PacketDeliverySemantics = 'BEST_EFFORT' | 'RELIABLE' | 'ORDERED' | 'CAUSAL';
+
+export interface PacketOptions {
+  delivery?: PacketDeliverySemantics;
+  channelPriority?: 'control' | 'bulk';
+  maxAttempts?: number;
+}
+
 export interface ITransport {
   readonly name: string;
   connect(roomId: RoomId): Promise<void>;

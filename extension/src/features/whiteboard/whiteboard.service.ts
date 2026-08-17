@@ -452,6 +452,22 @@ export class WhiteboardService {
       }
     });
 
+    // 1b. Receive remote strokes batch (moving/transforming selections)
+    this.network.on<{ pageId?: string; strokes: WhiteboardStroke[] }>('whiteboard:strokes_batch', (payload) => {
+      if (!payload || !Array.isArray(payload.strokes) || payload.strokes.length === 0) return;
+      const pageId = payload.pageId || this.collabNotebook.activePageId;
+      const targetPage = this.collabNotebook.pages.find((p) => p.id === pageId) || this.getActivePage();
+
+      const strokeMap = new Map<string, WhiteboardStroke>(payload.strokes.map((s) => [s.id, s]));
+      targetPage.strokes = targetPage.strokes.map((s) => (strokeMap.has(s.id) ? strokeMap.get(s.id)! : s));
+      this.saveCollabNotebook();
+      this.broadcastLocal('strokes_batch', { strokes: payload.strokes, pageId: targetPage.id });
+      this.broadcastRuntime({ type: 'WHITEBOARD_UPDATE_STROKES_LOCAL', strokes: payload.strokes, pageId: targetPage.id });
+      if (this.privacyMode === 'collaborative' && this.collabNotebook.activePageId === targetPage.id) {
+        this.notifyListeners();
+      }
+    });
+
     // 2. Receive temporary disappearing stroke
     this.network.on<{ stroke: WhiteboardStroke; durationMs: number }>('whiteboard:temp_stroke', (payload) => {
       if (payload?.stroke && this.privacyMode === 'collaborative') {
@@ -813,6 +829,37 @@ export class WhiteboardService {
       }
       this.broadcastLocal('undo', { strokeId, pageId: page.id });
       this.broadcastRuntime({ type: 'WHITEBOARD_UNDO_LOCAL', strokeId, pageId: page.id });
+      this.notifyListeners();
+    }
+  }
+
+  public deleteStrokes(strokeIds: string[]): void {
+    if (!strokeIds || strokeIds.length === 0) return;
+    const page = this.getActivePage();
+    const idSet = new Set(strokeIds);
+    const removedStrokes: WhiteboardStroke[] = [];
+    page.strokes = page.strokes.filter((s) => {
+      if (idSet.has(s.id)) {
+        removedStrokes.push(s);
+        return false;
+      }
+      return true;
+    });
+
+    if (removedStrokes.length > 0) {
+      page.redoStack.push(...removedStrokes);
+      if (this.privacyMode === 'personal') {
+        this.savePersonalNotebook();
+      } else {
+        this.saveCollabNotebook();
+        removedStrokes.forEach((s) => {
+          this.network.broadcast('whiteboard:undo', { pageId: page.id, strokeId: s.id });
+        });
+      }
+      removedStrokes.forEach((s) => {
+        this.broadcastLocal('undo', { strokeId: s.id, pageId: page.id });
+        this.broadcastRuntime({ type: 'WHITEBOARD_UNDO_LOCAL', strokeId: s.id, pageId: page.id });
+      });
       this.notifyListeners();
     }
   }

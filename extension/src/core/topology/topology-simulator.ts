@@ -86,7 +86,12 @@ export class TopologySimulator {
     const sender = this.peers.get(fromPeerId);
     if (!sender) throw new Error(`Unknown sender peer ${fromPeerId}`);
 
-    const packet = createPacket(type as any, { peerId: fromPeerId, nickname: fromPeerId }, this.roomId, payload);
+    const packet = createPacket(
+      type as any,
+      { peerId: fromPeerId, nickname: fromPeerId, avatar: '🤖', color: '#10b981' },
+      this.roomId,
+      payload
+    );
 
     this.peers.forEach((targetPeer) => {
       if (targetPeer.peerId === fromPeerId) return;

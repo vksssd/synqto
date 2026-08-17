@@ -1,3 +1,6 @@
+import { RoomId, TopologyEpoch, PeerId } from '../types/identifiers';
+import { TopologyTier } from './topology.types';
+
 export type TopologyPhase =
   | 'STABLE'
   | 'PREPARING'

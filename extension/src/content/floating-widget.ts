@@ -230,6 +230,7 @@ export class FloatingWidget {
   private wbSelectionBox: { x1: number; y1: number; x2: number; y2: number } | null = null;
   private wbClipboardStrokes: InPageStroke[] = [];
   private wbIsMovingSelection: boolean = false;
+  private wbDragStartCoords: { x: number; y: number } | null = null;
   private wbIsMarqueeSelecting: boolean = false;
   private wbAnimationRafId: number | null = null;
   private wbDrawRafScheduled: boolean = false;
@@ -1336,7 +1337,7 @@ export class FloatingWidget {
               <div class="chat-bubble ${m.isSelf ? 'self' : 'other'}" id="nb-msg-${m.id}">
                 ${m.replyPreview ? `
                   <div class="wa-quote-box">
-                    <div style="font-weight:700;color:var(--primary);">${this.escapeHtml(m.replyTo?.preview?.split(':')[0] || 'Reply')}</div>
+                    <div style="font-weight:700;color:var(--primary);">${this.escapeHtml(m.replyPreview.split(':')[0] || 'Reply')}</div>
                     <div style="color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this.escapeHtml(m.replyPreview)}</div>
                   </div>
                 ` : ''}

@@ -132,15 +132,15 @@ function distanceToLineSegment(px: number, py: number, x1: number, y1: number, x
 }
 
 function getStrokeBounds(stroke: Stroke): { minX: number; minY: number; maxX: number; maxY: number } {
+  if (stroke.text && stroke.geometry) {
+    return { minX: stroke.geometry.x1, minY: stroke.geometry.y1 - 20, maxX: stroke.geometry.x1 + 100, maxY: stroke.geometry.y1 + 10 };
+  }
   if (stroke.geometry) {
     const minX = Math.min(stroke.geometry.x1, stroke.geometry.x2);
     const maxX = Math.max(stroke.geometry.x1, stroke.geometry.x2);
     const minY = Math.min(stroke.geometry.y1, stroke.geometry.y2);
     const maxY = Math.max(stroke.geometry.y1, stroke.geometry.y2);
     return { minX, minY, maxX, maxY };
-  }
-  if (stroke.text && stroke.geometry) {
-    return { minX: stroke.geometry.x1, minY: stroke.geometry.y1 - 20, maxX: stroke.geometry.x1 + 100, maxY: stroke.geometry.y1 + 10 };
   }
   if (stroke.points && stroke.points.length > 0) {
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;

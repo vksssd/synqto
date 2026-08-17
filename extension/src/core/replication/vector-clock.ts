@@ -63,6 +63,41 @@ export function compareVectorClocks(a: VectorClock, b: VectorClock): VectorCompa
 }
 
 /**
+ * Returns true if vector clock A dominates (is greater than or equal to in all dimensions) vector clock B
+ */
+export function dominates(a: VectorClock, b: VectorClock): boolean {
+  for (const [peerId, counter] of Object.entries(b)) {
+    if ((a[peerId] || 0) < counter) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Computes component-wise minimum across a collection of vector clocks.
+ * Essential for calculating the stableCutVector across participating active peers.
+ */
+export function minVectorClocks(clocks: VectorClock[], candidatePeers?: PeerId[]): VectorClock {
+  if (clocks.length === 0) return createVectorClock();
+  const minClock: VectorClock = {};
+  const targetPeers = candidatePeers || Array.from(new Set(clocks.flatMap((c) => Object.keys(c))));
+
+  for (const peerId of targetPeers) {
+    let minVal = Infinity;
+    for (const clock of clocks) {
+      const val = clock[peerId] || 0;
+      if (val < minVal) minVal = val;
+    }
+    if (minVal !== Infinity && minVal > 0) {
+      minClock[peerId] = minVal;
+    }
+  }
+
+  return minClock;
+}
+
+/**
  * Generates a deterministic, universally unique OperationId
  */
 export function generateOperationId(author: PeerId, seq: number, lamport: number): OperationId {

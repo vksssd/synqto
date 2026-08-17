@@ -10,12 +10,16 @@ import {
   TOPOLOGY_THRESHOLDS,
 } from './topology.types';
 import { VectorClock } from '../replication/vector-clock';
+import { RouteResolver } from './route-resolver';
 
 export class LeaderMesh {
   private leaders: Map<PeerId, LeaderNode> = new Map();
   private peerAssignments: Map<PeerId, PeerAssignment> = new Map();
   private heartbeatInterval: any = null;
   private healthCheckInterval: any = null;
+  private digestSeq: number = 0;
+
+  public readonly routeResolver: RouteResolver;
 
   private onDigestBroadcastFn: ((digest: LeaderDigest) => void) | null = null;
   private onLeaderFailureCallback: ((failedPeerId: PeerId) => void) | null = null;
@@ -25,7 +29,9 @@ export class LeaderMesh {
     private readonly roomId: RoomId,
     private getVectorClockFn: () => VectorClock,
     private getLamportTimeFn: () => number
-  ) {}
+  ) {
+    this.routeResolver = new RouteResolver(myPeerId, 1);
+  }
 
   public bindDigestBroadcast(sender: (digest: LeaderDigest) => void): void {
     this.onDigestBroadcastFn = sender;
@@ -38,6 +44,7 @@ export class LeaderMesh {
   public setLeaders(leaderIds: PeerId[], epoch: TopologyEpoch): void {
     const existing = new Map(this.leaders);
     this.leaders.clear();
+    this.routeResolver.setEpoch(epoch);
 
     leaderIds.forEach((pid) => {
       const prev = existing.get(pid);
@@ -76,13 +83,22 @@ export class LeaderMesh {
    * Checks if current node is part of the majority leader partition
    */
   public hasQuorum(): boolean {
+    if (this.leaders.size === 0) return true;
     let healthyCount = 0;
-    this.leaders.forEach((node) => {
-      if (node.health !== 'FAILED') {
-        healthyCount++;
-      }
+    this.leaders.forEach((l) => {
+      if (l.health === 'HEALTHY' || l.health === 'SUSPECTED') healthyCount++;
     });
     return healthyCount >= this.getQuorum();
+  }
+
+  public getLocalClusterPeers(): PeerId[] {
+    const peers: PeerId[] = [];
+    this.peerAssignments.forEach((assignment, peerId) => {
+      if (assignment.primaryLeader === this.myPeerId) {
+        peers.push(peerId);
+      }
+    });
+    return peers;
   }
 
   /**
@@ -90,15 +106,20 @@ export class LeaderMesh {
    */
   public start(epoch: TopologyEpoch): void {
     this.stop();
+    this.routeResolver.setEpoch(epoch);
 
     // 1. Digest broadcast loop (only active if local node is an active leader)
     this.heartbeatInterval = setInterval(() => {
       if (this.isLeader() && this.onDigestBroadcastFn) {
+        this.digestSeq++;
+        const localCluster = this.getLocalClusterPeers();
         const digest: LeaderDigest = {
           roomId: this.roomId,
           topologyEpoch: epoch,
           leaderGeneration: this.leaders.get(this.myPeerId)?.generation ?? 1,
+          digestVersion: this.digestSeq,
           leaderPeerId: this.myPeerId,
+          assignedClusterPeers: localCluster,
           memberCount: this.peerAssignments.size + this.leaders.size,
           vectorDigest: this.getVectorClockFn(),
           latestLamport: this.getLamportTimeFn(),
@@ -106,6 +127,8 @@ export class LeaderMesh {
           knownLeaders: this.getActiveLeaders(),
           timestamp: Date.now(),
         };
+        // Record our own local cluster routes into the resolver
+        this.routeResolver.recordDigest(digest);
         this.onDigestBroadcastFn(digest);
       }
     }, TOPOLOGY_TIMERS.LEADER_HEARTBEAT_MS);
@@ -133,6 +156,8 @@ export class LeaderMesh {
       leader.health = 'HEALTHY';
       leader.score = digest.healthScore;
     }
+    // Update authoritative route resolver
+    this.routeResolver.recordDigest(digest);
   }
 
   private checkLeaderHealth(): void {
@@ -145,6 +170,7 @@ export class LeaderMesh {
         if (node.health !== 'FAILED') {
           node.health = 'FAILED';
           console.warn(`[LeaderMesh] Leader ${pid} declared FAILED (no heartbeat for ${elapsed}ms)`);
+          this.routeResolver.invalidateLeader(pid);
 
           // Only proceed with leader election if quorum majority is present
           if (this.hasQuorum()) {

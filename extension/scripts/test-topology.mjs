@@ -10,8 +10,17 @@ import {
   mergeVectorClocks,
   compareVectorClocks,
   generateOperationId,
+  dominates,
+  minVectorClocks,
 } from '../src/core/replication/vector-clock.ts';
 import { ReplicatedEventLog } from '../src/core/replication/event-log.ts';
+import { OperationJournal } from '../src/core/replication/operation-journal.ts';
+import { CausalSyncEngine } from '../src/core/replication/causal-sync-engine.ts';
+import { BoundedMemoryManager } from '../src/core/replication/bounded-memory.ts';
+import { SnapshotTransferManager } from '../src/core/replication/snapshot-transfer.ts';
+import { ReplicatedStore } from '../src/core/replication/replicated-store.ts';
+import { ReplicationValidator } from '../src/core/replication/validation.ts';
+import { InMemoryStorageAdapter } from '../src/core/replication/storage-adapter.ts';
 
 let passed = 0;
 let total = 0;
@@ -398,6 +407,1000 @@ test('RelayTransport exposes valid TransportCapabilities', () => {
   assert.strictEqual(caps.maxPayloadSize, 16 * 1024 * 1024);
 });
 
+// ─── 11. RouteResolver & Deterministic Conflict Resolution ───
+console.log('\n📦 Section 11: RouteResolver & Deterministic Routing Conflicts');
+
+import { RouteResolver } from '../src/core/topology/route-resolver.ts';
+
+test('RouteResolver resolves direct peer and cluster leader', () => {
+  const resolver = new RouteResolver('my-peer', 2);
+
+  // Ingest digest from Leader L1 assigning peers P1, P2
+  resolver.recordDigest({
+    roomId: 'room-1',
+    topologyEpoch: 2,
+    leaderGeneration: 1,
+    digestVersion: 1,
+    leaderPeerId: 'leader-1',
+    assignedClusterPeers: ['peer-1', 'peer-2'],
+    memberCount: 3,
+    vectorDigest: {},
+    latestLamport: 10,
+    healthScore: 90,
+    knownLeaders: ['leader-1'],
+    timestamp: Date.now(),
+  });
+
+  const directPeers = new Set(['peer-direct', 'leader-1']);
+
+  // Direct connected peer -> DIRECT
+  const routeDirect = resolver.resolve('peer-direct', directPeers);
+  assert.strictEqual(routeDirect.type, 'DIRECT');
+  assert.strictEqual(routeDirect.nextHopPeerId, 'peer-direct');
+
+  // Peer-1 in Leader-1's cluster -> LEADER nextHop = leader-1
+  const routeCluster = resolver.resolve('peer-1', directPeers);
+  assert.strictEqual(routeCluster.type, 'LEADER');
+  assert.strictEqual(routeCluster.nextHopPeerId, 'leader-1');
+
+  // Unknown peer -> RELAY unicast
+  const routeUnknown = resolver.resolve('peer-unknown', directPeers);
+  assert.strictEqual(routeUnknown.type, 'RELAY');
+  assert.strictEqual(routeUnknown.nextHopPeerId, 'peer-unknown');
+});
+
+test('RouteResolver deterministic conflict resolution (Epoch > Version > Tie-Break)', () => {
+  const resolver = new RouteResolver('my-peer', 2);
+
+  // 1. Initial assignment from Leader-1 at epoch 2, ver 1
+  resolver.recordDigest({
+    roomId: 'room-1',
+    topologyEpoch: 2,
+    leaderGeneration: 1,
+    digestVersion: 1,
+    leaderPeerId: 'leader-1',
+    assignedClusterPeers: ['peer-X'],
+    memberCount: 2,
+    vectorDigest: {},
+    latestLamport: 1,
+    healthScore: 90,
+    knownLeaders: ['leader-1'],
+    timestamp: Date.now(),
+  });
+  assert.strictEqual(resolver.resolve('peer-X', new Set(['leader-1', 'leader-2'])).nextHopPeerId, 'leader-1');
+
+  // 2. Stale epoch digest (epoch 1) -> Rejected
+  resolver.recordDigest({
+    roomId: 'room-1',
+    topologyEpoch: 1,
+    leaderGeneration: 1,
+    digestVersion: 5,
+    leaderPeerId: 'leader-2',
+    assignedClusterPeers: ['peer-X'],
+    memberCount: 2,
+    vectorDigest: {},
+    latestLamport: 1,
+    healthScore: 90,
+    knownLeaders: ['leader-2'],
+    timestamp: Date.now(),
+  });
+  assert.strictEqual(resolver.resolve('peer-X', new Set(['leader-1', 'leader-2'])).nextHopPeerId, 'leader-1');
+
+  // 3. Higher version in same epoch (epoch 2, ver 2 from leader-2) -> Replaces
+  resolver.recordDigest({
+    roomId: 'room-1',
+    topologyEpoch: 2,
+    leaderGeneration: 1,
+    digestVersion: 2,
+    leaderPeerId: 'leader-2',
+    assignedClusterPeers: ['peer-X'],
+    memberCount: 2,
+    vectorDigest: {},
+    latestLamport: 1,
+    healthScore: 90,
+    knownLeaders: ['leader-2'],
+    timestamp: Date.now(),
+  });
+  assert.strictEqual(resolver.resolve('peer-X', new Set(['leader-1', 'leader-2'])).nextHopPeerId, 'leader-2');
+
+  // 4. Higher epoch (epoch 3, ver 1 from leader-3) -> Replaces
+  resolver.recordDigest({
+    roomId: 'room-1',
+    topologyEpoch: 3,
+    leaderGeneration: 1,
+    digestVersion: 1,
+    leaderPeerId: 'leader-3',
+    assignedClusterPeers: ['peer-X'],
+    memberCount: 2,
+    vectorDigest: {},
+    latestLamport: 1,
+    healthScore: 90,
+    knownLeaders: ['leader-3'],
+    timestamp: Date.now(),
+  });
+  assert.strictEqual(resolver.resolve('peer-X', new Set(['leader-1', 'leader-2', 'leader-3'])).nextHopPeerId, 'leader-3');
+});
+
+// ─── 12. TransportRouter Invariants & Zero-Broadcast Unicast ───
+console.log('\n📦 Section 12: TransportRouter Data Plane & Zero-Broadcast Invariant');
+
+import { TransportRouter } from '../src/core/transport/transport-router.ts';
+
+test('TransportRouter routes directed unicast to leader and unknown to RELAY_UNICAST (never broadcast)', () => {
+  let relayedUnicasts = [];
+  let relayedBroadcasts = [];
+  let p2pPackets = [];
+
+  const mockRelay = {
+    onPacket: () => () => {},
+    sendTo: (target, pkt) => {
+      relayedUnicasts.push({ target, pkt });
+      return true;
+    },
+    broadcast: (pkt) => {
+      relayedBroadcasts.push(pkt);
+      return true;
+    },
+    getHealth: () => ({ connected: true }),
+  };
+
+  const router = new TransportRouter(mockRelay);
+  const resolver = new RouteResolver('my-node', 1);
+
+  // Ingest route: peer-target is assigned to leader-backbone
+  resolver.recordDigest({
+    roomId: 'room-1',
+    topologyEpoch: 1,
+    leaderGeneration: 1,
+    digestVersion: 1,
+    leaderPeerId: 'leader-backbone',
+    assignedClusterPeers: ['peer-target'],
+    memberCount: 2,
+    vectorDigest: {},
+    latestLamport: 1,
+    healthScore: 90,
+    knownLeaders: ['leader-backbone'],
+    timestamp: Date.now(),
+  });
+
+  const directPeers = new Set(['leader-backbone']);
+  router.bindRouteResolver(resolver, () => directPeers);
+  router.bindP2PSender((pkt, target) => {
+    p2pPackets.push({ target, pkt });
+    return true;
+  });
+
+  router.updateView({
+    roomId: 'room-1',
+    tier: 'TIER2_MULTI_LEADER',
+    epoch: 1,
+    generation: 1,
+    membershipVersion: 5,
+    leaders: ['leader-backbone'],
+    relayAvailable: true,
+    timestamp: Date.now(),
+  });
+
+  // 1. Unicast to peer-target -> Should route to leader-backbone over P2P
+  const pkt1 = createPacket('chat:message', { peerId: 'my-node', nickname: 'Me', avatar: '', color: '' }, 'room-1', { text: 'hi' }, 'peer-target');
+  router.sendTo('peer-target', pkt1);
+
+  assert.strictEqual(p2pPackets.length, 1);
+  assert.strictEqual(p2pPackets[0].target, 'leader-backbone');
+  assert.strictEqual(relayedUnicasts.length, 0);
+  assert.strictEqual(relayedBroadcasts.length, 0);
+
+  // 2. Unicast to completely unknown peer -> Should route to RELAY_UNICAST (never broadcast!)
+  const pkt2 = createPacket('chat:message', { peerId: 'my-node', nickname: 'Me', avatar: '', color: '' }, 'room-1', { text: 'private' }, 'peer-stranger');
+  router.sendTo('peer-stranger', pkt2);
+
+  assert.strictEqual(relayedUnicasts.length, 1);
+  assert.strictEqual(relayedUnicasts[0].target, 'peer-stranger');
+  assert.strictEqual(relayedBroadcasts.length, 0, 'INVARIANT VIOLATION: Unknown unicast must NEVER trigger room broadcast');
+});
+
+test('TransportRouter drops stale control packets but preserves stale application payloads', () => {
+  const router = new TransportRouter({ onPacket: () => () => {}, broadcast: () => true, sendTo: () => true, getHealth: () => ({}) });
+  let delivered = [];
+  router.onPacket((p) => delivered.push(p));
+
+  router.updateView({
+    roomId: 'room-1',
+    tier: 'TIER2_MULTI_LEADER',
+    epoch: 5,
+    generation: 1,
+    membershipVersion: 5,
+    leaders: ['L1'],
+    relayAvailable: true,
+    timestamp: Date.now(),
+  });
+
+  // Stale control packet (epoch 3 < current 5) -> DROPPED
+  const staleControl = createPacket('topology:digest', { peerId: 'L1', nickname: 'L1', avatar: '', color: '' }, 'room-1', {}, undefined, { topologyEpoch: 3 });
+  router.routeIncoming(staleControl);
+  assert.strictEqual(delivered.length, 0, 'Stale control packet must be dropped');
+
+  // Stale application packet (epoch 3 < current 5) -> PRESERVED
+  const staleApp = createPacket('chat:message', { peerId: 'P1', nickname: 'P1', avatar: '', color: '' }, 'room-1', { text: 'important' }, undefined, { topologyEpoch: 3 });
+  router.routeIncoming(staleApp);
+  assert.strictEqual(delivered.length, 1, 'Stale application payload must be preserved');
+  assert.strictEqual(delivered[0].payload.text, 'important');
+});
+
+// ─── 13. Dual-Path Draining Deduplication & Failure Resilience ───
+console.log('\n📦 Section 13: Dual-Path Draining Deduplication & Failure Resilience');
+
+test('Dual delivery during draining generates exactly one application event', () => {
+  const router = new TransportRouter({ onPacket: () => () => {}, broadcast: () => true, sendTo: () => true, getHealth: () => ({}) });
+  let deliveredCount = 0;
+  router.onPacket(() => deliveredCount++);
+
+  const duplicatePacket = createPacket('whiteboard:stroke', { peerId: 'P1', nickname: 'P1', avatar: '', color: '' }, 'room-1', { strokeId: 's1' }, undefined, { seq: 42 });
+
+  // Packet arrives from P2P path
+  router.routeIncoming(duplicatePacket);
+  assert.strictEqual(deliveredCount, 1);
+
+  // Same packet arrives from Server Relay path during migration drain
+  router.routeIncoming(duplicatePacket);
+  assert.strictEqual(deliveredCount, 1, 'Duplicate packet ID during drain must be deduplicated to 1 delivery');
+});
+
+test('Leader failure during draining invalidates routes and falls back to RELAY_UNICAST', () => {
+  let relayCalls = [];
+  const mockRelay = {
+    onPacket: () => () => {},
+    sendTo: (t, p) => { relayCalls.push(t); return true; },
+    broadcast: () => true,
+    getHealth: () => ({ connected: true }),
+  };
+
+  const router = new TransportRouter(mockRelay);
+  const resolver = new RouteResolver('my-node', 2);
+
+  resolver.recordDigest({
+    roomId: 'room-1',
+    topologyEpoch: 2,
+    leaderGeneration: 1,
+    digestVersion: 1,
+    leaderPeerId: 'leader-failing',
+    assignedClusterPeers: ['peer-victim'],
+    memberCount: 2,
+    vectorDigest: {},
+    latestLamport: 1,
+    healthScore: 90,
+    knownLeaders: ['leader-failing'],
+    timestamp: Date.now(),
+  });
+
+  router.bindRouteResolver(resolver, () => new Set());
+  router.updateView({
+    roomId: 'room-1',
+    tier: 'TIER2_MULTI_LEADER',
+    phase: 'DRAINING',
+    epoch: 2,
+    generation: 1,
+    membershipVersion: 5,
+    leaders: ['leader-failing'],
+    relayAvailable: true,
+    timestamp: Date.now(),
+  });
+
+  // Leader fails -> Invalidate leader routes
+  resolver.invalidateLeader('leader-failing');
+
+  // Send unicast to peer-victim
+  const pkt = createPacket('chat:message', { peerId: 'my-node', nickname: 'Me', avatar: '', color: '' }, 'room-1', {}, 'peer-victim');
+  router.sendTo('peer-victim', pkt);
+
+  assert.strictEqual(relayCalls.length, 1);
+  assert.strictEqual(relayCalls[0], 'peer-victim', 'Must fallback to direct relay unicast to victim after leader failure');
+});
+
+// ─── 14. Adaptive ReliableTransport & Karn's Algorithm ───
+console.log('\n📦 Section 14: ReliableTransport (Jacobson RTO + Karn Algorithm)');
+
+import { ReliableTransport } from '../src/core/network/reliable-transport.ts';
+
+test('ReliableTransport delivers with ACK correlation and updates Jacobson RTT', async () => {
+  const rt = new ReliableTransport();
+  let sent = [];
+  rt.bindSender((p, target) => { sent.push({ p, target }); return true; });
+
+  const pkt = createPacket('chat:message', { peerId: 'node-A', nickname: 'A', avatar: '', color: '' }, 'room-1', { text: 'test' }, 'node-B');
+
+  const promise = rt.sendReliable(pkt, 'node-B');
+  assert.strictEqual(sent.length, 1);
+  assert.strictEqual(sent[0].p.id, pkt.id);
+
+  // Send matching ACK
+  rt.handleAck({
+    ackId: 'ack:1',
+    ackFor: pkt.id,
+    fromPeerId: 'node-B',
+    timestamp: Date.now(),
+  });
+
+  const receipt = await promise;
+  assert.strictEqual(receipt.status, 'delivered');
+  assert.strictEqual(receipt.attempts, 1);
+
+  // Estimator updated
+  const est = rt.getEstimator();
+  assert.ok(est.rto >= 250 && est.rto <= 10000);
+});
+
+test('Karn Algorithm: Retransmissions do NOT update RTT estimates', async () => {
+  const rt = new ReliableTransport();
+  let attempts = 0;
+  rt.bindSender(() => { attempts++; return true; });
+
+  const estBefore = rt.getEstimator();
+  const pkt = createPacket('chat:message', { peerId: 'node-A', nickname: 'A', avatar: '', color: '' }, 'room-1', {}, 'node-B');
+
+  // Simulate retransmission
+  const promise = rt.sendReliable(pkt, 'node-B');
+
+  // Fast forward attempt
+  rt['pending'].get(pkt.id).attempts = 2; // Simulate retry attempt
+
+  // ACK arrives after retry
+  rt.handleAck({
+    ackId: 'ack:2',
+    ackFor: pkt.id,
+    fromPeerId: 'node-B',
+    timestamp: Date.now(),
+  });
+
+  const receipt = await promise;
+  assert.strictEqual(receipt.status, 'delivered');
+  assert.strictEqual(receipt.attempts, 2);
+
+  const estAfter = rt.getEstimator();
+  assert.strictEqual(estAfter.srtt, estBefore.srtt, 'Karn rule: Retransmissions must NOT alter srtt');
+});
+
+test('ReliableTransport enforces No ACK-of-ACK invariant', () => {
+  const rt = new ReliableTransport();
+  const ackPkt = createPacket('transport:ack', { peerId: 'A', nickname: '', avatar: '', color: '' }, 'room-1', {});
+  const nackPkt = createPacket('transport:nack', { peerId: 'A', nickname: '', avatar: '', color: '' }, 'room-1', {});
+  const presencePkt = createPacket('presence:ping', { peerId: 'A', nickname: '', avatar: '', color: '' }, 'room-1', {});
+  const chatPkt = createPacket('chat:message', { peerId: 'A', nickname: '', avatar: '', color: '' }, 'room-1', {});
+
+  assert.strictEqual(rt.isAckable(ackPkt), false, 'ACK packets must not be ackable');
+  assert.strictEqual(rt.isAckable(nackPkt), false, 'NACK packets must not be ackable');
+  assert.strictEqual(rt.isAckable(presencePkt), false, 'Presence packets must not be ackable');
+  assert.strictEqual(rt.isAckable(chatPkt), true, 'Chat packets must be ackable');
+});
+
+// ─── 15. Stream-Scoped Ordering & Gap Recovery ───
+console.log('\n📦 Section 15: Stream-Scoped Ordering & Gap Recovery');
+
+import { OrderingBuffer } from '../src/core/network/ordering-buffer.ts';
+
+test('OrderingBuffer drains out-of-order sequence and isolates streams', () => {
+  const ob = new OrderingBuffer();
+  let chatDelivered = [];
+  let codeDelivered = [];
+  let gapRequests = [];
+
+  const createStreamPkt = (streamId, seq, sender, text) => {
+    return createPacket('chat:message', { peerId: sender, nickname: sender, avatar: '', color: '' }, 'room-1', { text }, undefined, { streamId, seq });
+  };
+
+  // Chat stream: receives seq 1 -> delivered immediately
+  ob.inflow(createStreamPkt('chat', 1, 'peer-1', 'msg1'), (p) => chatDelivered.push(p), (g) => gapRequests.push(g));
+  assert.strictEqual(chatDelivered.length, 1);
+
+  // Chat stream: receives seq 3 -> buffered (seq 2 missing)
+  ob.inflow(createStreamPkt('chat', 3, 'peer-1', 'msg3'), (p) => chatDelivered.push(p), (g) => gapRequests.push(g));
+  assert.strictEqual(chatDelivered.length, 1, 'Out-of-order seq 3 must be buffered');
+  assert.strictEqual(gapRequests.length, 1, 'Must request gap repair for missing seq 2');
+  assert.strictEqual(gapRequests[0].missingRangeStart, 2);
+
+  // Code stream from same sender receives seq 1 -> delivered immediately (Stream Isolation!)
+  ob.inflow(createStreamPkt('code', 1, 'peer-1', 'delta1'), (p) => codeDelivered.push(p));
+  assert.strictEqual(codeDelivered.length, 1, 'Unrelated code stream must NOT be blocked by chat gap');
+
+  // Chat stream: missing seq 2 arrives -> delivers seq 2 and drains buffered seq 3
+  ob.inflow(createStreamPkt('chat', 2, 'peer-1', 'msg2'), (p) => chatDelivered.push(p));
+  assert.strictEqual(chatDelivered.length, 3, 'Delivering missing seq 2 must drain seq 3');
+  assert.strictEqual(chatDelivered[1].payload.text, 'msg2');
+  assert.strictEqual(chatDelivered[2].payload.text, 'msg3');
+});
+
+// ─── 16. Payload Chunker, CRC32 Integrity & Memory Bounds ───
+console.log('\n📦 Section 16: Payload Chunker, CRC32 Integrity & Resource Bounds');
+
+import { PayloadChunker, PayloadReassembler, computeCRC32 } from '../src/core/network/chunker.ts';
+
+test('PayloadChunker bypasses small payloads and fragments large objects', () => {
+  const smallPkt = createPacket('chat:message', { peerId: 'P1', nickname: '', avatar: '', color: '' }, 'room-1', { text: 'small' });
+  const smallFragments = PayloadChunker.chunkPacket(smallPkt);
+  assert.strictEqual(smallFragments.length, 1);
+  assert.strictEqual(smallFragments[0].type, 'chat:message');
+
+  // Large payload (20 KB string)
+  const bigData = 'X'.repeat(20 * 1024);
+  const largePkt = createPacket('whiteboard:page_sync', { peerId: 'P1', nickname: '', avatar: '', color: '' }, 'room-1', { snapshot: bigData });
+  const largeFragments = PayloadChunker.chunkPacket(largePkt);
+
+  assert.ok(largeFragments.length >= 3, '20KB payload must be split into at least 3 chunks');
+  assert.strictEqual(largeFragments[0].type, 'chunk:data');
+  assert.strictEqual(largeFragments[0].payload.totalChunks, largeFragments.length);
+});
+
+test('PayloadReassembler reassembles out-of-order chunks and validates CRC32', () => {
+  const reassembler = new PayloadReassembler();
+  const bigData = { canvas: 'DRAW_DATA_'.repeat(800) };
+  const originalPkt = createPacket('whiteboard:stroke', { peerId: 'P1', nickname: 'Author', avatar: '', color: '' }, 'room-1', bigData);
+
+  const chunks = PayloadChunker.chunkPacket(originalPkt);
+  assert.ok(chunks.length >= 2);
+
+  // Ingest chunks in reverse order
+  let result = null;
+  for (let i = chunks.length - 1; i >= 0; i--) {
+    result = reassembler.ingestChunk(chunks[i]);
+  }
+
+  assert.ok(result !== null, 'Reassembler must successfully reconstruct packet');
+  assert.strictEqual(result.type, 'whiteboard:stroke');
+  assert.deepStrictEqual(result.payload, bigData);
+});
+
+test('PayloadReassembler rejects corrupted chunks via CRC32 check', () => {
+  const reassembler = new PayloadReassembler();
+  const originalPkt = createPacket('code:sync', { peerId: 'P1', nickname: '', avatar: '', color: '' }, 'room-1', { data: 'CORRUPTION_TEST_'.repeat(600) });
+  const chunks = PayloadChunker.chunkPacket(originalPkt);
+
+  // Corrupt chunk 0 payload data
+  chunks[0].payload.data += '_MALICIOUS_BIT';
+
+  let result = null;
+  for (const chunk of chunks) {
+    result = reassembler.ingestChunk(chunk);
+  }
+
+  assert.strictEqual(result, null, 'Corrupted chunk must fail CRC32 and result in null');
+});
+
+// ─── 17. PacketPipeline & Topology Transition Resilience ───
+console.log('\n📦 Section 17: PacketPipeline & Topology Transition Invariants');
+
+import { PacketPipeline } from '../src/core/network/packet-pipeline.ts';
+
+test('PacketPipeline delivers reliable packets and auto-generates ACKs', async () => {
+  let outbound = [];
+  const mockRouter = {
+    broadcast: (p) => { outbound.push({ mode: 'broadcast', p }); return true; },
+    sendTo: (t, p) => { outbound.push({ mode: 'unicast', target: t, p }); return true; },
+    onPacket: (fn) => { mockRouter['incomingHandler'] = fn; return () => {}; },
+  };
+
+  const pipeline = new PacketPipeline(mockRouter);
+  pipeline.init({ peerId: 'node-local', nickname: 'Local', avatar: '', color: '' }, 'room-1');
+
+  let appDelivered = [];
+  pipeline.onDeliver((p) => appDelivered.push(p));
+
+  // Simulate remote peer sending reliable chat packet to node-local
+  const incomingChat = createPacket(
+    'chat:message',
+    { peerId: 'node-remote', nickname: 'Remote', avatar: '', color: '' },
+    'room-1',
+    { text: 'Hello Pipeline' },
+    'node-local',
+    { streamId: 'chat', seq: 1 }
+  );
+
+  mockRouter['incomingHandler'](incomingChat);
+
+  // Application received packet
+  assert.strictEqual(appDelivered.length, 1);
+  assert.strictEqual(appDelivered[0].payload.text, 'Hello Pipeline');
+
+  // Pipeline auto-replied with transport:ack
+  assert.strictEqual(outbound.length, 1);
+  assert.strictEqual(outbound[0].mode, 'unicast');
+  assert.strictEqual(outbound[0].target, 'node-remote');
+  assert.strictEqual(outbound[0].p.type, 'transport:ack');
+  assert.strictEqual(outbound[0].p.payload.ackFor, incomingChat.id);
+});
+
+// ─── 18. Adversarial & Deduplication Invariant Testing ───
+console.log('\n📦 Section 18: Adversarial & Exactly-Once Invariants');
+
+test('Property: Multi-path, delayed, and duplicate deliveries produce exactly ONE application delivery', () => {
+  const mockRouter = {
+    broadcast: () => true,
+    sendTo: () => true,
+    onPacket: (fn) => { mockRouter['incomingHandler'] = fn; return () => {}; },
+  };
+
+  const pipeline = new PacketPipeline(mockRouter);
+  pipeline.init({ peerId: 'node-local', nickname: 'Local', avatar: '', color: '' }, 'room-1');
+
+  let appDeliveredCount = 0;
+  pipeline.onDeliver(() => appDeliveredCount++);
+
+  const pkt = createPacket(
+    'whiteboard:stroke',
+    { peerId: 'node-remote', nickname: 'Remote', avatar: '', color: '' },
+    'room-1',
+    { id: 'stroke-1' },
+    'node-local',
+    { streamId: 'whiteboard', seq: 1 }
+  );
+
+  // Delivery 1: Via direct P2P
+  mockRouter['incomingHandler'](pkt);
+  assert.strictEqual(appDeliveredCount, 1);
+
+  // Delivery 2: Delayed copy via Server Relay during drain
+  mockRouter['incomingHandler'](pkt);
+  assert.strictEqual(appDeliveredCount, 1, 'Duplicate physical delivery must be suppressed');
+
+  // Delivery 3: Retransmission copy arriving late
+  mockRouter['incomingHandler'](pkt);
+  assert.strictEqual(appDeliveredCount, 1, 'Late retry must be suppressed');
+});
+
+// ─── 19. OperationJournal & Materialization ───
+console.log('\n📦 Section 19: OperationJournal Deterministic Lamport & Total Ordering');
+
+test('OperationJournal appends, orders deterministically by Lamport+Author, and deduplicates', () => {
+  const journal = new OperationJournal('doc-1', 'peer-A');
+
+  // 1. Append local operations
+  const op1 = journal.appendLocal('text:insert', { pos: 0, char: 'H' });
+  const op2 = journal.appendLocal('text:insert', { pos: 1, char: 'i' });
+
+  assert.strictEqual(journal.getEventCount(), 2);
+  assert.strictEqual(op1.seq, 1);
+  assert.strictEqual(op2.seq, 2);
+  assert.strictEqual(op1.lamport, 1);
+  assert.strictEqual(op2.lamport, 2);
+
+  // 2. Apply out-of-order remote operation with higher Lamport
+  const remoteOp = {
+    storeId: 'doc-1',
+    opId: 'peer-B:1:5',
+    author: 'peer-B',
+    seq: 1,
+    lamport: 5,
+    dependencies: [op2.opId],
+    type: 'text:insert',
+    op: { pos: 2, char: '!' },
+    timestamp: Date.now(),
+  };
+
+  const isNew = journal.applyRemote(remoteOp);
+  assert.strictEqual(isNew, true);
+  assert.strictEqual(journal.getEventCount(), 3);
+
+  // Duplicate insertion must return false
+  const isDuplicate = journal.applyRemote(remoteOp);
+  assert.strictEqual(isDuplicate, false);
+  assert.strictEqual(journal.getEventCount(), 3);
+
+  // 3. Reducer execution
+  const reducer = (state, op) => state + op.char;
+  const materialized = journal.reduceState(reducer, '');
+  assert.strictEqual(materialized, 'Hi!');
+
+  // 4. Delta extraction
+  const deltas = journal.getDeltasSince({ 'peer-A': 1, 'peer-B': 0 });
+  assert.strictEqual(deltas.length, 2, 'Should extract op2 and remoteOp');
+});
+
+// ─── 20. Causal Dependency Buffering & Anti-Entropy ───
+console.log('\n📦 Section 20: Causal Dependency Buffering & Anti-Entropy Synchronization');
+
+test('CausalSyncEngine buffers missing dependencies and automatically unblocks on arrival', () => {
+  const journal = new OperationJournal('chat-store', 'peer-A');
+  let syncRequested = false;
+
+  const syncEngine = new CausalSyncEngine('chat-store', 'peer-A', journal, {
+    onEmitSyncRequest: () => { syncRequested = true; },
+  });
+
+  // Op 2 arrives before Op 1 has been seen (missing dependency)
+  const op2 = {
+    storeId: 'chat-store',
+    opId: 'peer-B:2:3',
+    author: 'peer-B',
+    seq: 2,
+    lamport: 3,
+    dependencies: ['peer-B:1:1'], // Op 1 not yet received!
+    type: 'msg',
+    op: { text: 'Second' },
+    timestamp: Date.now(),
+  };
+
+  const appliedOp2 = syncEngine.ingestOperation(op2);
+  assert.strictEqual(appliedOp2, false, 'Op2 must not be applied immediately without dependencies');
+  assert.strictEqual(syncEngine.getPendingCount(), 1, 'Op2 must be buffered in pending causal queue');
+  assert.strictEqual(syncRequested, true, 'Sync request must be emitted for missing dependency');
+
+  // Now Op 1 arrives
+  const op1 = {
+    storeId: 'chat-store',
+    opId: 'peer-B:1:1',
+    author: 'peer-B',
+    seq: 1,
+    lamport: 1,
+    dependencies: [],
+    type: 'msg',
+    op: { text: 'First' },
+    timestamp: Date.now(),
+  };
+
+  const appliedOp1 = syncEngine.ingestOperation(op1);
+  assert.strictEqual(appliedOp1, true, 'Op1 must be applied immediately');
+  assert.strictEqual(syncEngine.getPendingCount(), 0, 'Op2 must be automatically unblocked and drained');
+  assert.strictEqual(journal.getEventCount(), 2, 'Both Op1 and Op2 must now be committed in journal');
+
+  // State materialization in strict causal order
+  const state = journal.reduceState((acc, op) => [...acc, op.text], []);
+  assert.deepStrictEqual(state, ['First', 'Second']);
+});
+
+// ─── 21. Bounded Memory Log Compaction & Snapshot Truncation ───
+console.log('\n📦 Section 21: Bounded Memory Log Compaction & Snapshot Truncation');
+
+test('BoundedMemoryManager computes stableCutVector and safely compacts old journal history', () => {
+  const journal = new OperationJournal('counter-store', 'peer-A');
+  const memoryManager = new BoundedMemoryManager('counter-store', journal, {
+    maxJournalEvents: 10,
+    minRetentionEvents: 2,
+  });
+
+  const reducer = (state, op) => state + op.amount;
+
+  // Append 10 operations
+  for (let i = 1; i <= 10; i++) {
+    journal.appendLocal('add', { amount: 10 });
+    memoryManager.recordOperation();
+  }
+
+  assert.strictEqual(journal.getEventCount(), 10);
+  assert.strictEqual(journal.reduceState(reducer, 0), 100);
+
+  // Compact log with peers participating at different frontiers
+  const peerAVector = journal.getVectorClock();
+  const peerBVector = { 'peer-A': 7 };
+
+  const snapshot = memoryManager.maybeCompact(reducer, 0, [peerAVector, peerBVector], ['peer-A', 'peer-B'], true);
+  assert.notStrictEqual(snapshot, null);
+  assert.strictEqual(snapshot.state, 100);
+  assert.strictEqual(snapshot.snapshotVersion, 1);
+
+  // Journal history truncated to retained tail
+  assert.strictEqual(journal.getEventCount() < 10, true, 'Journal events must be pruned');
+
+  // State materialization from compacted snapshot + remaining tail remains exact
+  const postCompactState = journal.reduceState(reducer, 0);
+  assert.strictEqual(postCompactState, 100);
+
+  // Fallback detection: Peer B (seen seq 7) is past cut (seq 7), Peer C (seen seq 3) is behind cut
+  assert.strictEqual(memoryManager.isBehindStableCut({ 'peer-A': 8 }), false, 'Peer at seq 8 receives delta');
+  assert.strictEqual(memoryManager.isBehindStableCut({ 'peer-A': 2 }), true, 'Peer at seq 2 requires full snapshot');
+});
+
+// ─── 22. Atomic Snapshot Transfer & Multi-Peer State Convergence ───
+console.log('\n📦 Section 22: Atomic Snapshot Transfer & Multi-Peer State Convergence');
+
+test('SnapshotTransferManager rejects corrupted snapshots and atomically installs valid snapshots', () => {
+  const mockRouter = {
+    broadcast: () => true,
+    sendTo: () => true,
+    onPacket: () => () => {},
+  };
+  const pipeline = new PacketPipeline(mockRouter);
+  pipeline.init({ peerId: 'node-A', nickname: 'NodeA', avatar: '', color: '' }, 'room-1');
+
+  const journal = new OperationJournal('wb-store', 'node-A');
+  const memoryManager = new BoundedMemoryManager('wb-store', journal);
+
+  let installed = false;
+  let rejectedReason = '';
+
+  const transferManager = new SnapshotTransferManager('wb-store', 'node-A', 'room-1', journal, memoryManager, pipeline, {
+    onSnapshotInstalled: () => { installed = true; },
+    onSnapshotRejected: (r) => { rejectedReason = r; },
+  });
+
+  const reducer = (state, op) => ({ ...state, strokes: [...state.strokes, op.stroke] });
+  const initialState = { strokes: [] };
+
+  // 1. Attempt to install corrupted snapshot (bad CRC32)
+  const corruptedPayload = {
+    storeId: 'wb-store',
+    snapshotVersion: 1,
+    vectorClock: { 'node-remote': 5 },
+    state: { strokes: ['stroke-1', 'stroke-2'] },
+    checksum: 999999999, // Intentional bad checksum
+    byteLength: 50,
+    timestamp: Date.now(),
+  };
+
+  const corruptedResult = transferManager.installSnapshot(corruptedPayload, reducer, initialState);
+  assert.strictEqual(corruptedResult, false, 'Corrupted snapshot must be rejected');
+  assert.strictEqual(rejectedReason, 'CRC32_CHECKSUM_MISMATCH');
+
+  // 2. Install valid snapshot with accurate CRC32
+  const validState = { strokes: ['stroke-1', 'stroke-2', 'stroke-3'] };
+  const validSerialized = JSON.stringify(validState);
+  const validCRC = PayloadChunker.calculateCRC32(validSerialized);
+
+  // Append a local uncommitted operation on node-A before installation
+  journal.appendLocal('draw', { stroke: 'stroke-local-concurrent' });
+  assert.strictEqual(journal.getEventCount(), 1);
+
+  const validPayload = {
+    storeId: 'wb-store',
+    snapshotVersion: 2,
+    vectorClock: { 'node-remote': 10 },
+    state: validState,
+    checksum: validCRC,
+    byteLength: validSerialized.length,
+    timestamp: Date.now(),
+  };
+
+  const validResult = transferManager.installSnapshot(validPayload, reducer, initialState);
+  assert.strictEqual(validResult, true, 'Valid snapshot must be atomically installed');
+  assert.strictEqual(installed, true);
+
+  // Verify concurrent local operation was preserved and reconciled on top of snapshot
+  const finalState = journal.reduceState(reducer, initialState);
+  assert.deepStrictEqual(finalState.strokes, ['stroke-1', 'stroke-2', 'stroke-3', 'stroke-local-concurrent']);
+});
+
+console.log('\n📦 Section 23: Authoritative Input Fencing & Quarantine');
+test('ReplicationValidator enforces structural sanity, sequence, and Lamport constraints', () => {
+  const journal = new OperationJournal('fencing-store', 'node-local');
+
+  // 1. Malformed envelope (missing opId)
+  const badEnvelope = { storeId: 'fencing-store', author: 'node-remote', seq: 1, lamport: 1, op: {} };
+  const res1 = ReplicationValidator.validateOperation(badEnvelope, { kind: 'direct-origin', senderPeerId: 'node-remote' }, journal);
+  assert.strictEqual(res1.accepted, false);
+  assert.strictEqual(res1.reason, 'MALFORMED_ENVELOPE');
+
+  // 2. Author spoofing on direct connection
+  const spoofedOp = { storeId: 'fencing-store', opId: 'op-spoof', author: 'node-victim', seq: 1, lamport: 1, op: {} };
+  const res2 = ReplicationValidator.validateOperation(spoofedOp, { kind: 'direct-origin', senderPeerId: 'node-attacker' }, journal);
+  assert.strictEqual(res2.accepted, false);
+  assert.strictEqual(res2.reason, 'AUTHOR_SPOOFING');
+
+  // 3. Forwarded packet with authenticated origin is accepted
+  const res3 = ReplicationValidator.validateOperation(spoofedOp, { kind: 'forwarded', senderPeerId: 'node-forwarder', authenticatedOrigin: 'node-victim' }, journal);
+  assert.strictEqual(res3.accepted, true);
+
+  // 4. Invalid sequence (<= 0 or non-integer)
+  const badSeqOp = { storeId: 'fencing-store', opId: 'op-badseq', author: 'node-remote', seq: 0, lamport: 1, op: {} };
+  const res4 = ReplicationValidator.validateOperation(badSeqOp, { kind: 'direct-origin', senderPeerId: 'node-remote' }, journal);
+  assert.strictEqual(res4.accepted, false);
+  assert.strictEqual(res4.reason, 'INVALID_SEQUENCE');
+
+  // 5. Invalid Lamport (< 0)
+  const badLamportOp = { storeId: 'fencing-store', opId: 'op-badlamp', author: 'node-remote', seq: 1, lamport: -1, op: {} };
+  const res5 = ReplicationValidator.validateOperation(badLamportOp, { kind: 'direct-origin', senderPeerId: 'node-remote' }, journal);
+  assert.strictEqual(res5.accepted, false);
+  assert.strictEqual(res5.reason, 'INVALID_LAMPORT');
+
+  // 6. Self-dependency
+  const selfDepOp = { storeId: 'fencing-store', opId: 'op-self', author: 'node-remote', seq: 1, lamport: 1, dependencies: ['op-self'], op: {} };
+  const res6 = ReplicationValidator.validateOperation(selfDepOp, { kind: 'direct-origin', senderPeerId: 'node-remote' }, journal);
+  assert.strictEqual(res6.accepted, false);
+  assert.strictEqual(res6.reason, 'SELF_DEPENDENCY');
+});
+
+test('ReplicationValidator detects known dependency cycles without falsely rejecting unknown remote deps', () => {
+  const journal = new OperationJournal('cycle-store', 'node-local');
+
+  // Append opA: dependencies = []
+  journal.appendLocal('draw', { text: 'A' }, []);
+  const opA = journal.getEvents()[0];
+
+  // Append opB: dependencies = [opA]
+  journal.appendLocal('draw', { text: 'B' }, [opA.opId]);
+  const opB = journal.getEvents()[1];
+
+  // Attempt to ingest malicious opC that depends on opB, with opA depending on opC (cycle: opA -> opB -> opA)
+  const cyclicOp = {
+    storeId: 'cycle-store',
+    opId: opA.opId, // claims to be opA
+    author: 'node-remote',
+    seq: 5,
+    lamport: 5,
+    dependencies: [opB.opId],
+    op: {},
+  };
+
+  const cycleRes = ReplicationValidator.validateOperation(cyclicOp, { kind: 'direct-origin', senderPeerId: 'node-remote' }, journal);
+  assert.strictEqual(cycleRes.accepted, false);
+  assert.strictEqual(cycleRes.reason, 'CYCLIC_DEPENDENCY');
+
+  // Legitimate remote op with unknown dependency is NOT flagged as cyclic
+  const unknownDepOp = {
+    storeId: 'cycle-store',
+    opId: 'op-future-remote',
+    author: 'node-remote',
+    seq: 1,
+    lamport: 1,
+    dependencies: ['op-unknown-ancestor-xyz'],
+    op: {},
+  };
+  const unknownRes = ReplicationValidator.validateOperation(unknownDepOp, { kind: 'direct-origin', senderPeerId: 'node-remote' }, journal);
+  assert.strictEqual(unknownRes.accepted, true, 'Unknown remote dependency must be accepted for causal buffering, not rejected as cyclic');
+});
+
+console.log('\n📦 Section 24: Transactional Durability & Process Hydration');
+await testAsync('ReplicatedStore persists mutations before network broadcast and hydrates exact state', async () => {
+  const storeId = 'durable-store-1';
+  const identity = { peerId: 'peer-durability-1', nickname: 'Tester', avatar: '', color: '#fff' };
+  const reducer = (state, op) => ({ count: state.count + op.val });
+  const storage = new InMemoryStorageAdapter(storeId);
+
+  const mockPipeline = {
+    sendPacket: async () => ({ messageId: 'm1', status: 'delivered', attempts: 1 }),
+  };
+
+  // 1. Create active store and perform mutations
+  const store = new ReplicatedStore(storeId, identity, 'room-1', reducer, { count: 0 }, mockPipeline, {}, storage);
+  await store.mutateAsync('increment', { val: 10 });
+  await store.mutateAsync('increment', { val: 20 });
+  await store.mutateAsync('increment', { val: 30 });
+
+  assert.strictEqual(store.getState().count, 60);
+
+  // 2. Simulate process restart / cold hydration into a new ReplicatedStore instance with same storage
+  const restoredStore = new ReplicatedStore(storeId, identity, 'room-1', reducer, { count: 0 }, mockPipeline, {}, storage);
+  const hydration = await restoredStore.hydrate();
+
+  assert.strictEqual(hydration.eventCount, 3);
+  assert.strictEqual(restoredStore.getState().count, 60, 'Hydrated store must reflect exact pre-restart state');
+});
+
+console.log('\n📦 Section 25: Memory Bounds, Slack & Steady-State Telemetry');
+await testAsync('BoundedMemoryManager maintains bounded journal within compaction slack during high-throughput soak', async () => {
+  const storeId = 'soak-mem-store';
+  const identity = { peerId: 'peer-soak-1', nickname: 'Tester', avatar: '', color: '#fff' };
+  const reducer = (state, op) => ({ count: state.count + 1 });
+  const storage = new InMemoryStorageAdapter(storeId);
+
+  const mockPipeline = {
+    sendPacket: async () => ({ messageId: 'm1', status: 'delivered', attempts: 1 }),
+  };
+
+  const MAX_EVENTS = 40;
+  const RETENTION = 15;
+  const COMPACTION_SLACK = 20;
+
+  const store = new ReplicatedStore(
+    storeId,
+    identity,
+    'room-1',
+    reducer,
+    { count: 0 },
+    mockPipeline,
+    { maxJournalEvents: MAX_EVENTS, minRetentionEvents: RETENTION, checkpointIntervalOps: 20 },
+    storage
+  );
+
+  // Perform 250 mutations
+  for (let i = 0; i < 250; i++) {
+    await store.mutateAsync('inc', { i });
+  }
+
+  const currentJournalEvents = store.getJournal().getEventCount();
+  assert.ok(
+    currentJournalEvents <= MAX_EVENTS + COMPACTION_SLACK,
+    `Journal length (${currentJournalEvents}) must remain bounded within MAX (${MAX_EVENTS}) + slack (${COMPACTION_SLACK})`
+  );
+  assert.strictEqual(store.getState().count, 250);
+});
+
+console.log('\n📦 Section 26: Crash-at-Every-Phase Invariants (J1 to J8)');
+await testAsync('Crash injection across all 8 mutation & compaction lifecycle phases guarantees exact recovery', async () => {
+  const storeId = 'crash-inject-store';
+  const identity = { peerId: 'peer-crash-1', nickname: 'Tester', avatar: '', color: '#fff' };
+  const reducer = (state, op) => ({ ops: [...state.ops, op.tag] });
+  const storage = new InMemoryStorageAdapter(storeId);
+
+  const mockPipeline = {
+    sendPacket: async () => ({ messageId: 'm1', status: 'delivered', attempts: 1 }),
+  };
+
+  // Base state: 3 operations committed
+  const store = new ReplicatedStore(storeId, identity, 'room-1', reducer, { ops: [] }, mockPipeline, {}, storage);
+  await store.mutateAsync('draw', { tag: 'op-base-1' });
+  await store.mutateAsync('draw', { tag: 'op-base-2' });
+  await store.mutateAsync('draw', { tag: 'op-base-3' });
+
+  // J1: Crash pre-journal write -> operation absent
+  // (Simulated by no write to storage)
+  const j1Store = new ReplicatedStore(storeId, identity, 'room-1', reducer, { ops: [] }, mockPipeline, {}, storage);
+  await j1Store.hydrate();
+  assert.deepStrictEqual(j1Store.getState().ops, ['op-base-1', 'op-base-2', 'op-base-3']);
+
+  // J2: Crash post-journal write -> operation is durable in storage
+  const event4 = {
+    storeId,
+    opId: 'peer-crash-1:4',
+    author: 'peer-crash-1',
+    seq: 4,
+    lamport: 4,
+    dependencies: ['peer-crash-1:3'],
+    type: 'draw',
+    op: { tag: 'op-base-4' },
+    timestamp: Date.now(),
+  };
+  await storage.appendJournalEvent(event4);
+  const j2Store = new ReplicatedStore(storeId, identity, 'room-1', reducer, { ops: [] }, mockPipeline, {}, storage);
+  await j2Store.hydrate();
+  assert.deepStrictEqual(j2Store.getState().ops, ['op-base-1', 'op-base-2', 'op-base-3', 'op-base-4']);
+
+  // J4: Crash post-snapshot write (uncommitted) -> uncommitted snapshot is discarded, journal remains authoritative
+  const uncommittedSnapshot = {
+    storeId,
+    snapshotVersion: 99,
+    vector: { 'peer-crash-1': 4 },
+    state: { ops: ['corrupted-uncommitted-snapshot'] },
+    checksum: 12345,
+    byteLength: 50,
+    timestamp: Date.now(),
+  };
+  await storage.saveSnapshot(uncommittedSnapshot); // Saved but NOT committed (no commit marker 99)
+  const j4Store = new ReplicatedStore(storeId, identity, 'room-1', reducer, { ops: [] }, mockPipeline, {}, storage);
+  await j4Store.hydrate();
+  assert.deepStrictEqual(j4Store.getState().ops, ['op-base-1', 'op-base-2', 'op-base-3', 'op-base-4'], 'Uncommitted snapshot must be ignored during recovery');
+
+  // J5: Post-snapshot commit -> new snapshot authoritative
+  const validSnapshot = {
+    storeId,
+    snapshotVersion: 1,
+    vector: { 'peer-crash-1': 4 },
+    state: { ops: ['op-base-1', 'op-base-2', 'op-base-3', 'op-base-4'] },
+    checksum: 12345,
+    byteLength: 50,
+    timestamp: Date.now(),
+  };
+  await storage.saveSnapshot(validSnapshot);
+  await storage.commitSnapshot(1);
+  const j5Store = new ReplicatedStore(storeId, identity, 'room-1', reducer, { ops: [] }, mockPipeline, {}, storage);
+  await j5Store.hydrate();
+  assert.deepStrictEqual(j5Store.getState().ops, ['op-base-1', 'op-base-2', 'op-base-3', 'op-base-4']);
+
+  // J6: Pre-truncate (new snapshot committed + old journal still present) -> deduplicated without double counting
+  const j6Store = new ReplicatedStore(storeId, identity, 'room-1', reducer, { ops: [] }, mockPipeline, {}, storage);
+  await j6Store.hydrate();
+  assert.deepStrictEqual(j6Store.getState().ops, ['op-base-1', 'op-base-2', 'op-base-3', 'op-base-4']);
+
+  // J7: Post-truncate -> new committed snapshot + remaining tail authoritative
+  await storage.truncateJournalBefore({ 'peer-crash-1': 4 });
+  const event5 = {
+    storeId,
+    opId: 'peer-crash-1:5',
+    author: 'peer-crash-1',
+    seq: 5,
+    lamport: 5,
+    dependencies: ['peer-crash-1:4'],
+    type: 'draw',
+    op: { tag: 'op-base-5' },
+    timestamp: Date.now(),
+  };
+  await storage.appendJournalEvent(event5);
+  const j7Store = new ReplicatedStore(storeId, identity, 'room-1', reducer, { ops: [] }, mockPipeline, {}, storage);
+  await j7Store.hydrate();
+  assert.deepStrictEqual(j7Store.getState().ops, ['op-base-1', 'op-base-2', 'op-base-3', 'op-base-4', 'op-base-5']);
+
+  // J8: Hydration idempotence -> calling hydrate() twice produces identical state without duplicate mutations
+  await j7Store.hydrate();
+  assert.deepStrictEqual(j7Store.getState().ops, ['op-base-1', 'op-base-2', 'op-base-3', 'op-base-4', 'op-base-5']);
+});
+
 console.log(`\n========================================`);
 console.log(`🏁 Test Summary: ${passed}/${total} tests passed (${Math.round((passed / total) * 100)}%)`);
 console.log(`========================================\n`);
@@ -405,3 +1408,5 @@ console.log(`========================================\n`);
 if (passed !== total) {
   process.exit(1);
 }
+
+

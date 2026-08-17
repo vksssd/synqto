@@ -3,10 +3,12 @@
 import { NetworkPacket, PeerIdentity, createPacket } from './packet';
 import { SignalingService, RosterData, PromoteData, DemoteData } from './signaling.service';
 import { WebRTCService } from './webrtc.service';
-import { TopologyEpoch } from '../types/identifiers';
+import { TopologyEpoch, PeerId } from '../types/identifiers';
 import { TierCoordinator } from '../topology/tier-coordinator';
 import { LeaderMesh } from '../topology/leader-mesh';
 import { LeaderDigest, TopologyTier, TopologyLifecycleState } from '../topology/topology.types';
+import { TopologyView } from '../topology/topology-view';
+import { IRouteResolver } from '../topology/route-resolver';
 
 export interface TopologyState {
   isLeader: boolean;
@@ -612,6 +614,82 @@ export class TopologyService {
     return () => {
       this.packetListeners.delete(handler);
     };
+  }
+
+  public getDirectConnectedPeerIds(): Set<PeerId> {
+    const direct = new Set<PeerId>();
+    this.allPeers.forEach((peerId) => {
+      if (this.webrtc.isConnected(peerId)) {
+        direct.add(peerId);
+      }
+    });
+    return direct;
+  }
+
+  public getActiveView(): TopologyView {
+    const state = this.tierCoordinator.getLifecycleState();
+    const isStable = state === 'STABLE_TIER1' || state === 'STABLE_TIER2' || state === 'STABLE_TIER3';
+    return {
+      roomId: this.currentRoomId,
+      tier: this.tierCoordinator.getCurrentTier(),
+      phase: isStable ? 'STABLE' : 'DRAINING',
+      epoch: this.topologyEpoch,
+      generation: 1,
+      membershipVersion: this.allPeers.size,
+      leaders: Array.from(this.backboneLeaders),
+      primaryLeader: this.assignedLeader || undefined,
+      secondaryLeader: this.assignedStandbyLeader || undefined,
+      relayAvailable: this.signaling.isServerConnected(),
+      timestamp: Date.now(),
+    };
+  }
+
+  public getRouteResolver(): IRouteResolver | null {
+    return this.leaderMesh?.routeResolver ?? null;
+  }
+
+  public sendP2PPacket(packet: NetworkPacket, targetPeerId?: PeerId): boolean {
+    if (targetPeerId) {
+      if (this.webrtc.isConnected(targetPeerId)) {
+        return this.webrtc.sendPacket(targetPeerId, packet);
+      }
+      return false;
+    }
+
+    // P2P Broadcast
+    const currentTier = this.tierCoordinator.getCurrentTier();
+    if (currentTier === 'TIER1_FULL_MESH') {
+      let anySent = false;
+      this.allPeers.forEach((peerId) => {
+        if (peerId !== this.myIdentity?.peerId && this.webrtc.isConnected(peerId)) {
+          this.webrtc.sendPacket(peerId, packet);
+          anySent = true;
+        }
+      });
+      return anySent;
+    }
+
+    if (currentTier === 'TIER2_MULTI_LEADER') {
+      if (this.isLeader) {
+        this.clusterPeers.forEach((peerId) => {
+          this.webrtc.sendPacket(peerId, packet);
+        });
+        this.backboneLeaders.forEach((leaderId) => {
+          this.webrtc.sendPacket(leaderId, packet);
+        });
+        return true;
+      } else {
+        if (this.assignedLeader && this.webrtc.isConnected(this.assignedLeader)) {
+          return this.webrtc.sendPacket(this.assignedLeader, packet);
+        }
+        if (this.assignedStandbyLeader && this.webrtc.isConnected(this.assignedStandbyLeader)) {
+          return this.webrtc.sendPacket(this.assignedStandbyLeader, packet);
+        }
+        return false;
+      }
+    }
+
+    return false;
   }
 
   public onStateChange(handler: (state: TopologyState) => void): () => void {

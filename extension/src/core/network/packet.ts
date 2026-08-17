@@ -24,6 +24,7 @@ export type PacketType =
   | 'stream:announce'
   | 'stream:stopped'
   | 'whiteboard:stroke'
+  | 'whiteboard:strokes_batch'
   | 'whiteboard:temp_stroke'
   | 'whiteboard:clear'
   | 'whiteboard:undo'
@@ -47,7 +48,18 @@ export type PacketType =
   | 'sync:response'
   | 'sync:digest'
   | 'sync:delta_request'
-  | 'sync:delta_response';
+  | 'sync:delta_response'
+  | 'topology:digest'
+  | 'relay:packet'
+  | 'transport:ack'
+  | 'transport:nack'
+  | 'transport:gap_repair'
+  | 'chunk:data'
+  | 'state:op'
+  | 'state:sync_request'
+  | 'state:sync_response'
+  | 'state:snapshot_request'
+  | 'state:snapshot_response';
 
 export type PacketPriority = 'CONTROL' | 'CHAT' | 'SYNC' | 'MEDIA' | 'BULK';
 
@@ -64,6 +76,88 @@ export interface PeerIdentity {
  */
 export function generatePacketId(roomId: string, sourcePeerId: string, seq: number): string {
   return `${roomId}:${sourcePeerId}:${seq}`;
+}
+
+export interface AckPayload {
+  ackId: string;
+  ackFor: string;
+  fromPeerId: string;
+  streamId?: string;
+  seq?: number;
+  timestamp: number;
+}
+
+export interface NackPayload {
+  nackId: string;
+  nackFor: string;
+  fromPeerId: string;
+  reason: 'BUFFER_OVERFLOW' | 'EPOCH_REJECTED' | 'UNSUPPORTED' | 'RATE_LIMITED';
+  streamId?: string;
+  seq?: number;
+}
+
+export interface GapRepairPayload {
+  streamId: string;
+  fromPeerId: string;
+  missingRangeStart: number;
+  missingRangeEnd: number;
+}
+
+export interface ChunkPayload {
+  transferId: string;
+  chunkIndex: number;
+  totalChunks: number;
+  data: string;
+  checksum: number;
+  originalType: PacketType;
+  byteLength: number;
+}
+
+// ─── P3 State Replication Protocol Wire Payloads ───
+
+export interface StateOpPayload<TOp = unknown> {
+  storeId: string;
+  opId: string; // ${author}:${seq}:${lamport}
+  author: string;
+  seq: number;
+  lamport: number;
+  dependencies: string[]; // Causal predecessor opIds
+  type: string;
+  op: TOp;
+  timestamp: number;
+  topologyEpoch?: number;
+}
+
+export interface StateSyncRequestPayload {
+  storeId: string;
+  requestingPeerId: string;
+  vectorClock: Record<string, number>;
+  lastKnownSnapshotVersion?: number;
+}
+
+export interface StateSyncResponsePayload<TOp = unknown> {
+  storeId: string;
+  targetPeerId: string;
+  missingEvents: StateOpPayload<TOp>[];
+  requiresSnapshot: boolean;
+  snapshotVersion?: number;
+  vectorClock: Record<string, number>;
+}
+
+export interface StateSnapshotRequestPayload {
+  storeId: string;
+  requestingPeerId: string;
+  currentVector: Record<string, number>;
+}
+
+export interface StateSnapshotPayload<TState = unknown> {
+  storeId: string;
+  snapshotVersion: number;
+  vectorClock: Record<string, number>;
+  state: TState;
+  checksum: number; // IEEE 802.3 CRC32
+  byteLength: number;
+  timestamp: number;
 }
 
 /**
@@ -93,7 +187,9 @@ export interface NetworkPacket {
   priority?: PacketPriority;
   /** Channel routing priority: 'control' for low-latency reliable, 'bulk' for large streams/blobs. */
   channelPriority?: 'control' | 'bulk';
-  /** Monotonically increasing sequence number from the originating peer. */
+  /** Logical stream ID for stream-scoped ordering (e.g. 'chat', 'whiteboard', 'code'). */
+  streamId?: string;
+  /** Monotonically increasing sequence number from the originating peer within stream. */
   seq?: number;
   /** Logical Lamport clock for deterministic causal ordering of application events. */
   lamportTime?: number;
@@ -114,6 +210,7 @@ export function createPacket(
   options?: {
     channelPriority?: 'control' | 'bulk';
     priority?: PacketPriority;
+    streamId?: string;
     seq?: number;
     lamportTime?: number;
     topologyEpoch?: number;
@@ -124,11 +221,12 @@ export function createPacket(
     type === 'whiteboard:page_sync' ||
     type === 'whiteboard:sync_response' ||
     type === 'chat:history:response' ||
-    type === 'sync:delta_response';
+    type === 'sync:delta_response' ||
+    type === 'chunk:data';
 
   const defaultPriority: PacketPriority =
     options?.priority ||
-    (type.startsWith('presence:') || type.startsWith('sync:')
+    (type.startsWith('presence:') || type.startsWith('sync:') || type.startsWith('transport:')
       ? 'CONTROL'
       : type.startsWith('chat:')
       ? 'CHAT'
@@ -136,8 +234,11 @@ export function createPacket(
       ? 'BULK'
       : 'SYNC');
 
-  const seq = options?.seq ?? Math.floor(Math.random() * 100000);
-  const id = options?.seq !== undefined ? generatePacketId(roomId, from.peerId, seq) : crypto.randomUUID();
+  const id = options?.seq !== undefined
+    ? generatePacketId(roomId, from.peerId, options.seq)
+    : typeof crypto !== 'undefined' && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `pkt-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
   return {
     id,
@@ -150,7 +251,8 @@ export function createPacket(
     ttl: DEFAULT_TTL,
     priority: defaultPriority,
     channelPriority: options?.channelPriority || (isBulk ? 'bulk' : 'control'),
-    seq,
+    streamId: options?.streamId,
+    seq: options?.seq,
     lamportTime: options?.lamportTime,
     topologyEpoch: options?.topologyEpoch ?? 1,
   };

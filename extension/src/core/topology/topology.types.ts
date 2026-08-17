@@ -65,11 +65,30 @@ export interface PeerAssignment {
   assignedAt: number;
 }
 
+export interface PeerRoute {
+  targetPeerId: PeerId;
+  leaderId: PeerId;
+  topologyEpoch: TopologyEpoch;
+  digestVersion: number;
+  updatedAt: number;
+}
+
+export type RouteType = 'DIRECT' | 'LEADER' | 'RELAY' | 'UNKNOWN';
+
+export interface ResolvedRoute {
+  type: RouteType;
+  nextHopPeerId?: PeerId;
+  targetPeerId: PeerId;
+  epoch: TopologyEpoch;
+}
+
 export interface LeaderDigest {
   roomId: RoomId;
   topologyEpoch: TopologyEpoch;
   leaderGeneration: number;
+  digestVersion: number;
   leaderPeerId: PeerId;
+  assignedClusterPeers: PeerId[];
   memberCount: number;
   vectorDigest: VectorClock;
   latestLamport: number;

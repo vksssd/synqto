@@ -74,6 +74,10 @@ export class SignalingService {
     return SignalingService.instance;
   }
 
+  public isServerConnected(): boolean {
+    return this.isConnected && this.ws !== null && this.ws.readyState === WebSocket.OPEN;
+  }
+
   public setServerUrl(url: string) {
     this.serverUrl = url;
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
@@ -350,14 +354,16 @@ export class SignalingService {
     });
   }
 
-  private sendRaw(msg: ServerMessage) {
+  private sendRaw(msg: ServerMessage): boolean {
     const raw = JSON.stringify(msg);
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(raw);
+      return true;
     } else {
       if (this.messageQueue.length < 100) {
         this.messageQueue.push({ raw, timestamp: Date.now() });
       }
+      return false;
     }
   }
 

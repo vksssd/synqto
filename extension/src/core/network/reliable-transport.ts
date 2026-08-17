@@ -1,7 +1,7 @@
-// ─── Reliable Transport Primitive with ACK/NACK & Exponential Retry ───
+// ─── Adaptive Reliable Transport (Jacobson/Karels RTO + Karn's Algorithm + Route Independence) ───
 
 import { MessageId, PeerId } from '../types/identifiers';
-import { NetworkEnvelope } from './envelope';
+import { NetworkPacket, AckPayload, NackPayload } from './packet';
 
 export interface DeliveryReceipt {
   messageId: MessageId;
@@ -11,14 +11,9 @@ export interface DeliveryReceipt {
   error?: string;
 }
 
-export interface TransportAckPayload {
-  messageId: MessageId;
-  status: 'ack' | 'nack';
-  reason?: string;
-}
-
 interface PendingMessage {
-  envelope: NetworkEnvelope;
+  packet: NetworkPacket;
+  targetPeerId?: PeerId;
   attempts: number;
   maxAttempts: number;
   initialSentAt: number;
@@ -33,9 +28,16 @@ export class ReliableTransport {
   private pending: Map<MessageId, PendingMessage> = new Map();
   private receivedMessageIds: Set<MessageId> = new Set();
   private messageHistoryOrder: MessageId[] = [];
-  private readonly MAX_HISTORY = 1000;
+  private readonly MAX_HISTORY = 3000;
 
-  private sendRawFn: ((envelope: NetworkEnvelope) => void) | null = null;
+  // Jacobson/Karels RTO Estimator State
+  private srtt: number = 500;       // Smoothed RTT (ms)
+  private rttvar: number = 250;     // RTT Variance (ms)
+  private rto: number = 1000;       // Retransmission Timeout (ms)
+  private readonly MIN_RTO = 250;
+  private readonly MAX_RTO = 10000;
+
+  private sendPacketFn: ((packet: NetworkPacket, targetPeerId?: PeerId) => boolean) | null = null;
 
   public static getInstance(): ReliableTransport {
     if (!ReliableTransport.instance) {
@@ -44,46 +46,39 @@ export class ReliableTransport {
     return ReliableTransport.instance;
   }
 
-  public bindSender(sender: (envelope: NetworkEnvelope) => void): void {
-    this.sendRawFn = sender;
+  public bindSender(sender: (packet: NetworkPacket, targetPeerId?: PeerId) => boolean): void {
+    this.sendPacketFn = sender;
   }
 
   /**
-   * Sends an envelope with reliability guarantees (ACK tracking + retry)
+   * Sends a logical packet with reliability guarantees (ACK tracking + adaptive retry).
+   * INVARIANT: Retransmissions preserve logical packet.id while re-evaluating physical routes dynamically.
    */
   public async sendReliable(
-    envelope: NetworkEnvelope,
-    maxAttempts = 4
+    packet: NetworkPacket,
+    targetPeerId?: PeerId,
+    maxAttempts = 6
   ): Promise<DeliveryReceipt> {
-    if (!this.sendRawFn) {
+    if (!this.sendPacketFn) {
       throw new Error('[ReliableTransport] No sender bound to ReliableTransport');
     }
 
-    // Ephemeral & bestEffort bypass ACK tracking
-    if (envelope.delivery === 'ephemeral' || envelope.delivery === 'bestEffort') {
-      this.sendRawFn(envelope);
-      return {
-        messageId: envelope.messageId,
-        status: 'delivered',
-        attempts: 1,
-        rttMs: 0,
-      };
-    }
-
     return new Promise<DeliveryReceipt>((resolve, reject) => {
+      const sentTime = typeof packet.timestamp === 'number' ? packet.timestamp : Date.now();
       const pendingItem: PendingMessage = {
-        envelope,
+        packet,
+        targetPeerId,
         attempts: 1,
         maxAttempts,
-        initialSentAt: Date.now(),
-        lastSentAt: Date.now(),
+        initialSentAt: sentTime,
+        lastSentAt: sentTime,
         timer: null,
         resolve,
         reject,
       };
 
-      this.pending.set(envelope.messageId, pendingItem);
-      this.sendRawFn!(envelope);
+      this.pending.set(packet.id, pendingItem);
+      this.sendPacketFn!(packet, targetPeerId);
       this.scheduleRetry(pendingItem);
     });
   }
@@ -91,56 +86,110 @@ export class ReliableTransport {
   private scheduleRetry(item: PendingMessage): void {
     if (item.timer) clearTimeout(item.timer);
 
-    // Exponential backoff with jitter: 400ms * (1.8 ^ attempts) + jitter
-    const delay = Math.floor(
-      Math.min(5000, 400 * Math.pow(1.8, item.attempts - 1)) + Math.random() * 200
+    // Exponential backoff: RTO * (1.8 ^ (attempts - 1)) + jitter
+    const backoffMultiplier = Math.pow(1.8, Math.max(0, item.attempts - 1));
+    const delay = Math.min(
+      this.MAX_RTO,
+      Math.round(this.rto * backoffMultiplier) + Math.floor(Math.random() * 150)
     );
 
     item.timer = setTimeout(() => {
-      if (!this.pending.has(item.envelope.messageId)) return;
+      if (!this.pending.has(item.packet.id)) return;
 
       if (item.attempts >= item.maxAttempts) {
-        this.pending.delete(item.envelope.messageId);
+        this.pending.delete(item.packet.id);
         item.resolve({
-          messageId: item.envelope.messageId,
+          messageId: item.packet.id,
           status: 'timeout',
           attempts: item.attempts,
-          error: `Delivery timed out after ${item.attempts} attempts`,
+          error: `Delivery timed out after ${item.attempts} attempts (last RTO: ${delay}ms)`,
         });
         return;
       }
 
       item.attempts += 1;
       item.lastSentAt = Date.now();
-      if (this.sendRawFn) {
-        this.sendRawFn(item.envelope);
+
+      // Retransmit using current dynamic route resolution
+      if (this.sendPacketFn) {
+        this.sendPacketFn(item.packet, item.targetPeerId);
       }
       this.scheduleRetry(item);
     }, delay);
   }
 
+  private onRetryFn: (() => void) | null = null;
+  private onAckFn: (() => void) | null = null;
+
+  public onRetry(fn: () => void): void {
+    this.onRetryFn = fn;
+  }
+
+  public onAck(fn: () => void): void {
+    this.onAckFn = fn;
+  }
+
   /**
-   * Processes incoming ACK from target peer
+   * Processes incoming ACK from remote peer.
+   * INVARIANT: Karn's algorithm — RTT samples are gathered ONLY from original transmissions (attempts === 1).
    */
-  public handleAck(ack: TransportAckPayload, fromPeerId: PeerId): void {
-    const item = this.pending.get(ack.messageId);
+  public handleAck(ack: AckPayload): void {
+    const item = this.pending.get(ack.ackFor);
     if (!item) return;
 
     if (item.timer) clearTimeout(item.timer);
-    this.pending.delete(ack.messageId);
+    this.pending.delete(ack.ackFor);
 
-    const rtt = Date.now() - item.initialSentAt;
+    const now = Date.now();
+    const rtt = Math.max(1, now - item.initialSentAt);
+
+    // Karn's Algorithm: Update RTO estimator ONLY if message was delivered on first attempt
+    if (item.attempts === 1) {
+      const delta = rtt - this.srtt;
+      this.srtt += 0.125 * delta;
+      this.rttvar += 0.25 * (Math.abs(delta) - this.rttvar);
+      this.rto = Math.min(this.MAX_RTO, Math.max(this.MIN_RTO, Math.round(this.srtt + 4 * this.rttvar)));
+    }
+
     item.resolve({
-      messageId: ack.messageId,
-      status: ack.status === 'ack' ? 'delivered' : 'rejected',
+      messageId: ack.ackFor,
+      status: 'delivered',
       attempts: item.attempts,
       rttMs: rtt,
-      error: ack.reason,
+    });
+
+    if (this.onAckFn) {
+      this.onAckFn();
+    }
+  }
+
+  /**
+   * Processes incoming NACK from remote peer.
+   */
+  public handleNack(nack: NackPayload): void {
+    const item = this.pending.get(nack.nackFor);
+    if (!item) return;
+
+    if (nack.reason === 'BUFFER_OVERFLOW' && item.attempts < item.maxAttempts) {
+      // Retryable NACK: reschedule with jittered backoff
+      this.scheduleRetry(item);
+      return;
+    }
+
+    // Terminal rejection
+    if (item.timer) clearTimeout(item.timer);
+    this.pending.delete(nack.nackFor);
+
+    item.resolve({
+      messageId: nack.nackFor,
+      status: 'rejected',
+      attempts: item.attempts,
+      error: `NACK: ${nack.reason}`,
     });
   }
 
   /**
-   * Checks if envelope is duplicate. If not, records it in LRU filter.
+   * Checks if packet is duplicate. If not, records it in sliding-window history.
    * Returns true if packet is NEW, false if duplicate.
    */
   public filterDuplicate(messageId: MessageId): boolean {
@@ -157,6 +206,76 @@ export class ReliableTransport {
     }
 
     return true; // Fresh message
+  }
+
+  /**
+   * Evaluates if a packet requires an automated ACK.
+   * INVARIANT: Never ACK an ACK or ephemeral control message.
+   */
+  public isAckable(packet: NetworkPacket): boolean {
+    if (
+      packet.type === 'transport:ack' ||
+      packet.type === 'transport:nack' ||
+      packet.type === 'transport:gap_repair' ||
+      packet.type.startsWith('presence:') ||
+      packet.type.startsWith('canvas:')
+    ) {
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Advances simulated time for pending message retries (for simulation harnesses).
+   */
+  public step(simulatedNow: number): void {
+    const toRetry: PendingMessage[] = [];
+    const toTimeout: PendingMessage[] = [];
+
+    this.pending.forEach((item) => {
+      const backoffMultiplier = Math.pow(1.8, Math.max(0, item.attempts - 1));
+      const delay = Math.min(
+        this.MAX_RTO,
+        Math.round(this.rto * backoffMultiplier)
+      );
+
+      if (simulatedNow - item.lastSentAt >= delay) {
+        if (item.attempts >= item.maxAttempts) {
+          toTimeout.push(item);
+        } else {
+          toRetry.push(item);
+        }
+      }
+    });
+
+    toTimeout.forEach((item) => {
+      this.pending.delete(item.packet.id);
+      item.resolve({
+        messageId: item.packet.id,
+        status: 'timeout',
+        attempts: item.attempts,
+        error: `Delivery timed out after ${item.attempts} attempts`,
+      });
+    });
+
+    toRetry.forEach((item) => {
+      item.attempts += 1;
+      item.lastSentAt = simulatedNow;
+      if (this.onRetryFn) {
+        this.onRetryFn();
+      }
+      if (this.sendPacketFn) {
+        this.sendPacketFn(item.packet, item.targetPeerId);
+      }
+    });
+  }
+
+  public hasPending(): boolean {
+    return this.pending.size > 0;
+  }
+
+  public getEstimator(): { srtt: number; rttvar: number; rto: number } {
+    return { srtt: Math.round(this.srtt), rttvar: Math.round(this.rttvar), rto: this.rto };
   }
 
   public clear(): void {

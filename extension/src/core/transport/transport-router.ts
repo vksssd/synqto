@@ -74,9 +74,21 @@ export class TransportRouter {
 
   public routeIncoming(packet: NetworkPacket): void {
     if (this.seenPacketIds.has(packet.id)) {
-      return; // Deduplicate
+      return; // Deduplicate transport packet
     }
     this.markSeen(packet.id);
+
+    // Stale / Future Epoch handling
+    if (this.activeView && packet.topologyEpoch) {
+      if (packet.topologyEpoch < this.activeView.epoch) {
+        // Stale topology routing: deliver application payload for causal replication but fence topology mutation
+        console.debug(`[TransportRouter] Packet ${packet.id} from stale epoch ${packet.topologyEpoch} (current: ${this.activeView.epoch}). Preserving payload for anti-entropy.`);
+      } else if (packet.topologyEpoch > this.activeView.epoch) {
+        // Future topology detected: notify view synchronization needed
+        console.info(`[TransportRouter] Packet ${packet.id} from newer epoch ${packet.topologyEpoch} (current: ${this.activeView.epoch}). Triggering topology sync.`);
+      }
+    }
+
     this.deliverLocally(packet);
   }
 

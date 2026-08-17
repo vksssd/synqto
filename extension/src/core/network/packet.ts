@@ -49,6 +49,8 @@ export type PacketType =
   | 'sync:delta_request'
   | 'sync:delta_response';
 
+export type PacketPriority = 'CONTROL' | 'CHAT' | 'SYNC' | 'MEDIA' | 'BULK';
+
 /** Identity information attached to every packet. */
 export interface PeerIdentity {
   peerId: string;
@@ -58,14 +60,20 @@ export interface PeerIdentity {
 }
 
 /**
- * NetworkPacket is the universal wire format for all P2P communication.
+ * Deterministic packet identifier formatting: roomId:sourcePeerId:seq
+ */
+export function generatePacketId(roomId: string, sourcePeerId: string, seq: number): string {
+  return `${roomId}:${sourcePeerId}:${seq}`;
+}
+
+/**
+ * NetworkPacket is the universal wire format for all P2P and relay communication.
  *
- * TTL (Time To Live) prevents infinite relay loops in the leader backbone.
+ * TTL (Time To Live) prevents infinite relay loops in multi-tier topologies.
  * Each relay hop decrements TTL by 1. Packets with TTL ≤ 0 are dropped.
- * Default TTL = 3: peer → leader → backbone leader → destination peer.
  */
 export interface NetworkPacket {
-  /** Unique packet ID for deduplication. */
+  /** Unique packet ID for transport deduplication (roomId:sourcePeerId:seq or UUID). */
   id: string;
   /** Discriminated packet type. */
   type: PacketType;
@@ -81,12 +89,16 @@ export interface NetworkPacket {
   timestamp: number;
   /** Hop counter — decremented by each relay, dropped at 0. */
   ttl: number;
+  /** Traffic priority class */
+  priority?: PacketPriority;
   /** Channel routing priority: 'control' for low-latency reliable, 'bulk' for large streams/blobs. */
   channelPriority?: 'control' | 'bulk';
   /** Monotonically increasing sequence number from the originating peer. */
   seq?: number;
-  /** Logical Lamport clock for deterministic causal ordering. */
+  /** Logical Lamport clock for deterministic causal ordering of application events. */
   lamportTime?: number;
+  /** Topology epoch under which this packet was created. */
+  topologyEpoch?: number;
 }
 
 /** Default TTL for new packets. */
@@ -99,7 +111,13 @@ export function createPacket(
   roomId: string,
   payload: unknown,
   to?: string,
-  options?: { channelPriority?: 'control' | 'bulk'; seq?: number; lamportTime?: number }
+  options?: {
+    channelPriority?: 'control' | 'bulk';
+    priority?: PacketPriority;
+    seq?: number;
+    lamportTime?: number;
+    topologyEpoch?: number;
+  }
 ): NetworkPacket {
   const isBulk =
     options?.channelPriority === 'bulk' ||
@@ -108,8 +126,21 @@ export function createPacket(
     type === 'chat:history:response' ||
     type === 'sync:delta_response';
 
+  const defaultPriority: PacketPriority =
+    options?.priority ||
+    (type.startsWith('presence:') || type.startsWith('sync:')
+      ? 'CONTROL'
+      : type.startsWith('chat:')
+      ? 'CHAT'
+      : isBulk
+      ? 'BULK'
+      : 'SYNC');
+
+  const seq = options?.seq ?? Math.floor(Math.random() * 100000);
+  const id = options?.seq !== undefined ? generatePacketId(roomId, from.peerId, seq) : crypto.randomUUID();
+
   return {
-    id: crypto.randomUUID(),
+    id,
     type,
     from,
     to,
@@ -117,9 +148,11 @@ export function createPacket(
     payload,
     timestamp: Date.now(),
     ttl: DEFAULT_TTL,
+    priority: defaultPriority,
     channelPriority: options?.channelPriority || (isBulk ? 'bulk' : 'control'),
-    seq: options?.seq,
+    seq,
     lamportTime: options?.lamportTime,
+    topologyEpoch: options?.topologyEpoch ?? 1,
   };
 }
 

@@ -105,4 +105,14 @@ export class RelayTransport implements ITransport {
       lastSeen: this.lastSeen || Date.now(),
     };
   }
+
+  public getCapabilities(): import('./transport.types').TransportCapabilities {
+    return {
+      directPeer: false,
+      broadcast: true,
+      ordered: true,
+      reliable: true,
+      maxPayloadSize: 16 * 1024 * 1024, // 16MB
+    };
+  }
 }

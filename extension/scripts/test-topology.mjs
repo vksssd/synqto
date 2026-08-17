@@ -315,6 +315,89 @@ test('TopologySimulator handles network partition and healing', () => {
   sim.assertNoDuplicatePackets();
 });
 
+// ─── 9. Canonical NetworkPacket & EventId Separation ───
+console.log('\n📦 Section 9: Canonical NetworkPacket & EventId vs PacketId Separation');
+
+import { generatePacketId, createPacket } from '../src/core/network/packet.ts';
+
+test('PacketId deterministic formatting (roomId:peerId:seq)', () => {
+  const packetId = generatePacketId('room-42', 'peer-alpha', 7);
+  assert.strictEqual(packetId, 'room-42:peer-alpha:7');
+});
+
+test('PacketId and EventId/OpId are distinct and independent', () => {
+  // Event opId: author:seq:lamport
+  const opId = generateOperationId('peer-alpha', 3, 15);
+  assert.strictEqual(opId, 'peer-alpha:3:15');
+
+  // Transport packetId: roomId:peerId:seq
+  const packet = createPacket(
+    'chat:message',
+    { peerId: 'peer-alpha', nickname: 'Alpha', avatar: '', color: '' },
+    'room-42',
+    { opId, text: 'Hello' },
+    undefined,
+    { seq: 10, lamportTime: 15, topologyEpoch: 2 }
+  );
+
+  assert.strictEqual(packet.id, 'room-42:peer-alpha:10');
+  assert.strictEqual(packet.priority, 'CHAT');
+  assert.strictEqual(packet.topologyEpoch, 2);
+  assert.notStrictEqual(packet.id, opId, 'PacketId and EventId must remain distinct');
+});
+
+// ─── 10. TopologyProposalEngine & TransportCapabilities ───
+console.log('\n📦 Section 10: TopologyProposalEngine & Transport Capabilities');
+
+import { TopologyProposalEngine } from '../src/core/topology/topology-view.ts';
+import { RelayTransport } from '../src/core/transport/relay-transport.ts';
+
+test('TopologyProposal creates proposal with proposedEpoch = epoch + 1', () => {
+  const currentView = {
+    roomId: 'room-10',
+    tier: 'TIER1_FULL_MESH',
+    epoch: 3,
+    generation: 1,
+    membershipVersion: 4,
+    leaders: [],
+    relayAvailable: false,
+    timestamp: Date.now(),
+  };
+
+  const proposal = TopologyProposalEngine.createProposal(
+    currentView,
+    'TIER2_MULTI_LEADER',
+    ['L1', 'L2', 'L3'],
+    'L1'
+  );
+
+  assert.strictEqual(proposal.previousEpoch, 3);
+  assert.strictEqual(proposal.proposedEpoch, 4);
+  assert.deepStrictEqual(proposal.leaders, ['L1', 'L2', 'L3']);
+
+  // Validate with quorum 2 (proposal currently has 1 vote from proposer)
+  assert.strictEqual(TopologyProposalEngine.validateProposal(currentView, proposal, 2), false);
+
+  // Add 2nd vote
+  proposal.votes.push('L2');
+  assert.strictEqual(TopologyProposalEngine.validateProposal(currentView, proposal, 2), true);
+
+  // Commit proposal
+  const newView = TopologyProposalEngine.commitProposal(proposal);
+  assert.strictEqual(newView.epoch, 4);
+  assert.strictEqual(newView.tier, 'TIER2_MULTI_LEADER');
+  assert.strictEqual(newView.phase, 'STABLE');
+});
+
+test('RelayTransport exposes valid TransportCapabilities', () => {
+  const relay = new RelayTransport({ on: () => {}, getIsConnected: () => true, sendRelayPacket: () => true });
+  const caps = relay.getCapabilities();
+
+  assert.strictEqual(caps.broadcast, true);
+  assert.strictEqual(caps.reliable, true);
+  assert.strictEqual(caps.maxPayloadSize, 16 * 1024 * 1024);
+});
+
 console.log(`\n========================================`);
 console.log(`🏁 Test Summary: ${passed}/${total} tests passed (${Math.round((passed / total) * 100)}%)`);
 console.log(`========================================\n`);

@@ -25,6 +25,14 @@ export interface RelayEnvelope {
   packet: NetworkPacket;
 }
 
+export interface TransportCapabilities {
+  directPeer: boolean;
+  broadcast: boolean;
+  ordered: boolean;
+  reliable: boolean;
+  maxPayloadSize: number;
+}
+
 export interface ITransport {
   readonly name: string;
   connect(roomId: RoomId): Promise<void>;
@@ -34,4 +42,5 @@ export interface ITransport {
   sendTo(targetPeerId: PeerId, packet: NetworkPacket): boolean;
   onPacket(handler: (packet: NetworkPacket) => void): () => void;
   getHealth(): TransportHealth;
+  getCapabilities(): TransportCapabilities;
 }

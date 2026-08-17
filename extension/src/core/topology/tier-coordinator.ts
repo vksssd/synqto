@@ -7,9 +7,30 @@ import {
   TOPOLOGY_TIMERS,
 } from './topology.types';
 
+export type MigrationPhase =
+  | 'EVALUATING'
+  | 'PREPARING'
+  | 'CONNECTING'
+  | 'VERIFYING'
+  | 'COMMITTING'
+  | 'DRAINING'
+  | 'STABLE'
+  | 'ABORTED'
+  | 'ROLLBACK';
+
+export interface MigrationTransaction {
+  transitionId: string;
+  fromTier: TopologyTier;
+  toTier: TopologyTier;
+  phase: MigrationPhase;
+  startedAt: number;
+  timeoutMs: number;
+}
+
 export class TierCoordinator {
   private currentTier: TopologyTier = 'TIER1_FULL_MESH';
   private lifecycleState: TopologyLifecycleState = 'STABLE_TIER1';
+  private activeTransaction: MigrationTransaction | null = null;
   private peerCount = 1;
 
   private transitionTimer: any = null;
@@ -30,6 +51,10 @@ export class TierCoordinator {
 
   public getLifecycleState(): TopologyLifecycleState {
     return this.lifecycleState;
+  }
+
+  public getActiveTransaction(): MigrationTransaction | null {
+    return this.activeTransaction;
   }
 
   /**
@@ -108,6 +133,16 @@ export class TierCoordinator {
       return; // Already in progress
     }
 
+    const txId = `tx_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    this.activeTransaction = {
+      transitionId: txId,
+      fromTier: this.currentTier,
+      toTier: targetTier,
+      phase: 'EVALUATING',
+      startedAt: Date.now(),
+      timeoutMs: delayMs,
+    };
+
     this.setLifecycleState(evaluatingState);
     if (this.transitionTimer) clearTimeout(this.transitionTimer);
 
@@ -116,6 +151,10 @@ export class TierCoordinator {
       if (conditionCheck()) {
         const oldTier = this.currentTier;
         this.currentTier = targetTier;
+        if (this.activeTransaction) {
+          this.activeTransaction.phase = 'STABLE';
+        }
+
         this.setLifecycleState(
           targetTier === 'TIER1_FULL_MESH'
             ? 'STABLE_TIER1'
@@ -124,26 +163,46 @@ export class TierCoordinator {
             : 'STABLE_TIER3'
         );
 
-        console.info(`[TierCoordinator] Transitioned topology tier: ${oldTier} -> ${targetTier}`);
+        console.info(`[TierCoordinator] Committed topology migration (${txId}): ${oldTier} -> ${targetTier}`);
         if (this.onTierChangedFn) {
           this.onTierChangedFn(targetTier, oldTier);
         }
       } else {
-        this.cancelScheduledTransition(
-          this.currentTier === 'TIER1_FULL_MESH'
-            ? 'STABLE_TIER1'
-            : this.currentTier === 'TIER2_MULTI_LEADER'
-            ? 'STABLE_TIER2'
-            : 'STABLE_TIER3'
-        );
+        this.rollbackMigration(txId, 'Condition not sustained');
       }
     }, delayMs);
+  }
+
+  public rollbackMigration(transitionId: string, reason: string): void {
+    if (this.activeTransaction && this.activeTransaction.transitionId === transitionId) {
+      this.activeTransaction.phase = 'ROLLBACK';
+      console.warn(`[TierCoordinator] Rolled back migration (${transitionId}): ${reason}`);
+    }
+
+    this.cancelScheduledTransition(
+      this.currentTier === 'TIER1_FULL_MESH'
+        ? 'STABLE_TIER1'
+        : this.currentTier === 'TIER2_MULTI_LEADER'
+        ? 'STABLE_TIER2'
+        : 'STABLE_TIER3'
+    );
+  }
+
+  public commitMigration(transitionId: string): boolean {
+    if (this.activeTransaction && this.activeTransaction.transitionId === transitionId) {
+      this.activeTransaction.phase = 'COMMITTING';
+      return true;
+    }
+    return false;
   }
 
   private cancelScheduledTransition(stableState: TopologyLifecycleState): void {
     if (this.transitionTimer) {
       clearTimeout(this.transitionTimer);
       this.transitionTimer = null;
+    }
+    if (this.activeTransaction && this.activeTransaction.phase !== 'STABLE') {
+      this.activeTransaction.phase = 'ABORTED';
     }
     if (this.lifecycleState !== stableState) {
       this.setLifecycleState(stableState);
@@ -160,6 +219,7 @@ export class TierCoordinator {
   public reset(): void {
     if (this.transitionTimer) clearTimeout(this.transitionTimer);
     this.transitionTimer = null;
+    this.activeTransaction = null;
     this.currentTier = 'TIER1_FULL_MESH';
     this.lifecycleState = 'STABLE_TIER1';
     this.peerCount = 1;

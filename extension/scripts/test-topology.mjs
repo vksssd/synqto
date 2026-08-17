@@ -197,11 +197,14 @@ test('TierCoordinator starts evaluating on 5 peers and cancels on drop', () => {
   const coordinator = new TierCoordinator();
   coordinator.updatePeerCount(5);
   assert.strictEqual(coordinator.getLifecycleState(), 'TIER1_EVALUATING');
+  assert.ok(coordinator.getActiveTransaction());
+  assert.strictEqual(coordinator.getActiveTransaction().phase, 'EVALUATING');
 
   // Drops to 4 peers before evaluation finishes -> cancels
   coordinator.updatePeerCount(4);
   assert.strictEqual(coordinator.getLifecycleState(), 'STABLE_TIER1');
   assert.strictEqual(coordinator.getCurrentTier(), 'TIER1_FULL_MESH');
+  assert.strictEqual(coordinator.getActiveTransaction().phase, 'ABORTED');
 });
 
 // ─── 6. TopologyView & Monotonic Ordering ───

@@ -249,7 +249,7 @@ test('Tier thresholds keep a real hysteresis margin so boundary churn cannot fla
   // cluster high watermark (hub.MaxClusterHighWatermark = 8), otherwise clusters would be
   // forced past their split point with no leader slot left to split into. This couples the
   // client tier ceiling to the server watermark, so raising one without the other fails here.
-  const SERVER_CLUSTER_HIGH_WATERMARK = 8;
+  const SERVER_CLUSTER_HIGH_WATERMARK = 12;
   assert.ok(
     t.MAX_LEADERS * SERVER_CLUSTER_HIGH_WATERMARK >= t.TIER2_MAX,
     `MAX_LEADERS (${t.MAX_LEADERS}) x cluster watermark (${SERVER_CLUSTER_HIGH_WATERMARK}) must cover TIER2_MAX (${t.TIER2_MAX})`

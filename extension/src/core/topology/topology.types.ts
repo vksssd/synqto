@@ -33,40 +33,59 @@ export type LeaderHealthStatus = 'HEALTHY' | 'SUSPECTED' | 'FAILED';
  * holds thousands of connections (see SERVER_AUDIT_AND_CAPACITY.md), but that says
  * nothing about how many RTCPeerConnections a browser can sustain inside one room.
  *
- * BOUNDARY VALUES ARE DELIBERATELY UNCHANGED pending P3.9 capacity validation. The
- * P3.8 server fixes removed the roster cliff and cut per-connection memory, which makes
- * it *reasonable to investigate* raising TIER1/TIER2, but the binding constraint for
- * those boundaries is client-side P2P viability (peer-connection count, CPU, WebRTC
- * establishment success rate) — none of which the server-side harness measures.
- * Raising them on server evidence alone would be changing the architecture on the
- * strength of the wrong measurement. P3.9 decides these numbers.
+ * SIZING — raised in P3.9 on the strength of the post-fix measurements, and shaped by the
+ * production target of a 512 MB / 0.1 vCPU instance:
  *
- * MARGINS: each tier's demote threshold sits below its promote threshold so a room
- * hovering at a boundary cannot oscillate. Tier migration renegotiates every
- * DataChannel in the room, so it must never be triggered by a single peer joining and
- * leaving repeatedly. The invariants these must satisfy are asserted in the test suite.
+ * TIER1 4 -> 8. Every peer holds N-1 RTCPeerConnections, so per-peer cost is O(N).
+ * Data-channel-only connections are far cheaper than media ones, and 8 keeps each peer at
+ * 7 connections — comfortably inside what a browser sustains. Raising TIER1 is also the
+ * single best lever for the constrained server: rooms that stay in full mesh never consult
+ * the server for topology at all beyond initial signaling.
+ *
+ * TIER2 19 -> 50. Post-fix the roster broadcast is O(N) and drops zero state messages
+ * through 500 peers/room, so the previous ceiling was set by a defect rather than by the
+ * architecture. 50 matches the measured safe band with margin.
+ *
+ * TIER3 remains the escape hatch: growth past TIER2 is absorbed by moving a room INTO
+ * relay mode, never by stretching TIER2 further.
+ *
+ * CPU CAVEAT (0.1 vCPU): the binding constraint on a Render free instance is CPU, not
+ * memory. Roster fan-out is O(N) work per membership change and is serialised on a tenth
+ * of a core, so a room's CHURN rate matters as much as its size. The wide hysteresis below
+ * exists partly for this reason — every avoided tier migration is a burst of renegotiation
+ * the server does not have the CPU budget to absorb.
+ *
+ * MARGINS: each tier's demote threshold sits well below its promote threshold so a room
+ * hovering at a boundary cannot oscillate. Tier migration renegotiates every DataChannel in
+ * the room, so it must never be triggered by a single peer joining and leaving repeatedly.
+ * The invariants these must satisfy are asserted in the test suite.
  */
 export const TOPOLOGY_THRESHOLDS = {
   // ── TIER 1: Full mesh ──
-  TIER1_MAX: 4,
-  TIER1_PROMOTE_AT: 5, // 5+ peers => leave full mesh
-  TIER1_DEMOTE_AT: 3,  // fall back only at <=3
+  TIER1_MAX: 8,
+  TIER1_PROMOTE_AT: 9, // 9+ peers => leave full mesh
+  TIER1_DEMOTE_AT: 6,  // fall back only at <=6, a 3-peer margin below promotion
 
   // ── TIER 2: Multi-leader clustered mesh ──
-  TIER2_MAX: 19,
-  TIER2_PROMOTE_AT: 20, // 20+ peers => server-assisted relay (TIER3)
-  TIER2_DEMOTE_AT: 15,  // fall back only at <=15
+  TIER2_MAX: 50,
+  TIER2_PROMOTE_AT: 51, // 51+ peers => server-assisted relay (TIER3)
+  TIER2_DEMOTE_AT: 38,  // fall back only at <=38, a 13-peer margin below promotion
 
   // ── Leader backbone ──
   // MIN_LEADERS is the Trinity quorum: 3 interconnected leaders keep a 2/3 majority
   // through a single leader loss, which a 2-leader setup cannot.
+  // MAX_LEADERS rises with TIER2: at a 12-peer cluster watermark a full 50-peer room needs
+  // ~5 clusters, and headroom above that avoids forcing oversized clusters during churn.
+  // It is not raised further because every leader adds a backbone edge to every other
+  // leader — leader-to-leader connections are O(L^2).
   MIN_LEADERS: 3,
-  MAX_LEADERS: 5,
+  MAX_LEADERS: 9,
 
   // Candidate must exceed the incumbent by this margin to displace a healthy leader.
-  // Leader churn invalidates routes for a whole cluster, so a marginally better
-  // candidate is not worth the disruption.
-  PROMOTION_SCORE_MARGIN: 10,
+  // Widened with the tier margins: leader churn invalidates routes for an entire cluster,
+  // which on 0.1 vCPU is an expensive burst, so a marginally better candidate is not worth
+  // the disruption.
+  PROMOTION_SCORE_MARGIN: 15,
 } as const;
 
 export const TOPOLOGY_TIMERS = {

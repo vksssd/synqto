@@ -294,6 +294,11 @@ export class SignalingService {
       case 'signal:ice':
         this.emit('signal:ice', { from: msg.from, candidate: msg.payload?.candidate });
         break;
+      case 'relay:packet':
+        if (msg.payload) {
+          this.emit('relay:packet', msg.payload);
+        }
+        break;
       case 'pong':
         if (this.pongTimeoutTimer) {
           clearTimeout(this.pongTimeoutTimer);
@@ -303,6 +308,16 @@ export class SignalingService {
       default:
         console.log('[SignalingService] Unhandled server message:', msg);
     }
+  }
+
+  public sendRelayPacket(packet: any): boolean {
+    return this.sendRaw({
+      type: 'relay:packet',
+      from: this.peerId,
+      to: packet.to,
+      roomId: this.currentRoomId,
+      payload: packet,
+    });
   }
 
   public sendOffer(targetPeerId: string, sdp: RTCSessionDescriptionInit) {

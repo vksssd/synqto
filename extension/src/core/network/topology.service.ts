@@ -368,6 +368,13 @@ export class TopologyService {
     this.signaling.on('signal:ice', async (data: { from: string; candidate: RTCIceCandidateInit }) => {
       await this.webrtc.handleIncomingIce(data.from, data.candidate);
     });
+
+    // 5. Tier 3 Server Relay messages
+    this.signaling.on('relay:packet', (packet: NetworkPacket) => {
+      if (packet && packet.from) {
+        this.routeIncomingPacket(packet.from.peerId, packet);
+      }
+    });
   }
 
   private setupWebRTCListeners() {
@@ -494,9 +501,21 @@ export class TopologyService {
     this.deliverLocally(packet);
 
     const currentTier = this.tierCoordinator.getCurrentTier();
+    const lifecycleState = this.tierCoordinator.getLifecycleState();
 
+    // 1. Tier 3 Server Relay Broadcast
+    if (currentTier === 'TIER3_SERVER_RELAY') {
+      this.signaling.sendRelayPacket(packet);
+      return;
+    }
+
+    // 2. Dual-Path Migration: If preparing or demoting Tier 3, send copy to server relay as fallback
+    if (lifecycleState === 'TIER3_PREPARING' || lifecycleState === 'TIER3_DEMOTING') {
+      this.signaling.sendRelayPacket(packet);
+    }
+
+    // 3. Tier 1 (Full Mesh): Direct broadcast to all connected peers
     if (currentTier === 'TIER1_FULL_MESH') {
-      // Tier 1 (Full Mesh): Direct broadcast to all connected peers
       this.allPeers.forEach((peerId) => {
         if (peerId !== this.myIdentity?.peerId && this.webrtc.isConnected(peerId)) {
           this.webrtc.sendPacket(peerId, packet);
@@ -505,6 +524,7 @@ export class TopologyService {
       return;
     }
 
+    // 4. Tier 2 (Multi-Leader Mesh)
     if (this.isLeader) {
       // Leader sends to all cluster members + all backbone leaders
       this.clusterPeers.forEach((peerId) => {
@@ -531,6 +551,15 @@ export class TopologyService {
   public sendPacket(targetPeerId: string, packet: NetworkPacket) {
     this.markPacketSeen(packet.id);
 
+    const currentTier = this.tierCoordinator.getCurrentTier();
+
+    // 1. Tier 3 Server Relay Directed Message
+    if (currentTier === 'TIER3_SERVER_RELAY') {
+      this.signaling.sendRelayPacket(packet);
+      return;
+    }
+
+    // 2. Direct WebRTC send if connection is alive
     if (this.webrtc.isConnected(targetPeerId)) {
       this.webrtc.sendPacket(targetPeerId, packet);
     } else if (this.isLeader) {

@@ -161,9 +161,10 @@ export class GamificationService {
           const stats = res[STORAGE_KEY_STATS] || res[LEGACY_STORAGE_KEY_STATS];
           if (stats) {
             this.stats = { ...this.stats, ...stats };
+            this.reconcileStreakOnLoad();
           } else {
             // Initialize mock past 30 days data so user has visual squares on day 1
-            this.initSampleHeatmap();
+            this.initEmptyStats();
           }
 
           const badges = res[STORAGE_KEY_BADGES] || res[LEGACY_STORAGE_KEY_BADGES];
@@ -172,42 +173,42 @@ export class GamificationService {
             this.badges = { ...this.getDefaultBadges(), ...loadedBadges };
           }
 
-          this.touchStreak();
+          // NOTE: touchStreak() is deliberately NOT called here. It used to run on every
+          // load, so merely opening the side panel counted as a day of activity and
+          // extended the streak. That made the streak a measure of "days the panel was
+          // opened" rather than days studied. It now advances only from real signals:
+          // recordProblemVisit, recordMessage and focus time.
           this.evaluateBadges();
           this.initialized = true;
           this.emitChange();
         }
       );
     } else {
-      this.initSampleHeatmap();
-      this.touchStreak();
+      this.initEmptyStats();
       this.evaluateBadges();
       this.initialized = true;
       this.emitChange();
     }
   }
 
-  private initSampleHeatmap(): void {
-    const today = new Date();
-    // Fill sample past 14 days with activity for visual satisfaction
-    for (let i = 14; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(today.getDate() - i);
-      const dateStr = this.getTodayDateString(d);
-      if (i % 2 === 0 || i < 3) {
-        this.stats.activityMap[dateStr] = {
-          date: dateStr,
-          count: Math.floor(Math.random() * 4) + 1,
-          problemsVisited: Math.floor(Math.random() * 3) + 1,
-          minutesSpent: (Math.floor(Math.random() * 3) + 1) * 20,
-          messagesSent: Math.floor(Math.random() * 6) + 1,
-        };
-      }
-    }
-    this.stats.currentStreak = 3;
-    this.stats.longestStreak = 5;
-    this.stats.totalProblemsSolved = 8;
-    this.stats.totalFocusMinutes = 180;
+  /**
+   * Starts a new user from a genuinely empty record.
+   *
+   * This previously fabricated ~15 days of randomised heatmap activity and seeded
+   * currentStreak = 3, longestStreak = 5, totalProblemsSolved = 8 and 180 focus minutes,
+   * "for visual satisfaction". That is not placeholder chrome — it is presented as the
+   * user's own study history, it persists to storage on the next save, and it immediately
+   * unlocks the streak_3 badge for doing nothing. A streak that can be obtained by
+   * installing the extension does not mean anything, which defeats the point of tracking
+   * it. New users now start at zero and earn the first square by actually studying.
+   */
+  private initEmptyStats(): void {
+    this.stats.activityMap = {};
+    this.stats.currentStreak = 0;
+    this.stats.longestStreak = 0;
+    this.stats.totalProblemsSolved = 0;
+    this.stats.totalFocusMinutes = 0;
+    this.stats.totalDaysActive = 0;
   }
 
   private saveToStorage(): void {
@@ -218,6 +219,35 @@ export class GamificationService {
         [STORAGE_KEY_BADGES]: this.badges,
         [LEGACY_STORAGE_KEY_BADGES]: this.badges,
       });
+    }
+  }
+
+  /**
+   * Expires a lapsed streak at load time.
+   *
+   * currentStreak was only ever recalculated inside touchStreak(), which runs on activity.
+   * So a user who kept a 7-day streak and then didn't study for a week would open the panel
+   * and still be told "7 day streak" — the number stayed frozen at its last value and only
+   * collapsed to 1 once they next visited a problem. The displayed streak was therefore
+   * wrong precisely when it mattered most, and it silently rewarded a streak that had
+   * already been broken.
+   *
+   * A streak survives only if the last active day was today or yesterday.
+   */
+  private reconcileStreakOnLoad(): void {
+    const last = this.stats.lastActiveDate;
+    if (!last) return;
+
+    const today = this.getTodayDateString();
+    const yesterday = this.getYesterdayDateString();
+
+    if (last === today || last === yesterday) return; // still alive
+
+    if (this.stats.currentStreak !== 0) {
+      this.stats.currentStreak = 0;
+      // longestStreak is a historical high-water mark and is deliberately preserved.
+      this.saveToStorage();
+      this.emitChange();
     }
   }
 
@@ -247,8 +277,9 @@ export class GamificationService {
       this.stats.currentStreak += 1;
       this.stats.longestStreak = Math.max(this.stats.longestStreak, this.stats.currentStreak);
       this.stats.totalDaysActive += 1;
-    } else if (this.stats.lastActiveDate !== today) {
-      // Missed a day — reset streak to 1
+    } else {
+      // Either a gap of 2+ days, or the streak was already expired to 0 at load.
+      // Today becomes day one of a fresh streak.
       this.stats.currentStreak = 1;
       this.stats.totalDaysActive += 1;
     }

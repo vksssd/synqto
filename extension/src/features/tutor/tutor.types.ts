@@ -59,4 +59,12 @@ export interface TutorStageState {
   broadcastType: BroadcastType;
   streamTitle?: string;
   activeStreams: ActiveStreamInfo[]; // All concurrent active streams in room
+  /**
+   * Most recent media/stage failure, surfaced to the user.
+   *
+   * Media errors were previously only console.debug'd, so a denied microphone, a failed
+   * camera, or accepting a guest onto an already-full stage all appeared to the user as
+   * "the button did nothing". Carrying it on state lets the stage UI explain itself.
+   */
+  lastMediaError?: string;
 }

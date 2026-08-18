@@ -97,6 +97,11 @@ export class TutorService {
     this.network.on<{ targetPeerId: string; accepted: boolean }>('stage:hand_response', (payload) => {
       this.handleIncomingHandResponse(payload);
     });
+
+    // 8. Hand withdrawn — keeps the tutor's queue from showing stale requests.
+    this.network.on<{ peerId: string }>('stage:hand_lower', (payload) => {
+      this.handleIncomingHandLower(payload);
+    });
   }
 
   private setupWebRTCListeners(): void {
@@ -527,12 +532,33 @@ export class TutorService {
 
   public lowerHand(currentRoomId: string): void {
     this.state.isMyHandRaised = false;
+
+    // Tell the tutor the hand went down. Previously this only cleared local state, so the
+    // request stayed in the tutor's queue forever — the tutor would keep seeing a raised
+    // hand from someone who had already withdrawn, and accepting them promoted a person
+    // who was no longer asking. currentRoomId was accepted as a parameter but unused,
+    // which is what made the omission easy to miss.
+    const myIdentity = this.identityService.getCachedIdentity();
+    if (myIdentity) {
+      this.network.broadcast('stage:hand_lower', { peerId: myIdentity.peerId });
+    }
+
     this.emitState();
   }
 
-  public acceptSpeaker(student: HandRaiseRequest, currentRoomId: string): void {
-    if (this.state.myRole !== 'tutor') return;
-    if (this.state.guestSpeakers.length >= 2) return;
+  /** Maximum simultaneous interactive guests on stage alongside the tutor. */
+  public static readonly MAX_GUEST_SPEAKERS = 2;
+
+  public acceptSpeaker(student: HandRaiseRequest, currentRoomId: string): boolean {
+    if (this.state.myRole !== 'tutor') return false;
+
+    // At capacity this used to `return` silently: the tutor clicked Accept, nothing
+    // happened, and no explanation appeared anywhere. Report it so the UI can say why.
+    if (this.state.guestSpeakers.length >= TutorService.MAX_GUEST_SPEAKERS) {
+      this.state.lastMediaError = `Stage is full — ${TutorService.MAX_GUEST_SPEAKERS} guests max. Remove one to add another.`;
+      this.emitState();
+      return false;
+    }
 
     const identity = {
       peerId: student.peerId,
@@ -549,8 +575,10 @@ export class TutorService {
       accepted: true,
     });
 
+    this.state.lastMediaError = undefined;
     this.broadcastStageState(currentRoomId);
     this.emitState();
+    return true;
   }
 
   public removeSpeaker(peerId: string, currentRoomId: string): void {
@@ -588,14 +616,107 @@ export class TutorService {
     this.emitState();
   }
 
+  /**
+   * Brings an accepted guest speaker onto the stage with microphone audio.
+   *
+   * Audio-first is deliberate: a guest is promoted mid-conversation, and silently opening
+   * their camera the instant a tutor accepts them would be a privacy surprise. Video is
+   * therefore opt-in via setSpeakerVideoEnabled() once they are already on stage.
+   */
   private async enableSpeakerAudio(): Promise<void> {
     if (!this.localStream && navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function') {
       try {
         this.localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
         this.webrtc.setLocalMediaStream(this.localStream);
+        this.state.isAudioLive = true;
+        this.emitState();
       } catch (e) {
         console.debug('[TutorService] Speaker mic track bypassed:', e);
+        this.state.lastMediaError = 'Microphone unavailable — check the site permission and try again.';
+        this.emitState();
       }
+    }
+  }
+
+  /**
+   * Turns a guest speaker's camera on or off while they are on stage.
+   *
+   * Previously a guest could only ever be a voice: enableSpeakerAudio requested
+   * { audio: true } and nothing else, so an accepted audience member had no way to appear
+   * on camera even though BroadcastType already modelled 'camera' and the stage state
+   * already tracked isVideoLive. This adds the missing half so a guest can join with
+   * camera + mic or mic only, which is what the two-guest stage was designed for.
+   *
+   * The video track is added to the SAME MediaStream the peer connections already carry,
+   * so no renegotiation dance is needed beyond what setLocalMediaStream performs.
+   */
+  public async setSpeakerVideoEnabled(enabled: boolean): Promise<{ ok: boolean; error?: string }> {
+    if (this.state.myRole !== 'speaker' && this.state.myRole !== 'tutor') {
+      return { ok: false, error: 'Only stage speakers can toggle camera' };
+    }
+
+    if (!enabled) {
+      const existing = this.localStream?.getVideoTracks() ?? [];
+      existing.forEach((t) => {
+        t.stop();
+        this.localStream?.removeTrack(t);
+      });
+      this.state.isVideoLive = false;
+      this.webrtc.setLocalMediaStream(this.localStream);
+      this.emitState();
+      return { ok: true };
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      return { ok: false, error: 'Camera not available in this context' };
+    }
+
+    try {
+      const camStream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 640 }, height: { ideal: 360 }, frameRate: { ideal: 24 } },
+      });
+      const track = camStream.getVideoTracks()[0];
+      if (!track) return { ok: false, error: 'No camera track produced' };
+
+      // Reuse the live stream so existing senders pick the track up in place.
+      if (!this.localStream) {
+        this.localStream = camStream;
+      } else {
+        this.localStream.getVideoTracks().forEach((t) => {
+          t.stop();
+          this.localStream?.removeTrack(t);
+        });
+        this.localStream.addTrack(track);
+      }
+
+      // A guest can stop sharing from the browser's own UI; keep our state honest.
+      track.addEventListener('ended', () => {
+        this.state.isVideoLive = false;
+        this.emitState();
+      });
+
+      this.webrtc.setLocalMediaStream(this.localStream);
+      this.state.isVideoLive = true;
+      this.state.lastMediaError = undefined;
+      this.emitState();
+      return { ok: true };
+    } catch (e: any) {
+      const denied = e?.name === 'NotAllowedError' || e?.name === 'SecurityError';
+      const msg = denied
+        ? 'Camera permission denied — grant access and try again.'
+        : 'Could not start the camera.';
+      this.state.lastMediaError = msg;
+      this.emitState();
+      return { ok: false, error: msg };
+    }
+  }
+
+  /** Removes a withdrawn request from the tutor's queue. */
+  private handleIncomingHandLower(payload: { peerId: string }): void {
+    if (!payload?.peerId) return;
+    if (this.state.handRaises.some((h) => h.peerId === payload.peerId)) {
+      this.state.handRaises = this.state.handRaises.filter((h) => h.peerId !== payload.peerId);
+      this.emitState();
     }
   }
 

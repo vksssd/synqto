@@ -63,9 +63,25 @@ export const StreakHeatmap: React.FC<StreakHeatmapProps> = ({ stats }) => {
           <span>Study Streak &amp; Activity</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: 'var(--accent-amber, #f59e0b)', fontWeight: 600 }}>
-            <Zap size={12} />
-            <span>{stats.currentStreak} Day Streak!</span>
+          {/* A zero streak is a real, common state now that new users start empty and a
+              lapsed streak expires on load. "0 Day Streak!" reads like a bug and celebrates
+              nothing, so the copy adapts rather than shouting a number that isn't there. */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              fontSize: '11px',
+              color: stats.currentStreak > 0 ? 'var(--accent-amber, #f59e0b)' : 'var(--text-muted)',
+              fontWeight: 600,
+            }}
+          >
+            <Zap size={12} aria-hidden={true} />
+            <span>
+              {stats.currentStreak > 0
+                ? `${stats.currentStreak} Day Streak!`
+                : 'Start a streak today'}
+            </span>
           </div>
           <div
             style={{

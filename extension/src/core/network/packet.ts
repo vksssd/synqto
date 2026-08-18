@@ -21,6 +21,7 @@ export type PacketType =
   | 'stage:state'
   | 'stage:hand_raise'
   | 'stage:hand_response'
+  | 'stage:hand_lower'
   | 'stream:announce'
   | 'stream:stopped'
   | 'whiteboard:stroke'

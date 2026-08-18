@@ -944,6 +944,28 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                 {isSpeaker ? '🎤 You are speaking on stage' : 'Audience View (Full Width)'}
               </div>
 
+              {/* An accepted guest joins with microphone only, by design — opening the
+                  camera automatically the moment a tutor accepts would be a privacy
+                  surprise. This is the opt-in, and it was previously missing entirely:
+                  a guest could only ever be a voice even though the stage models video. */}
+              {isSpeaker && (
+                <button
+                  type="button"
+                  className={`btn ${stageState.isVideoLive ? 'btn-secondary' : 'btn-ghost'} btn-sm`}
+                  style={{
+                    fontSize: '9.5px',
+                    padding: '2px 7px',
+                    color: stageState.isVideoLive ? '#10b981' : 'var(--text-secondary)',
+                  }}
+                  onClick={() => tutorService.setSpeakerVideoEnabled(!stageState.isVideoLive)}
+                  aria-pressed={!!stageState.isVideoLive}
+                  title={stageState.isVideoLive ? 'Turn your camera off' : 'Join with your camera as well as mic'}
+                >
+                  <Camera size={10} aria-hidden={true} />
+                  <span>{stageState.isVideoLive ? 'Camera On' : 'Turn On Camera'}</span>
+                </button>
+              )}
+
               {!isSpeaker && (
                 <button
                   type="button"
@@ -962,6 +984,25 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
             </div>
           )}
 
+          {/* Media and stage failures were previously console-only, so a denied mic, a
+              failed camera, or a full stage all looked like "the button did nothing". */}
+          {stageState.lastMediaError && (
+            <div
+              role="alert"
+              style={{
+                marginTop: '4px',
+                padding: '4px 7px',
+                borderRadius: 'var(--radius-sm)',
+                background: 'rgba(244, 63, 94, 0.14)',
+                border: '1px solid rgba(244, 63, 94, 0.3)',
+                color: '#fca5a5',
+                fontSize: '9.5px',
+              }}
+            >
+              {stageState.lastMediaError}
+            </div>
+          )}
+
           {/* Tutor Hand-Raise Approval Queue */}
           {isTutor && stageState.handRaises.length > 0 && (
             <div
@@ -975,7 +1016,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
               }}
             >
               <div style={{ fontSize: '9px', fontWeight: 600, color: '#f59e0b' }}>
-                Hand Raise Queue ({stageState.handRaises.length}):
+                Hand Raise Queue ({stageState.handRaises.length}) — stage {stageState.guestSpeakers.length}/2 full:
               </div>
               {stageState.handRaises.map((req) => (
                 <div

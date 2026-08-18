@@ -395,11 +395,10 @@ export class WhiteboardService {
     // 0. Automatic Catch-up sync on presence join in collaborative mode
     this.network.on('presence:join', () => {
       if (this.privacyMode === 'collaborative') {
-        const strokeCount = this.collabNotebook.pages.reduce((acc, p) => acc + p.strokes.length, 0);
-        if (strokeCount === 0) {
-          // Empty notebook, ask other peers in the room for snapshot
-          this.network.broadcast('whiteboard:sync_request', { timestamp: Date.now() });
-        }
+        // Always ask. This was gated on the local notebook being EMPTY, so anyone who had
+        // drawn even one stroke before joining never requested the room's history and sat
+        // on a permanently partial board.
+        this.network.broadcast('whiteboard:sync_request', { timestamp: Date.now() });
       }
     });
 
@@ -420,11 +419,31 @@ export class WhiteboardService {
     // 0b. Handle incoming full sync response from existing peer in room
     this.network.on<{ notebook: WhiteboardNotebook }>('whiteboard:sync_response', (payload) => {
       if (this.privacyMode !== 'collaborative' || !payload?.notebook?.pages) return;
-      const currentStrokes = this.collabNotebook.pages.reduce((acc, p) => acc + p.strokes.length, 0);
-      const incomingStrokes = payload.notebook.pages.reduce((acc, p) => acc + (p.strokes?.length || 0), 0);
+      // MERGE by stroke id rather than replacing the notebook wholesale.
+      //
+      // The old rule was "whichever side has more strokes wins", which silently discarded
+      // every local stroke whenever the remote happened to have more. Strokes are an
+      // append-only set with stable ids, so a union is both safe and order-independent —
+      // no peer can lose work by being the one who had drawn less.
+      let changed = false;
+      for (const incomingPage of payload.notebook.pages) {
+        const localPage = this.collabNotebook.pages.find((p) => p.id === incomingPage.id);
+        if (!localPage) {
+          this.collabNotebook.pages.push(incomingPage);
+          changed = true;
+          continue;
+        }
+        const seen = new Set(localPage.strokes.map((st) => st.id));
+        for (const st of incomingPage.strokes || []) {
+          if (!seen.has(st.id)) {
+            localPage.strokes.push(st);
+            seen.add(st.id);
+            changed = true;
+          }
+        }
+      }
 
-      if (incomingStrokes > currentStrokes || currentStrokes === 0) {
-        this.collabNotebook = payload.notebook;
+      if (changed) {
         this.saveCollabNotebook();
         this.notifyNotebookListeners();
         this.notifyListeners();
@@ -932,7 +951,23 @@ export class WhiteboardService {
       }
       return;
     }
-    const removed = page.strokes.pop();
+    // Undo removes only YOUR most recent stroke, not simply the last stroke on the page.
+    //
+    // This used to be page.strokes.pop(), which takes whatever was drawn last by anyone —
+    // so pressing Ctrl+Z while a friend was drawing deleted THEIR stroke, and the undo was
+    // then broadcast so it vanished for them too. Undo is a per-author operation in every
+    // collaborative editor, and strokes already carry peerId, so scope it properly.
+    const myPeerId = this.identityService.getCachedIdentity()?.peerId;
+    let removeIdx = -1;
+    for (let i = page.strokes.length - 1; i >= 0; i--) {
+      // In personal mode there is only one author, so fall back to the last stroke.
+      if (this.privacyMode === 'personal' || !myPeerId || page.strokes[i].peerId === myPeerId) {
+        removeIdx = i;
+        break;
+      }
+    }
+    if (removeIdx === -1) return; // nothing of ours left to undo
+    const removed = page.strokes.splice(removeIdx, 1)[0];
     if (removed) {
       page.redoStack.push(removed);
       if (this.privacyMode === 'personal') {

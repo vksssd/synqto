@@ -20,6 +20,18 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
   const [isStarting, setIsStarting] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isWatchingStream, setIsWatchingStream] = useState(true);
+  /**
+   * Whether the viewer DELIBERATELY left the stream.
+   *
+   * isWatchingStream alone was not enough: the stage state listener re-set it to true on
+   * every update where a stream was active, and stage state updates on any change at all
+   * (a hand raised, a guest added, a stream re-announced). So leaving the stream lasted
+   * only until the next unrelated event and then silently snapped back to watching. This
+   * records the viewer's intent so it survives those updates, and is cleared only when a
+   * genuinely new broadcast starts — which is a fair moment to re-offer.
+   */
+  const [hasLeftStream, setHasLeftStream] = useState(false);
+  const lastStreamKeyRef = useRef<string>('');
   const [showStartModal, setShowStartModal] = useState(false);
   const [streamTitleInput, setStreamTitleInput] = useState('');
   const [selectedBroadcastType, setSelectedBroadcastType] = useState<BroadcastType>('screen');
@@ -54,7 +66,20 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
   useEffect(() => {
     const unsubState = tutorService.onStateChange((state) => {
       setStageState(state);
-      if (state.myRole === 'tutor' || state.isActive || state.activeStreams.length > 0) {
+
+      // A different set of live broadcasts means a genuinely new stream to offer, so the
+      // previous "I left" decision no longer applies.
+      const streamKey = (state.activeStreams || []).map((x) => x.streamId).sort().join('|');
+      if (streamKey && streamKey !== lastStreamKeyRef.current) {
+        lastStreamKeyRef.current = streamKey;
+        setHasLeftStream(false);
+        setIsWatchingStream(true);
+        return;
+      }
+      if (!streamKey) lastStreamKeyRef.current = '';
+
+      // Never drag a viewer back in who chose to leave.
+      if (state.myRole === 'tutor') {
         setIsWatchingStream(true);
       }
     });
@@ -62,7 +87,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
     const unsubStream = tutorService.onRemoteStreamChange((stream, peerId) => {
       setRemoteStream(stream);
       setSelectedPeerId(peerId);
-      if (stream) {
+      if (stream && !hasLeftStream) {
         setIsWatchingStream(true);
       }
     });
@@ -497,23 +522,28 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                     </button>
                   )}
 
+                  {/* "Watch" was styled red (which reads as stop) and its counterpart said
+                      "Hide", which sounds like collapsing a panel rather than leaving the
+                      stream. Both now say what they do, in the matching colour. */}
                   {!isWatchingStream ? (
                     <button
                       type="button"
                       className="btn btn-primary btn-sm"
-                      onClick={() => setIsWatchingStream(true)}
-                      style={{ fontSize: '9.5px', padding: '2px 8px', background: '#ef4444' }}
+                      onClick={() => { setHasLeftStream(false); setIsWatchingStream(true); }}
+                      style={{ fontSize: '9.5px', padding: '2px 8px' }}
+                      aria-label="Join the live stream as audience"
                     >
-                      Watch 📺
+                      Join Stream 📺
                     </button>
                   ) : (
                     <button
                       type="button"
                       className="btn btn-ghost btn-sm"
-                      onClick={() => setIsWatchingStream(false)}
-                      style={{ fontSize: '9.5px', padding: '2px 6px', color: 'var(--text-muted)' }}
+                      onClick={() => { setHasLeftStream(true); setIsWatchingStream(false); }}
+                      style={{ fontSize: '9.5px', padding: '2px 6px', color: '#fca5a5' }}
+                      aria-label="Leave the live stream"
                     >
-                      Hide
+                      Leave Stream
                     </button>
                   )}
                 </>

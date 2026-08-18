@@ -103,6 +103,53 @@ export const TOPOLOGY_TIMERS = {
   MIGRATION_TIMEOUT_MS: 30_000,     // Grace period for dual-path migration
 } as const;
 
+/**
+ * TopologyPolicy constrains which topologies a room is ALLOWED to run, independently of
+ * how many peers are in it.
+ *
+ * WHY THIS EXISTS — TOPOLOGY_THRESHOLDS answers "when should an adaptive room change tier?";
+ * this answers "is this room adaptive at all?". They are different questions and conflating
+ * them is a latent bug: a CoFocus session is a 2-peer session today only because 2 is below
+ * TIER1_PROMOTE_AT, which is an incidental property of a tunable constant, not a guarantee.
+ * If TIER1_PROMOTE_AT were ever lowered, or a third peer reached one of these rooms, a
+ * matchmade session would silently escalate into a leader-backbone or server-relay topology
+ * it was explicitly designed never to use.
+ *
+ * The policy makes that structural instead: DIRECT_ONLY rooms never even EVALUATE a
+ * promotion, so no threshold change can promote them.
+ */
+export interface TopologyPolicy {
+  /** Tiers this room may occupy. A tier absent from this list is never evaluated for promotion. */
+  allowedTiers: TopologyTier[];
+  /** Whether the server may join the data path (TIER3). */
+  allowRelay: boolean;
+  /** Whether a leader backbone may be elected. False ⇒ LeaderMesh is not constructed at all. */
+  allowLeaderElection: boolean;
+}
+
+/**
+ * Default policy — every room type that existed before CoFocus (problem rooms, custom rooms,
+ * groups) uses this and behaves exactly as it always has.
+ */
+export const ADAPTIVE_POLICY: TopologyPolicy = {
+  allowedTiers: ['TIER1_FULL_MESH', 'TIER2_MULTI_LEADER', 'TIER3_SERVER_RELAY'],
+  allowRelay: true,
+  allowLeaderElection: true,
+};
+
+/**
+ * CoFocus policy — Watcher and Together sessions are deterministic two-peer sessions and
+ * must remain direct P2P. No leader election, no relay fallback, no tier migration.
+ *
+ * Invariant: session.mode ∈ {WATCHER, TOGETHER} ⇒ tier === 'TIER1_FULL_MESH', for the whole
+ * life of the session, regardless of peer count or threshold tuning.
+ */
+export const DIRECT_ONLY_POLICY: TopologyPolicy = {
+  allowedTiers: ['TIER1_FULL_MESH'],
+  allowRelay: false,
+  allowLeaderElection: false,
+};
+
 export interface LeaderScoreMetrics {
   uptimeMs: number;
   rttMs: number;

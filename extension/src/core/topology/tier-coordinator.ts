@@ -3,6 +3,8 @@
 import {
   TopologyTier,
   TopologyLifecycleState,
+  TopologyPolicy,
+  ADAPTIVE_POLICY,
   TOPOLOGY_THRESHOLDS,
   TOPOLOGY_TIMERS,
 } from './topology.types';
@@ -37,6 +39,24 @@ export class TierCoordinator {
   private onTierChangedFn: ((newTier: TopologyTier, oldTier: TopologyTier) => void) | null = null;
   private onStateChangedFn: ((newState: TopologyLifecycleState) => void) | null = null;
 
+  /**
+   * @param policy Which tiers this room may occupy. Defaults to ADAPTIVE_POLICY so every
+   * pre-existing call site keeps its current behaviour untouched. CoFocus sessions pass
+   * DIRECT_ONLY_POLICY, which makes promotion structurally unreachable rather than merely
+   * unlikely — see TopologyPolicy's docblock.
+   */
+  constructor(private readonly policy: TopologyPolicy = ADAPTIVE_POLICY) {}
+
+  /** Returns the policy governing this coordinator (diagnostics & assertions). */
+  public getPolicy(): TopologyPolicy {
+    return this.policy;
+  }
+
+  /** True if the policy permits occupying the given tier. */
+  private isTierAllowed(tier: TopologyTier): boolean {
+    return this.policy.allowedTiers.includes(tier);
+  }
+
   public onTierChanged(callback: (newTier: TopologyTier, oldTier: TopologyTier) => void): void {
     this.onTierChangedFn = callback;
   }
@@ -68,6 +88,14 @@ export class TierCoordinator {
   private evaluateTransitions(): void {
     switch (this.currentTier) {
       case 'TIER1_FULL_MESH':
+        // POLICY GATE: under DIRECT_ONLY the room may never leave full mesh, so promotion is
+        // not merely rejected later — it is never evaluated, and no threshold change can
+        // reach past this. Deliberately checked BEFORE the peer-count comparison so the
+        // guarantee does not depend on the value of TIER1_PROMOTE_AT.
+        if (!this.isTierAllowed('TIER2_MULTI_LEADER')) {
+          this.cancelScheduledTransition('STABLE_TIER1');
+          break;
+        }
         if (this.peerCount >= TOPOLOGY_THRESHOLDS.TIER1_PROMOTE_AT) {
           this.scheduleTransition(
             'TIER1_EVALUATING',
@@ -91,7 +119,13 @@ export class TierCoordinator {
             TOPOLOGY_TIMERS.DEMOTION_STABILITY_MS,
             () => this.peerCount <= TOPOLOGY_THRESHOLDS.TIER1_DEMOTE_AT
           );
-        } else if (this.peerCount >= TOPOLOGY_THRESHOLDS.TIER2_PROMOTE_AT) {
+        } else if (
+          // POLICY GATE: same reasoning as the TIER1 branch — a policy that disallows relay
+          // never evaluates the TIER2 -> TIER3 promotion at all.
+          this.isTierAllowed('TIER3_SERVER_RELAY') &&
+          this.policy.allowRelay &&
+          this.peerCount >= TOPOLOGY_THRESHOLDS.TIER2_PROMOTE_AT
+        ) {
           // Promote to Tier 3 (Relay) after 10s stability
           this.scheduleTransition(
             'TIER3_PREPARING',

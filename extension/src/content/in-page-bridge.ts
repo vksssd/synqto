@@ -55,6 +55,13 @@
     (document.head || document.documentElement).appendChild(styleEl);
   }
 
+  // Announce which page editor we hooked. The side panel uses this to say plainly whether
+  // collaborative typing will land in the page's real editor on this tab, instead of the
+  // user having to guess why nothing is syncing.
+  const announceAttached = (kind: 'monaco' | 'codemirror' | 'textarea') => {
+    window.postMessage({ source: 'SYNQTO_EDITOR_BRIDGE', type: 'EDITOR_ATTACHED', kind }, '*');
+  };
+
   // 2. Discover Monaco Editor (LeetCode, HackerRank modern UI)
   const hookMonaco = () => {
     const monaco = (window as any).monaco;
@@ -72,6 +79,7 @@
 
     if (monacoModelInstance) {
       activeEditorType = 'monaco';
+      announceAttached('monaco');
 
       // Listen for content changes in Monaco
       monacoModelInstance.onDidChangeContent(() => {
@@ -126,6 +134,7 @@
     if (cmEl && cmEl.CodeMirror) {
       codeMirrorInstance = cmEl.CodeMirror;
       activeEditorType = 'codemirror';
+      announceAttached('codemirror');
 
       codeMirrorInstance.on('change', (_cm: any, changeObj: any) => {
         if (isApplyingRemote || changeObj.origin === 'setValue') return;

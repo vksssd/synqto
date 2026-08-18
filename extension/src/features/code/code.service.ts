@@ -390,6 +390,20 @@ export class CodeService {
   /**
    * Updates code locally and broadcasts incremental delta across the WebRTC cluster
    */
+  /**
+   * Applies a local code change and propagates it everywhere.
+   *
+   * SOURCE OF TRUTH: the collaborative document is the editor already on the page
+   * (LeetCode's Monaco, Codeforces' textarea, and so on). The in-page bridge hooks that
+   * editor directly, so two people editing the same problem see each other's keystrokes in
+   * the real editor rather than in a parallel scratchpad.
+   *
+   * This previously broadcast to PEERS but never called broadcastToContentTabs, so a change
+   * originating in the side panel reached everyone else's page editor while never reaching
+   * the sender's own. The panel and the page then disagreed locally about the same document,
+   * with both presenting themselves as the shared code. Pushing to content tabs as well
+   * keeps a single document no matter where the edit came from.
+   */
   public updateCode(newCode: string, cursorLine?: number, cursorCol?: number): void {
     if (newCode === this.state.code) return;
 
@@ -410,6 +424,9 @@ export class CodeService {
       },
       { channelPriority: 'control' }
     );
+
+    // Mirror into this tab's real page editor so the panel can never diverge from the page.
+    this.broadcastToContentTabs({ type: 'CODE_SYNC_REMOTE', payload: this.state });
 
     this.emitState();
   }

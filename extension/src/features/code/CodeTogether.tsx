@@ -26,6 +26,9 @@ export const CodeTogether: React.FC<CodeTogetherProps> = ({ currentRoomId, isCom
   const [session, setSession] = useState<CodeSessionState>(codeService.getState());
   const [copied, setCopied] = useState(false);
   const [showConsole, setShowConsole] = useState(true);
+  // Whether THIS tab has a real page editor (Monaco / CodeMirror / textarea) attached.
+  // When it does, that editor is the collaboration surface and this panel is a mirror.
+  const [pageEditorAttached, setPageEditorAttached] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lineNumbersRef = useRef<HTMLDivElement>(null);
 
@@ -34,6 +37,27 @@ export const CodeTogether: React.FC<CodeTogetherProps> = ({ currentRoomId, isCom
       setSession(state);
     });
     return () => unsub();
+  }, []);
+
+  // Ask the active tab whether an editor is hooked. The in-page bridge attaches to the
+  // page's own editor, which is where collaborative typing actually happens.
+  useEffect(() => {
+    let cancelled = false;
+    const probe = () => {
+      if (typeof chrome === 'undefined' || !chrome.tabs?.query) return;
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        const id = tabs?.[0]?.id;
+        if (!id) return;
+        chrome.tabs.sendMessage(id, { type: 'CODE_EDITOR_PROBE' }, (resp) => {
+          // lastError is expected on tabs with no content script; treat as "not attached".
+          const err = chrome.runtime.lastError;
+          if (!cancelled) setPageEditorAttached(!err && !!resp?.attached);
+        });
+      });
+    };
+    probe();
+    const t = setInterval(probe, 4000);
+    return () => { cancelled = true; clearInterval(t); };
   }, []);
 
   const handleCodeChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -197,6 +221,33 @@ export const CodeTogether: React.FC<CodeTogetherProps> = ({ currentRoomId, isCom
               {line}
             </div>
           ))}
+        </div>
+
+        {/* The page's own editor is the collaboration surface. This panel is a mirror and a
+            fallback, not a rival document — editing here also writes back into the page
+            editor so the two can never disagree about the same code. */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '5px 8px',
+            fontSize: '10px',
+            borderBottom: '1px solid var(--border-subtle)',
+            background: pageEditorAttached ? 'rgba(16,185,129,0.10)' : 'rgba(255,255,255,0.03)',
+            color: pageEditorAttached ? '#6ee7b7' : 'var(--text-muted)',
+          }}
+        >
+          <span
+            className={pageEditorAttached ? 'status-dot pulse' : 'status-dot'}
+            style={{ background: pageEditorAttached ? '#10b981' : 'var(--text-dim)' }}
+            aria-hidden={true}
+          />
+          <span>
+            {pageEditorAttached
+              ? 'Synced with this page’s editor — type directly in the problem and your buddy sees it live.'
+              : 'No code editor detected on this tab. Open a problem page to code together in it, or use the box below.'}
+          </span>
         </div>
 
         {/* Textarea Code Input */}

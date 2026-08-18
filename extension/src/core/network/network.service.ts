@@ -2,6 +2,7 @@
 
 import { NetworkPacket, PacketType, PeerIdentity, createPacket } from './packet';
 import { TopologyService, TopologyState } from './topology.service';
+import { TopologyPolicy, ADAPTIVE_POLICY } from '../topology/topology.types';
 import { DeliveryReceipt } from './reliable-transport';
 import { TransportRouter } from '../transport/transport-router';
 import { PacketPipeline } from './packet-pipeline';
@@ -45,12 +46,21 @@ export class NetworkService {
     return NetworkService.instance;
   }
 
-  public init(identity: PeerIdentity, roomId: string) {
+  /**
+   * @param policy Topology constraints for this room. Omit for the adaptive default used by
+   * every pre-CoFocus room type (problem, custom, group). CoFocus rooms pass
+   * DIRECT_ONLY_POLICY, which pins the room to Tier 1 and forbids server-relay fallback.
+   */
+  public init(identity: PeerIdentity, roomId: string, policy: TopologyPolicy = ADAPTIVE_POLICY) {
     this.myIdentity = identity;
     this.currentRoomId = roomId;
 
+    // Relay permission must be applied BEFORE any packet can be sent, otherwise a race at
+    // join time could leak a CoFocus packet onto the server relay path.
+    this.transportRouter.setRelayAllowed(policy.allowRelay);
+
     // Initialize P2P topology network and bind authoritative route resolver
-    this.topology.init(identity, roomId);
+    this.topology.init(identity, roomId, policy);
     this.packetPipeline.init(identity, roomId);
 
     const resolver = this.topology.getRouteResolver();

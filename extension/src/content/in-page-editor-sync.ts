@@ -11,6 +11,8 @@ export interface RemotePeerCursor {
 
 export class InPageEditorSync {
   private isEnabled: boolean = true;
+  /** Which page editor the MAIN-world bridge hooked, if any. */
+  private attachedEditorKind: 'monaco' | 'codemirror' | 'textarea' | null = null;
   private showDock: boolean = false;
   private dockPosition: { top: number; right: number } = { top: 16, right: 90 };
   private isDragging: boolean = false;
@@ -144,6 +146,11 @@ export class InPageEditorSync {
 
       if (!this.isEnabled) return;
 
+      if (type === 'EDITOR_ATTACHED') {
+        this.attachedEditorKind = (event.data as any).kind ?? null;
+        return;
+      }
+
       if (type === 'LOCAL_CODE_CHANGED') {
         const { code, line, col, language } = payload;
         if (code !== this.lastSentCode) {
@@ -183,7 +190,14 @@ export class InPageEditorSync {
   private setupRuntimeListeners() {
     if (typeof chrome === 'undefined' || !chrome.runtime?.onMessage) return;
 
-    chrome.runtime.onMessage.addListener((message) => {
+    chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+      // Answer the panel's probe even when sync is disabled, so the panel can state
+      // accurately whether this tab has a real editor to collaborate in.
+      if (message?.type === 'CODE_EDITOR_PROBE') {
+        sendResponse({ attached: this.hasAttachedEditor(), enabled: this.isEnabled });
+        return true;
+      }
+
       if (!this.isEnabled) return;
 
       if (message.type === 'CODE_DELTA_REMOTE' || message.type === 'CODE_SYNC_REMOTE') {
@@ -222,6 +236,11 @@ export class InPageEditorSync {
         this.updateFloatingDock();
       }
     });
+  }
+
+  /** True when this tab has a real page editor to collaborate in. */
+  private hasAttachedEditor(): boolean {
+    return this.attachedEditorKind !== null;
   }
 
   private applyRemoteCodeToPage(code: string, language: string, senderNick: string, cursorLine: number, cursorCol: number) {

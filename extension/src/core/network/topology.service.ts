@@ -6,7 +6,13 @@ import { WebRTCService } from './webrtc.service';
 import { TopologyEpoch, PeerId } from '../types/identifiers';
 import { TierCoordinator } from '../topology/tier-coordinator';
 import { LeaderMesh } from '../topology/leader-mesh';
-import { LeaderDigest, TopologyTier, TopologyLifecycleState } from '../topology/topology.types';
+import {
+  LeaderDigest,
+  TopologyTier,
+  TopologyLifecycleState,
+  TopologyPolicy,
+  ADAPTIVE_POLICY,
+} from '../topology/topology.types';
 import { TopologyView } from '../topology/topology-view';
 import { IRouteResolver } from '../topology/route-resolver';
 
@@ -40,6 +46,8 @@ export class TopologyService {
   private backboneLeaders: Set<string> = new Set();
   private allPeers: Set<string> = new Set();
   private topologyEpoch: TopologyEpoch = 1;
+  /** Topology constraints for the currently-joined room. Set by init(). */
+  private activePolicy: TopologyPolicy = ADAPTIVE_POLICY;
 
   // Deduplication sliding window (max 1500 items)
   private seenPacketIds: Set<string> = new Set();
@@ -58,8 +66,21 @@ export class TopologyService {
   private constructor() {
     this.signaling = SignalingService.getInstance();
     this.webrtc = WebRTCService.getInstance();
-    this.tierCoordinator = new TierCoordinator();
+    // Constructed with the default (adaptive) policy; init() replaces it with the policy for
+    // the room actually being joined.
+    this.tierCoordinator = new TierCoordinator(ADAPTIVE_POLICY);
 
+    this.bindTierCoordinatorListeners();
+
+    this.setupSignalingListeners();
+    this.setupWebRTCListeners();
+  }
+
+  /**
+   * TierCoordinator is recreated per-room in init() (its policy is immutable), so its
+   * listeners are bound in one reusable place rather than only in the constructor.
+   */
+  private bindTierCoordinatorListeners() {
     this.tierCoordinator.onTierChanged((newTier, oldTier) => {
       this.topologyEpoch++;
       console.info(`[TopologyService] Tier transition: ${oldTier} -> ${newTier} (epoch ${this.topologyEpoch})`);
@@ -70,9 +91,6 @@ export class TopologyService {
     this.tierCoordinator.onStateChanged(() => {
       this.emitState();
     });
-
-    this.setupSignalingListeners();
-    this.setupWebRTCListeners();
   }
 
   public static getInstance(): TopologyService {
@@ -82,33 +100,57 @@ export class TopologyService {
     return TopologyService.instance;
   }
 
-  public init(identity: PeerIdentity, roomId: string) {
+  /** Topology policy governing the currently-joined room. */
+  public getPolicy(): TopologyPolicy {
+    return this.activePolicy;
+  }
+
+  /**
+   * @param policy Topology constraints for THIS room. Defaults to ADAPTIVE_POLICY, preserving
+   * the behaviour of every pre-CoFocus call site. CoFocus rooms pass DIRECT_ONLY_POLICY, which
+   * both forbids tier promotion and skips leader-mesh construction entirely.
+   */
+  public init(identity: PeerIdentity, roomId: string, policy: TopologyPolicy = ADAPTIVE_POLICY) {
     this.myIdentity = identity;
     this.currentRoomId = roomId;
+    this.activePolicy = policy;
     this.seenPacketIds.clear();
     this.packetIdOrder = [];
     this.retryAttempts.clear();
     this.clearAllRetryTimers();
+
+    // The coordinator's policy is immutable, so a room with a different policy gets a fresh
+    // coordinator rather than a mutated one. Rebind listeners to the new instance.
+    this.tierCoordinator = new TierCoordinator(policy);
+    this.bindTierCoordinatorListeners();
     this.tierCoordinator.reset();
 
-    this.leaderMesh = new LeaderMesh(
-      identity.peerId,
-      roomId,
-      () => ({ [identity.peerId]: this.topologyEpoch }),
-      () => Date.now()
-    );
-
-    this.leaderMesh.bindDigestBroadcast((digest: LeaderDigest) => {
-      this.broadcastPacket(
-        createPacket('topology:digest' as any, this.myIdentity!, this.currentRoomId, digest)
+    if (policy.allowLeaderElection) {
+      this.leaderMesh = new LeaderMesh(
+        identity.peerId,
+        roomId,
+        () => ({ [identity.peerId]: this.topologyEpoch }),
+        () => Date.now()
       );
-    });
 
-    this.leaderMesh.onLeaderFailed((failedPeerId) => {
-      this.topologyEpoch++;
-      console.warn(`[TopologyService] Leader ${failedPeerId} failed. Advancing epoch to ${this.topologyEpoch}`);
-      this.reconcileConnections();
-    });
+      this.leaderMesh.bindDigestBroadcast((digest: LeaderDigest) => {
+        this.broadcastPacket(
+          createPacket('topology:digest' as any, this.myIdentity!, this.currentRoomId, digest)
+        );
+      });
+
+      this.leaderMesh.onLeaderFailed((failedPeerId) => {
+        this.topologyEpoch++;
+        console.warn(`[TopologyService] Leader ${failedPeerId} failed. Advancing epoch to ${this.topologyEpoch}`);
+        this.reconcileConnections();
+      });
+    } else {
+      // DIRECT_ONLY: a deterministic 2-peer session has no backbone to elect. Not constructing
+      // LeaderMesh means no heartbeat timers, no digest broadcasts, and getRouteResolver()
+      // returns null — TransportRouter then routes purely direct, which is the intent.
+      this.leaderMesh = null;
+      console.info(`[TopologyService] Room ${roomId} initialised DIRECT_ONLY (no leader election, no relay)`);
+    }
 
     this.webrtc.setMyPeerId(identity.peerId);
 

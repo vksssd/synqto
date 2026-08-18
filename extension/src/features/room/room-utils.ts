@@ -11,6 +11,14 @@ export interface GroupDetails {
   topicTag?: string;
 }
 
+/** CoFocus session metadata attached to a matchmade or invited room. */
+export interface CoFocusDetails {
+  /** Preferred duration in seconds — metadata only, never a matching constraint. */
+  sessionLengthSec?: number;
+  subjectTag?: string;
+  partnerPeerId?: string;
+}
+
 export interface RoomContext {
   roomId: string;
   platform: string;
@@ -19,6 +27,17 @@ export interface RoomContext {
   canonicalUrl: string;
   isGroup?: boolean;
   groupDetails?: GroupDetails;
+  /**
+   * Set only for CoFocus sessions. Undefined for every pre-existing room type (problem,
+   * custom, group), which therefore behave exactly as before.
+   *
+   * 'WATCHER'  — camera-only body doubling; the UI must not mount chat/voice/whiteboard.
+   * 'TOGETHER' — full collaboration; reuses the standard room surface unchanged.
+   *
+   * Both run under DIRECT_ONLY_POLICY (Tier 1 direct P2P, no relay, no leader election).
+   */
+  cofocusMode?: 'WATCHER' | 'TOGETHER';
+  cofocusDetails?: CoFocusDetails;
 }
 
 /**

@@ -12,7 +12,7 @@
 
 import assert from 'assert';
 import { LinkStateRouter } from '../src/core/topology/link-state.ts';
-import { planMesh, planIsSymmetric } from '../src/core/topology/mesh-plan.ts';
+import { planMesh, planIsSymmetric, planFallbackTargets } from '../src/core/topology/mesh-plan.ts';
 import { LinkAffinity, isInteractiveType } from '../src/core/topology/link-affinity.ts';
 import { DEFAULT_TTL } from '../src/core/network/packet.ts';
 import { extractFingerprint } from '../src/core/network/peer-identity-store.ts';
@@ -943,6 +943,123 @@ scenario('fingerprint extraction is safe on malformed or absent SDP', () => {
   }
   assert.strictEqual(extractFingerprint(undefined), undefined);
   assert.strictEqual(extractFingerprint('v=0\r\na=setup:actpass'), undefined);
+});
+
+
+console.log('\n── Connectivity fallback: sparsity must not strand peers ──');
+
+scenario('an isolated peer escalates to trying everyone', () => {
+  // The regression case. Under a full mesh this peer had N-1 chances to find someone it
+  // could reach; the plan gives it 6, and connection failure is peer-correlated (two hosts
+  // behind symmetric NAT cannot connect at all), so those 6 are not independent draws.
+  const peers = Array.from({ length: 24 }, (_, i) => `p${String(i).padStart(3, '0')}`);
+  const targets = planFallbackTargets('p000', peers, { connected: [], reachable: [] });
+
+  assert.strictEqual(targets.length, 23, 'an isolated peer was not given every option');
+  assert.ok(!targets.includes('p000'), 'proposed connecting to itself');
+});
+
+scenario('a healthy peer proposes no extra links', () => {
+  // The fallback must be inert when the plan is working, or it silently rebuilds the full
+  // mesh and undoes the entire point of sparsity.
+  const peers = Array.from({ length: 24 }, (_, i) => `p${String(i).padStart(3, '0')}`);
+  const plan = planMesh('p000', peers);
+  const targets = planFallbackTargets('p000', peers, {
+    connected: [...plan.desired],
+    reachable: peers.filter((p) => p !== 'p000'),
+  });
+
+  assert.deepStrictEqual(targets, [], 'widened a mesh that was already delivering');
+});
+
+scenario('a partitioned peer reaches only toward the unreachable side', () => {
+  const peers = Array.from({ length: 24 }, (_, i) => `p${String(i).padStart(3, '0')}`);
+  const plan = planMesh('p000', peers);
+  // Half the room is unreachable through the mesh.
+  const reachable = peers.slice(0, 12).filter((p) => p !== 'p000');
+  const targets = planFallbackTargets('p000', peers, {
+    connected: [...plan.desired].filter((p) => reachable.includes(p)),
+    reachable,
+  });
+
+  assert.ok(targets.length > 0, 'a partitioned peer proposed no repair');
+  for (const t of targets) {
+    assert.ok(!reachable.includes(t), `proposed ${t}, which was already reachable`);
+    assert.ok(!plan.desired.has(t), `proposed ${t}, which the plan already covers`);
+  }
+});
+
+scenario('fallback is bounded so a split room cannot rebuild the full mesh', () => {
+  // A room splitting down the middle is the worst moment to trigger an O(N^2) dial storm.
+  const peers = Array.from({ length: 40 }, (_, i) => `p${String(i).padStart(3, '0')}`);
+  const plan = planMesh('p000', peers);
+  const reachable = peers.slice(0, 5).filter((p) => p !== 'p000');
+  const targets = planFallbackTargets('p000', peers, {
+    connected: [...plan.desired].filter((p) => reachable.includes(p)),
+    reachable,
+  });
+
+  assert.ok(targets.length <= 4, `fallback proposed ${targets.length} links, defeating the bound`);
+});
+
+scenario('escalation actually rescues a peer whose whole plan is unreachable', () => {
+  // End to end: a peer behind symmetric NAT whose six planned neighbours are all also
+  // behind symmetric NAT. Under the plan alone it is stranded; the fallback must surface at
+  // least one peer it can actually reach.
+  const peers = Array.from({ length: 24 }, (_, i) => `p${String(i).padStart(3, '0')}`);
+  const me = 'p000';
+  const plan = planMesh(me, peers);
+
+  // Everyone in my plan is unreachable; a few others are fine.
+  const canReach = new Set(peers.filter((p) => p !== me && !plan.desired.has(p)));
+  const targets = planFallbackTargets(me, peers, { connected: [], reachable: [] });
+  const usable = targets.filter((t) => canReach.has(t));
+
+  assert.ok(usable.length > 0, 'fallback surfaced no peer the stranded node could reach');
+});
+
+
+console.log('\n── Derived-state caching ──');
+
+scenario('the broadcast tree is cached but never served stale', () => {
+  // getBroadcastChildren is on the per-packet forwarding path, so it is cached — 62us
+  // uncached against 0.13us cached. A stale tree would be far worse than a slow one:
+  // packets would be forwarded to the wrong children and peers would silently stop
+  // receiving broadcasts, which is indistinguishable from the app being broken.
+  let clock = 1_000_000;
+  const a = new LinkStateRouter('a', { now: () => clock });
+  const mk = (origin, seq, nbs) => ({ origin, seq, neighbours: nbs, issuedAt: clock, ttl: 8 });
+
+  a.updateLocalNeighbours([{ peerId: 'b', costMs: 10 }]);
+  a.handleLSA(mk('b', 1, [{ peerId: 'a', costMs: 10 }, { peerId: 'c', costMs: 10 }]), 'b');
+  a.handleLSA(mk('c', 1, [{ peerId: 'b', costMs: 10 }]), 'b');
+
+  a.getBroadcastChildren('c');
+  assert.ok(a['broadcastTreeCache'].size > 0, 'tree was not cached at all');
+
+  clock += 5000;
+  a.handleLSA(mk('c', 2, [{ peerId: 'b', costMs: 10 }, { peerId: 'a', costMs: 10 }]), 'c');
+  assert.strictEqual(
+    a['broadcastTreeCache'].size,
+    0,
+    'a topology change left a cached broadcast tree in place'
+  );
+});
+
+scenario('the adjacency cache is dropped when an LSA ages out', () => {
+  // Age-out mutates the LSDB without going through handleLSA, so it is a separate path that
+  // must invalidate too — otherwise routes keep pointing at a departed peer.
+  let clock = 1_000_000;
+  const a = new LinkStateRouter('a', { now: () => clock, maxLsaAgeMs: 10_000 });
+  const mk = (origin, seq, nbs) => ({ origin, seq, neighbours: nbs, issuedAt: clock, ttl: 8 });
+
+  a.updateLocalNeighbours([{ peerId: 'b', costMs: 10 }]);
+  a.handleLSA(mk('b', 1, [{ peerId: 'a', costMs: 10 }]), 'b');
+  assert.strictEqual(a.nextHop('b'), 'b', 'precondition: b is routable');
+
+  clock += 60_000;
+  a.ageOut();
+  assert.strictEqual(a.nextHop('b'), null, 'stale route survived age-out — cache not invalidated');
 });
 
 console.log(`\n========================================`);

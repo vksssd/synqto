@@ -7,6 +7,8 @@ import { GroupService } from '@/features/group/group.service';
 import { DiscoveryService, OnlinePeer } from '@/features/discovery/discovery.service';
 import { ChatService } from '@/features/chat/chat.service';
 import { TopologyService } from '@/core/network/topology.service';
+import { WhiteboardService } from '@/features/whiteboard/whiteboard.service';
+import { NetworkService } from '@/core/network/network.service';
 import { SignalingService } from '@/core/network/signaling.service';
 import { GamificationService } from '@/features/gamification/gamification.service';
 import { detectResource } from '@/content/resource-detector';
@@ -23,9 +25,12 @@ import { ThemeService } from '@/features/settings/theme.service';
 import { FocusTimerBar } from '@/features/timer/FocusTimerBar';
 import { TimerService } from '@/features/timer/timer.service';
 import { TimerState, PomodoroConfig } from '@/features/timer/timer.types';
-import { Sparkles, RefreshCw, Palette, Crown, AlertTriangle, CheckCircle, Clock } from 'lucide-react';
+import { Sparkles, RefreshCw, Palette, Crown, AlertTriangle, CheckCircle, Clock, Users } from 'lucide-react';
 
 import { MicPermissionTab } from '@/features/voice/MicPermissionTab';
+import { CoFocusLauncherModal } from '@/features/cofocus/CoFocusLauncherModal';
+import { CoFocusWatcherView } from '@/features/cofocus/CoFocusWatcherView';
+import { CoFocusSessionBar } from '@/features/cofocus/CoFocusSessionBar';
 
 export const App: React.FC = () => {
   const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
@@ -50,6 +55,8 @@ const MainApp: React.FC = () => {
   const gamificationService = GamificationService.getInstance();
   const signalingService = SignalingService.getInstance();
   const timerService = TimerService.getInstance();
+  const whiteboardService = WhiteboardService.getInstance();
+  const networkService = NetworkService.getInstance();
 
   const initialTab = (urlParams?.get('view') as NavTabType) || 'chat';
   const [currentTab, setCurrentTab] = useState<NavTabType>(initialTab);
@@ -63,6 +70,7 @@ const MainApp: React.FC = () => {
   const [isLeader, setIsLeader] = useState(false);
   const [leaderId, setLeaderId] = useState<string | null>(null);
   const [isPeerModalOpen, setIsPeerModalOpen] = useState(false);
+  const [isCoFocusOpen, setIsCoFocusOpen] = useState(false);
   const [alertToast, setAlertToast] = useState<string | null>(null);
   const [currentStreak, setCurrentStreak] = useState(gamificationService.getStats().currentStreak);
   const [isDetecting, setIsDetecting] = useState(false);
@@ -96,13 +104,37 @@ const MainApp: React.FC = () => {
   // 1. Initialize identity & listen for changes
   useEffect(() => {
     identityService.getOrCreateIdentity().then((id) => setIdentity(id));
-    return identityService.onChange((id) => setIdentity(id));
+    return identityService.onChange((id) => {
+      setIdentity(id);
+
+      // Push the new identity onto the wire.
+      //
+      // Identity is cached at init() time by NetworkService, PacketPipeline and
+      // TopologyService. Without this, renaming yourself updated only local UI: every packet
+      // you sent afterwards still carried the old nickname, so peers kept seeing the previous
+      // name in chat, presence and cursors until a room switch happened to re-init.
+      networkService.updateIdentity(id);
+
+      // Presence is the field peers actually render in the roster, and it is only refreshed on
+      // ping. Nudging it here means the rename shows up for others within a beat rather than
+      // waiting up to the 5s heartbeat interval.
+      discoveryService.refreshPresence();
+    });
   }, []);
 
   // 2. Listen for Room context changes
   useEffect(() => {
     return roomService.onChange((r) => {
       setRoom(r);
+
+      // Point the SHARED whiteboard at this room.
+      //
+      // The collaborative notebook was previously global and never re-scoped, so strokes drawn
+      // in one room stayed in memory and — because a newly joined peer's sync_request is
+      // answered with the whole local notebook — were transmitted into the next room the user
+      // entered. Binding it to the room here is what keeps a board private to its room.
+      void whiteboardService.setRoom(r?.roomId || '');
+
       if (r) {
         gamificationService.recordProblemVisit(r.slug);
         groupService.registerProblemGroup({
@@ -212,6 +244,15 @@ const MainApp: React.FC = () => {
         if (area === 'local') {
           const problemChange = changes.synqto_active_problem || changes.nerd_buddy_active_problem;
           if (problemChange?.newValue) {
+            // Never auto-switch rooms out from under a live CoFocus session.
+            //
+            // Hiding the Detect button was not sufficient: this listener fires on ordinary
+            // browsing, so someone 20 minutes into a Together session who opens a LeetCode tab
+            // in the background would be silently pulled out of it — camera and partner gone,
+            // no prompt, no explanation. Auto-detection is a convenience and must yield to an
+            // explicit session the user deliberately started.
+            if (roomService.getCurrentRoom()?.cofocusMode) return;
+
             const p = problemChange.newValue;
             roomService.joinProblemRoom(p.platform, p.slug, p.title, p.canonicalUrl);
           }
@@ -228,6 +269,32 @@ const MainApp: React.FC = () => {
         chrome.storage.onChanged.removeListener(handleStorageChange);
       };
     }
+  }, []);
+
+  // 8.1 Honour a "open CoFocus" request from the in-page FAB.
+  //
+  // FAB-only users never open the side panel by hand, so without a route from the widget the
+  // whole feature was unreachable for them. The FAB asks the service worker to open the panel
+  // with this flag; we consume it once on mount and again if it arrives while the panel is
+  // already open, then clear it so it cannot re-trigger on later opens.
+  useEffect(() => {
+    if (typeof chrome === 'undefined' || !chrome.storage?.local) return;
+
+    const consume = (value: unknown) => {
+      if (!value) return;
+      setIsCoFocusOpen(true);
+      chrome.storage.local.remove('synqto_open_cofocus');
+    };
+
+    chrome.storage.local.get(['synqto_open_cofocus'], (res) => consume(res.synqto_open_cofocus));
+
+    const onChanged = (changes: any, area: string) => {
+      if (area === 'local' && changes.synqto_open_cofocus?.newValue) {
+        consume(changes.synqto_open_cofocus.newValue);
+      }
+    };
+    chrome.storage.onChanged.addListener(onChanged);
+    return () => chrome.storage.onChanged.removeListener(onChanged);
   }, []);
 
   // 9. Listen for in-page chat messages from floating widget
@@ -398,7 +465,14 @@ const MainApp: React.FC = () => {
             </span>
           </button>
 
-          {/* Top Bar Quick-Launch Whiteboard Button */}
+          {/*
+            Top Bar Quick-Launch Whiteboard Button.
+
+            Hidden during a Watcher session for the same reason the bottom nav is: that view
+            replaces the whole tabbed surface, so this would set a tab that cannot render —
+            a control that visibly does nothing.
+          */}
+          {room?.cofocusMode !== 'WATCHER' && (
           <button
             type="button"
             className={`btn ${currentTab === 'whiteboard' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
@@ -418,8 +492,38 @@ const MainApp: React.FC = () => {
             <Palette size={12} />
             <span>{currentTab === 'whiteboard' ? 'Exit Board' : 'Board 🎨'}</span>
           </button>
+          )}
 
-          {/* Detect Active Tab Button */}
+          {/* Top Bar Quick-Launch CoFocus (Study Partner Matchmaking) Button */}
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => setIsCoFocusOpen(true)}
+            title="CoFocus — find a study partner (Watcher or Together)"
+            style={{
+              fontSize: 'var(--font-size-sm)',
+              padding: '3px 8px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              background: room?.cofocusMode ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'rgba(255, 255, 255, 0.05)',
+              borderColor: room?.cofocusMode ? 'transparent' : 'rgba(99, 102, 241, 0.35)',
+              color: room?.cofocusMode ? '#ffffff' : '#c4b5fd',
+            }}
+          >
+            <Users size={12} />
+            <span>CoFocus 🎯</span>
+          </button>
+
+          {/*
+            Detect Active Tab Button.
+
+            Hidden during ANY CoFocus session (Watcher or Together), because detecting joins a
+            problem room — which tears down the CoFocus room out from under a live session with
+            no warning and no confirmation. That is destructive rather than merely dead, so it
+            is removed for the duration rather than left to surprise someone mid-session.
+          */}
+          {!room?.cofocusMode && (
           <button
             type="button"
             className="btn btn-secondary btn-sm"
@@ -446,6 +550,7 @@ const MainApp: React.FC = () => {
             />
             <span>{isDetecting ? 'Scanning...' : 'Detect'}</span>
           </button>
+          )}
         </div>
       </header>
 
@@ -671,16 +776,38 @@ const MainApp: React.FC = () => {
         {/* Floating Focus Timer / Pomodoro (Visible only when enabled in Settings) */}
         <FocusTimerBar />
 
-        {/* 1. Default Screen: Active Problem Room & Real-time P2P Chat */}
-        {currentTab === 'chat' && (
-          <ProblemRoomChatView
-            room={room}
-            identity={identity}
-            peers={peers}
-            isLeader={isLeader}
-            onOpenPeers={() => setIsPeerModalOpen(true)}
-          />
-        )}
+        {/*
+          0. CoFocus Watcher takes over the whole surface.
+
+          Watcher is silent camera-only body doubling, so it deliberately bypasses the tabbed
+          room UI entirely — mounting chat/whiteboard/voice here would contradict the mode's
+          entire promise. TOGETHER sessions are NOT special-cased: they fall through to
+          ProblemRoomChatView below and get the full existing collaboration surface unchanged,
+          which is exactly the intent (CoFocus decides how a room is reached, not what a
+          collaborative room can do).
+        */}
+        {room?.cofocusMode === 'WATCHER' ? (
+          <CoFocusWatcherView room={room} identity={identity} />
+        ) : (
+          <>
+            {/*
+              Together sessions reuse the whole normal room surface, which has no concept of a
+              CoFocus session — so the countdown the user chose in the launcher would otherwise
+              be invisible. This thin bar surfaces the timer, partner presence and a way out
+              without touching ProblemRoomChatView's internals.
+            */}
+            {room?.cofocusMode === 'TOGETHER' && <CoFocusSessionBar />}
+
+            {/* 1. Default Screen: Active Problem Room & Real-time P2P Chat */}
+            {currentTab === 'chat' && (
+              <ProblemRoomChatView
+                room={room}
+                identity={identity}
+                peers={peers}
+                isLeader={isLeader}
+                onOpenPeers={() => setIsPeerModalOpen(true)}
+              />
+            )}
 
         {/* 2. Full Collaborative Whiteboard & Personal Diary Screen */}
         {currentTab === 'whiteboard' && (
@@ -823,7 +950,12 @@ const MainApp: React.FC = () => {
         {currentTab === 'profile' && (
           <ProfileSettingsView isLeader={isLeader} />
         )}
+          </>
+        )}
       </main>
+
+      {/* CoFocus Launcher (Watcher / Together / Invite) */}
+      <CoFocusLauncherModal isOpen={isCoFocusOpen} onClose={() => setIsCoFocusOpen(false)} />
 
       {/* Online Peer Roster Modal */}
       <PeerListModal
@@ -835,18 +967,26 @@ const MainApp: React.FC = () => {
         leaderId={leaderId}
       />
 
-      {/* Persistent Bottom Nav (4-Tab Layout) */}
-      <NavBar
-        currentTab={currentTab}
-        onSelectTab={(tab) => {
-          setCurrentTab(tab);
-          if (tab === 'chat') {
-            chatService.markAsRead();
-          }
-        }}
-        unreadCount={unreadCount}
-        peerCount={peers.length}
-      />
+      {/*
+        Persistent Bottom Nav (4-Tab Layout).
+
+        Hidden during a Watcher session: that view replaces the entire tabbed surface, so the
+        tabs would be dead controls that change state without rendering anything. Together
+        sessions keep the nav, since they use the normal room surface.
+      */}
+      {room?.cofocusMode !== 'WATCHER' && (
+        <NavBar
+          currentTab={currentTab}
+          onSelectTab={(tab) => {
+            setCurrentTab(tab);
+            if (tab === 'chat') {
+              chatService.markAsRead();
+            }
+          }}
+          unreadCount={unreadCount}
+          peerCount={peers.length}
+        />
+      )}
     </div>
   );
 };

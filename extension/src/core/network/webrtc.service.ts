@@ -27,12 +27,6 @@ export class WebRTCService {
   private pendingIceCandidates: Map<string, RTCIceCandidateInit[]> = new Map();
 
   /**
-   * Locally-gathered candidates per peer, kept so a reconnect can be primed instead of
-   * re-gathering from zero. See getCachedCandidates.
-   */
-  private lastKnownCandidates: Map<string, RTCIceCandidateInit[]> = new Map();
-
-  /**
    * Bounds on ICE buffering.
    *
    * pendingIceCandidates is filled directly from the network by handleIncomingIce, before
@@ -552,17 +546,12 @@ export class WebRTCService {
 
     pc.onicecandidate = (event) => {
       if (event.candidate) {
-        const json = event.candidate.toJSON();
-
-        // Cache our own candidates so a later reconnect to this peer can be primed rather
-        // than re-gathered from zero. Bounded by the same per-peer cap as the inbound queue.
-        const cached = this.lastKnownCandidates.get(remotePeerId) || [];
-        if (cached.length < WebRTCService.MAX_PENDING_ICE_PER_PEER) {
-          cached.push(json);
-          this.lastKnownCandidates.set(remotePeerId, cached);
-        }
-
-        this.signalNeededListeners.forEach((fn) => fn(remotePeerId, 'ice', json));
+        // Candidates are NOT cached for reuse. They are ephemeral by construction — the
+        // port is released when this PeerConnection closes, and a NAT mapping expires within
+        // minutes — so a stored candidate would point at nothing on the next connection.
+        // What is worth persisting is which candidate TYPE succeeded; see
+        // peer-identity-store.ts.
+        this.signalNeededListeners.forEach((fn) => fn(remotePeerId, 'ice', event.candidate!.toJSON()));
       }
       // event.candidate === null means gathering is complete; nothing to send.
     };
@@ -765,7 +754,6 @@ export class WebRTCService {
     // handleIncomingIce and then never reachable by any cleanup path, because there was no
     // wrapper for closeConnection to find. The buffer grew for the lifetime of the session.
     this.pendingIceCandidates.delete(remotePeerId);
-    this.lastKnownCandidates.delete(remotePeerId);
 
     const wrapper = this.connections.get(remotePeerId);
     if (!wrapper) return;

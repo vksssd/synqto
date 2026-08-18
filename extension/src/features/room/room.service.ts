@@ -3,6 +3,7 @@
 import { NetworkService } from '@/core/network/network.service';
 import { IdentityService } from '@/features/identity/identity.service';
 import { RoomContext, computeRoomId } from './room-utils';
+import { DIRECT_ONLY_POLICY } from '@/core/topology/topology.types';
 
 export class RoomService {
   private static instance: RoomService | null = null;
@@ -117,6 +118,63 @@ export class RoomService {
     this.currentRoom = roomContext;
     const identity = await this.identityService.getOrCreateIdentity();
     this.network.init(identity, context.roomId);
+
+    this.emitChange();
+    return roomContext;
+  }
+
+  /**
+   * Joins a CoFocus session room (Watcher or Together).
+   *
+   * The room ID comes from the matchmaking lobby (or a shared invite code) rather than being
+   * derived from page content, so there is no computeRoomId call here — both peers were handed
+   * the same ID by the server.
+   *
+   * THE IMPORTANT LINE is the DIRECT_ONLY_POLICY passed to network.init(). It is what makes
+   * "CoFocus sessions are always two-peer direct P2P" a structural guarantee rather than a
+   * consequence of peer count sitting below TIER1_PROMOTE_AT: under this policy the tier
+   * coordinator never evaluates promotion, no leader mesh is constructed, and the transport
+   * router refuses to fall back to the server relay. This is the only call site that passes a
+   * non-default policy.
+   */
+  public async joinCoFocusRoom(
+    roomId: string,
+    opts: {
+      mode: 'WATCHER' | 'TOGETHER';
+      sessionLengthSec?: number;
+      subjectTag?: string;
+      partnerPeerId?: string;
+    }
+  ): Promise<RoomContext> {
+    if (this.currentRoom?.roomId === roomId) {
+      return this.currentRoom;
+    }
+
+    this.leaveCurrentRoom();
+
+    const isWatcher = opts.mode === 'WATCHER';
+    const roomContext: RoomContext = {
+      roomId,
+      platform: 'CoFocus',
+      slug: isWatcher ? 'watcher' : 'together',
+      title: isWatcher
+        ? 'Focus Session'
+        : opts.subjectTag
+        ? `Study Together · ${opts.subjectTag}`
+        : 'Study Together',
+      canonicalUrl: `cofocus://${roomId}`,
+      cofocusMode: opts.mode,
+      cofocusDetails: {
+        sessionLengthSec: opts.sessionLengthSec,
+        subjectTag: opts.subjectTag,
+        partnerPeerId: opts.partnerPeerId,
+      },
+    };
+
+    this.currentRoom = roomContext;
+
+    const identity = await this.identityService.getOrCreateIdentity();
+    this.network.init(identity, roomId, DIRECT_ONLY_POLICY);
 
     this.emitChange();
     return roomContext;

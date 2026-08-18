@@ -148,6 +148,17 @@ export class DiscoveryService {
     }
   }
 
+  /**
+   * Immediately re-broadcasts presence.
+   *
+   * Peers render the identity carried on presence packets, which otherwise only refresh on the
+   * 5s heartbeat — so a rename appeared to "not work" for several seconds. Callers use this
+   * after changing identity so the roster updates promptly.
+   */
+  public refreshPresence(): void {
+    this.sendPing();
+  }
+
   private sendPing() {
     const payload: PresencePayload = {
       status: this.currentStatus,

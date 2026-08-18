@@ -431,6 +431,44 @@ export class TutorService {
     this.emitState();
   }
 
+  /**
+   * Re-establishes peer connections and re-announces the local live stream to whoever is in
+   * the room NOW.
+   *
+   * WHY THIS EXISTS — startTutorStage() connects to `topology.allPeers` and broadcasts
+   * `stream:announce` exactly once, at the moment it is called. That is correct for the
+   * classic flow (a tutor starts broadcasting into an already-populated room), but it silently
+   * fails whenever the audience arrives AFTER the broadcast starts: the new peer was not in
+   * allPeers, so no connection was initiated toward them, and the single announce packet was
+   * broadcast to a room that did not yet contain them. They never learn a stream exists.
+   *
+   * CoFocus Watcher hits this every single time — the camera starts as soon as the matched
+   * room is joined, which is necessarily before the partner has finished joining — so without
+   * a re-announce both peers sit looking at "Partner's camera is off" forever.
+   *
+   * Safe to call repeatedly: initiateConnection is idempotent for an existing peer connection,
+   * and a duplicate stream:announce for the same streamId is de-duplicated by receivers.
+   */
+  public reannounceStream(currentRoomId: string): void {
+    const myIdentity = this.identityService.getCachedIdentity();
+    if (!myIdentity || !this.localStream) return;
+
+    const myStream = this.state.activeStreams.find(
+      (s) => s.broadcasterPeerId === myIdentity.peerId
+    );
+    if (!myStream) return;
+
+    const topology = this.network.getTopologyState();
+    topology.allPeers.forEach((peerId) => {
+      if (peerId !== myIdentity.peerId) {
+        this.webrtc.initiateConnection(peerId);
+      }
+    });
+
+    this.network.broadcast('stream:announce', myStream);
+    this.broadcastStageState(currentRoomId);
+  }
+
   public stopTutorStage(currentRoomId: string): void {
     const myIdentity = this.identityService.getCachedIdentity();
     if (this.localStream) {

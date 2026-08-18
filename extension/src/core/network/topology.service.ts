@@ -18,8 +18,8 @@ import { IRouteResolver } from '../topology/route-resolver';
 import { PeerSignaling, PeerSignalPayload } from './peer-signaling';
 import { LinkMonitor } from './link-monitor';
 import { LinkStateRouter, LSA } from '../topology/link-state';
-import { planMesh } from '../topology/mesh-plan';
-import { LinkAffinity, isInteractiveType } from '../topology/link-affinity';
+import { planMesh, planFallbackTargets } from '../topology/mesh-plan';
+import { LinkAffinity } from '../topology/link-affinity';
 import { PeerIdentityStore } from './peer-identity-store';
 
 export interface TopologyState {
@@ -326,14 +326,45 @@ export class TopologyService {
         }
       });
 
-      // Shed links the plan no longer wants — but never one that is carrying latency
-      // sensitive traffic. Adaptive promotion (see shouldKeepLink) is what stops a sparse
-      // plan from tearing down the direct link between two people actively co-editing.
       if (!plan.isFullMesh) {
-        for (const peerId of this.webrtc.getConnectedPeers()) {
-          if (plan.desired.has(peerId)) continue;
-          if (this.shouldKeepLink(peerId)) continue;
-          this.webrtc.closeConnection(peerId);
+        // Widen the plan when it is not delivering connectivity.
+        //
+        // Sparsity costs NAT-traversal robustness: a peer gets `targetDegree` chances to
+        // find someone reachable where a full mesh gave it N-1, and connection failure is
+        // peer-correlated rather than random, so those chances are not independent. Without
+        // this, a peer whose planned neighbours are all unreachable sits alone in a room it
+        // can see on the roster. See planFallbackTargets for the measured probabilities.
+        const connected = this.webrtc.getConnectedPeers();
+        const fallback = planFallbackTargets(this.myIdentity.peerId, this.allPeers, {
+          connected,
+          reachable: this.router.getReachable(),
+        });
+
+        for (const peerId of fallback) {
+          if (this.webrtc.isConnected(peerId) || this.webrtc.isConnecting(peerId)) continue;
+          // No peer-ID ordering here, unlike the planned links. Both endpoints of a broken
+          // mesh may be trying to repair it, and deferring to the lower ID would leave the
+          // higher one waiting on a peer that may never dial. Perfect negotiation resolves
+          // the resulting glare; a missed repair has nothing to resolve it.
+          this.webrtc.initiateConnection(peerId);
+        }
+
+        if (fallback.length > 0) {
+          console.warn(
+            `[TopologyService] Mesh not delivering connectivity — widening by ${fallback.length} link(s)`
+          );
+        }
+
+        // Shed links the plan no longer wants — but never one that is carrying latency
+        // sensitive traffic, and never while the mesh is still being repaired. Adaptive
+        // promotion (shouldKeepLink) is what stops a sparse plan from tearing down the
+        // direct link between two people actively co-editing.
+        if (fallback.length === 0) {
+          for (const peerId of connected) {
+            if (plan.desired.has(peerId)) continue;
+            if (this.shouldKeepLink(peerId)) continue;
+            this.webrtc.closeConnection(peerId);
+          }
         }
       }
       return;

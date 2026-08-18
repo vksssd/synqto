@@ -1107,6 +1107,17 @@ export class FloatingWidget {
               <button class="size-mode-pill ${this.popupSize === 'fullscreen' ? 'active' : ''}" data-popsize="fullscreen" title="Full Screen View (1180x880)" style="font-size: var(--font-size-2xs);font-weight:700;padding:2px 5px;border-radius:4px;border:none;cursor:pointer;background:${this.popupSize === 'fullscreen' ? 'var(--primary)' : 'transparent'};color:${this.popupSize === 'fullscreen' ? '#fff' : 'var(--text-muted)'};">📺 XL</button>
             </div>
 
+            <!--
+              CoFocus entry point.
+
+              CoFocus needs the full side-panel UI (camera tiles, launcher, countdown), so this
+              opens the panel with the launcher already showing rather than duplicating the whole
+              feature inside the widget's shadow DOM. Without it, users who work entirely from the
+              FAB and never open the side panel had NO route to CoFocus at all.
+            -->
+            <button class="icon-btn" id="nb-open-cofocus" title="CoFocus — find a study partner">
+              <span style="font-size:13px;line-height:1;">🎯</span>
+            </button>
             <button class="icon-btn" id="nb-open-sidepanel" title="Open complete extension in side panel">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M15 3h6v6M10 14L21 3M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/>
@@ -1702,6 +1713,19 @@ export class FloatingWidget {
       this.render();
       if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
         chrome.runtime.sendMessage({ type: 'OPEN_SIDEPANEL' }).catch(() => {});
+      }
+    });
+
+    // CoFocus: open the side panel with the launcher already up.
+    //
+    // openCoFocus is a request the panel picks up on mount. It is sent alongside the open
+    // rather than written to storage here so the two cannot drift out of order.
+    const openCoFocusBtn = this.shadow.getElementById('nb-open-cofocus');
+    openCoFocusBtn?.addEventListener('click', () => {
+      this.isOpen = false;
+      this.render();
+      if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+        chrome.runtime.sendMessage({ type: 'OPEN_SIDEPANEL', openCoFocus: true }).catch(() => {});
       }
     });
 

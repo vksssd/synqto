@@ -18,6 +18,38 @@ chrome.sidePanel
   .setPanelBehavior({ openPanelOnActionClick: true })
   .catch((error) => console.error(error));
 
+// 2.1 First run.
+//
+// There was previously no onInstalled handler at all: a fresh install did nothing observable,
+// so a new user was left with an unexplained toolbar icon and a FAB that appears on pages with
+// no indication of what either does. Two cheap, non-intrusive signals fix that — a badge on the
+// toolbar icon drawing the eye to the entry point, and a stored install timestamp so the panel
+// can tell a first-time user from a returning one.
+//
+// Deliberately does NOT force-open a tab or the side panel: hijacking the browser on install is
+// hostile, and sidePanel.open() requires a user gesture it would not have here anyway.
+chrome.runtime.onInstalled.addListener((details) => {
+  if (details.reason === 'install') {
+    chrome.storage.local.set({
+      synqto_installed_at: Date.now(),
+      synqto_first_run_pending: true,
+    });
+
+    chrome.action.setBadgeText({ text: 'NEW' });
+    chrome.action.setBadgeBackgroundColor({ color: '#6366f1' });
+    chrome.action.setTitle({ title: 'Synqto — click to get started' });
+  }
+});
+
+// Clear the new-install badge the first time the panel is actually opened, so it marks
+// "not yet opened" rather than becoming permanent decoration.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.synqto_sidepanel_open?.newValue === true) {
+    chrome.action.setBadgeText({ text: '' });
+    chrome.storage.local.set({ synqto_first_run_pending: false });
+  }
+});
+
 import { ContextRegistry } from '@/core/runtime/context-registry';
 import { Capability } from '@/core/types/identifiers';
 
@@ -143,6 +175,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       chrome.storage.local.set({
         synqto_sidepanel_open: true,
         nerd_buddy_sidepanel_open: true,
+        // Only set when the caller asked for CoFocus (the FAB's 🎯 button), so an ordinary
+        // panel open never pops the launcher unexpectedly. The panel clears this as soon as
+        // it consumes it, making it a one-shot request rather than sticky state that would
+        // re-open the launcher on every subsequent panel open.
+        ...(message.openCoFocus ? { synqto_open_cofocus: Date.now() } : {}),
       });
     };
 

@@ -57,6 +57,14 @@ export class WhiteboardService {
 
   private privacyMode: WhiteboardPrivacyMode = 'personal';
 
+  /**
+   * Room the SHARED board currently belongs to. Empty until setRoom() runs.
+   *
+   * The personal notebook is deliberately NOT scoped this way — it is the user's own private
+   * pad and is meant to follow them across rooms.
+   */
+  private currentRoomId = '';
+
   // Collaborative Notebook State
   private collabNotebook: WhiteboardNotebook = {
     activePageId: 'page-1',
@@ -370,22 +378,79 @@ export class WhiteboardService {
     }
   }
 
+  /**
+   * Storage key for the SHARED board of a specific room.
+   *
+   * Per-room, deliberately. The collaborative notebook used to live under one global
+   * `synqto_collab_notebook` key with nothing clearing it on a room change, which leaked
+   * board content between rooms — see setRoom().
+   */
+  private collabStorageKey(roomId: string): string {
+    return `synqto_collab_notebook_${roomId}`;
+  }
+
+  /**
+   * Points the shared board at a room, persisting the outgoing room's board first.
+   *
+   * WHY THIS EXISTS — the collaborative notebook was global and unscoped: switching rooms kept
+   * the previous room's strokes in memory, and because the sync_request handler replies to a
+   * newly joined peer with the ENTIRE local notebook, those strokes were then transmitted to
+   * whoever joined next. Working notes drawn in one room could therefore be handed to strangers
+   * in an unrelated room. Scoping per room is what makes "the board belongs to this room" true
+   * rather than merely apparent, and it matches how ChatService already scopes history.
+   */
+  public async setRoom(roomId: string): Promise<void> {
+    if (this.currentRoomId === roomId) return;
+
+    // Flush the outgoing room's board before switching away from it.
+    if (this.currentRoomId) {
+      this.saveCollabNotebook();
+    }
+
+    this.currentRoomId = roomId;
+
+    // Start from an empty board so nothing from the previous room can be served to this
+    // room's peers in the window before storage resolves.
+    const blank = this.createBlankCollabPage();
+    this.collabNotebook = { activePageId: blank.id, pages: [blank] };
+
+    await this.loadCollabNotebook();
+    this.notifyNotebookListeners();
+  }
+
+  private createBlankCollabPage(): WhiteboardPage {
+    return {
+      id: `page-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      title: 'Page 1: Architecture & Ideas',
+      strokes: [],
+      undoStack: [],
+      redoStack: [],
+      background: 'grid',
+      bgColor: '#090d16',
+      createdAt: Date.now(),
+    };
+  }
+
   private async loadCollabNotebook() {
+    if (!this.currentRoomId) return;
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       try {
-        const res = await chrome.storage.local.get(['synqto_collab_notebook']);
-        if (res.synqto_collab_notebook && Array.isArray(res.synqto_collab_notebook.pages)) {
-          this.collabNotebook = res.synqto_collab_notebook;
+        const key = this.collabStorageKey(this.currentRoomId);
+        const res = await chrome.storage.local.get([key]);
+        const stored = res[key];
+        if (stored && Array.isArray(stored.pages) && stored.pages.length > 0) {
+          this.collabNotebook = stored;
         }
       } catch (e) {}
     }
   }
 
   private saveCollabNotebook() {
+    if (!this.currentRoomId) return;
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       try {
         chrome.storage.local.set({
-          synqto_collab_notebook: this.collabNotebook,
+          [this.collabStorageKey(this.currentRoomId)]: this.collabNotebook,
         });
       } catch (e) {}
     }
@@ -406,6 +471,10 @@ export class WhiteboardService {
     // 0a. Handle incoming full sync request from a newly joined peer
     this.network.on('whiteboard:sync_request', (_, packet) => {
       if (this.privacyMode !== 'collaborative') return;
+      // Never serve a board that is not bound to this room. Without this guard, a client that
+      // had drawn in a previous room but not yet been pointed at the current one would answer
+      // a newcomer's sync request with the OLD room's content.
+      if (!this.currentRoomId || packet.roomId !== this.currentRoomId) return;
       const strokeCount = this.collabNotebook.pages.reduce((acc, p) => acc + p.strokes.length, 0);
       if (strokeCount > 0 && packet.from?.peerId) {
         this.network.send(

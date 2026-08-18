@@ -150,6 +150,77 @@ export function planMesh(
   return { desired, isFullMesh: false, ringLinks };
 }
 
+export interface FallbackInput {
+  /** Peers we currently hold an open connection to. */
+  connected: Iterable<PeerId>;
+  /** Peers the routing table can reach, directly or via a path. */
+  reachable: Iterable<PeerId>;
+}
+
+/**
+ * Extra peers to attempt when the planned links are not delivering connectivity.
+ *
+ * SPARSITY TRADES AWAY NAT-TRAVERSAL ROBUSTNESS, and this restores it. Under a full mesh a
+ * peer had N-1 chances to find someone it could actually reach; the plan gives it exactly
+ * `targetDegree`. That is a far bigger loss than it sounds, because connection failure is
+ * peer-correlated rather than random — two hosts behind symmetric NAT cannot connect to each
+ * other at all without TURN, so a peer's failures are not independent draws.
+ *
+ * Measured, for the probability that a peer's every option fails:
+ *
+ *     hard-NAT share    degree-6 plan     full mesh
+ *          20%              0.01%          8e-15%
+ *          40%              0.41%          7e-8%
+ *          60%              4.67%          8e-4%
+ *
+ * At a 60% share the sparse plan strands roughly one peer in twenty where a full mesh
+ * stranded one in a hundred thousand. Nothing widened the attempt set, so a peer whose six
+ * planned neighbours were all unreachable simply sat alone in a room it could see on the
+ * roster — which is precisely the "connections break easily" failure the sparse mesh was
+ * supposed to be safe enough to avoid.
+ *
+ * The fallback is graduated, because the two failure shapes want different responses:
+ *
+ *   ISOLATED   no connections at all. Being alone is strictly worse than holding more
+ *              connections than the plan wants, so every peer becomes a candidate. This is
+ *              the case where a full mesh would have succeeded and the plan failed.
+ *
+ *   PARTITIONED  connected, but part of the room is unreachable through the mesh. Only the
+ *                unreachable peers are worth trying — a link to someone already reachable
+ *                adds cost and no connectivity — and the number is bounded so a large split
+ *                cannot rebuild the full mesh.
+ */
+export function planFallbackTargets(
+  myPeerId: PeerId,
+  allPeers: Iterable<PeerId>,
+  input: FallbackInput,
+  config: Partial<MeshPlanConfig> = {}
+): PeerId[] {
+  const cfg = { ...DEFAULT_MESH_PLAN_CONFIG, ...config };
+  const peers = Array.from(new Set(allPeers)).filter((p) => p && p !== myPeerId).sort();
+  if (peers.length === 0) return [];
+
+  const connected = new Set(input.connected);
+  const reachable = new Set(input.reachable);
+  const plan = planMesh(myPeerId, allPeers, config);
+
+  // Isolated: nothing to be conservative about.
+  if (connected.size === 0) {
+    return peers;
+  }
+
+  // Partitioned: peers the mesh cannot deliver to, closest first in ring order so two peers
+  // on opposite sides of a split tend to pick each other rather than flailing independently.
+  const unreachable = peers.filter((p) => !reachable.has(p) && !connected.has(p));
+  if (unreachable.length === 0) return [];
+
+  // Bounded. A widened plan is a repair, not a new topology: without a cap, a room that
+  // splits down the middle would have every peer on each side dial every peer on the other,
+  // which is the O(N^2) explosion sparsity exists to prevent — at the worst possible moment.
+  const budget = Math.max(2, Math.ceil(cfg.targetDegree / 2));
+  return unreachable.filter((p) => !plan.desired.has(p)).slice(0, budget);
+}
+
 /**
  * Whether two peers agree that a link between them should exist.
  *

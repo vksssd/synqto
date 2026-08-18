@@ -529,6 +529,67 @@ scenario('30-peer sparse mesh: all pairs reachable within 4 hops', () => {
   assert.ok(worst <= 4, `worst-case hop count was ${worst}, above the 4-hop budget`);
 });
 
+
+console.log('\n── Restart and identity reuse ──');
+
+scenario('a peer that reloads is not invisible until its old LSA expires', () => {
+  // The dominant real-world event for a browser extension: the user refreshes the page.
+  // The peer keeps its identity but its sequence counter restarts, so every peer holding a
+  // higher sequence rejects its advertisements as replays. Without recovery the returning
+  // peer is absent from the routing graph until age-out — up to 45 seconds during which
+  // nobody can route to it.
+  const net = new SimNet(['a', 'b', 'c']);
+  net.ring();
+  net.settle();
+
+  // 'b' advertises several times so its sequence climbs.
+  for (let i = 0; i < 5; i++) {
+    SimNet.advance(2000);
+    net.link('b', 'c', 20 + i * 10); // cost changes force new LSAs
+    net.settle();
+  }
+  const seqBefore = net.routers.get('a').getLSA('b').seq;
+  assert.ok(seqBefore > 1, 'precondition: b has advertised more than once');
+
+  // 'b' reloads: brand new router object, same peer ID, sequence back to zero.
+  net.routers.set('b', new LinkStateRouter('b', { now: () => SimNet.clock }));
+  SimNet.advance(2000);
+
+  // Reconnecting triggers the adjacency database push, which is how the returning peer
+  // learns that the room holds a newer sequence for its own identity.
+  net.syncPending.push(['a', 'b'], ['b', 'c']);
+  net.settle();
+  SimNet.advance(2000);
+  net.settle();
+
+  const t = net.trace('a', 'b');
+  assert.ok(t.reached, 'a cannot route to the reloaded peer');
+  assert.ok(
+    net.routers.get('a').getLSA('b').seq > seqBefore,
+    'reloaded peer never superseded its stale advertisement'
+  );
+});
+
+scenario('a database push cannot be used to flood one peer in a single message', () => {
+  const net = new SimNet(['a', 'b']);
+  net.link('a', 'b');
+  net.settle();
+
+  const huge = Array.from({ length: 50_000 }, (_, i) => ({
+    origin: `bulk-${i}`,
+    seq: 1,
+    neighbours: [{ peerId: 'b', costMs: 1 }],
+    issuedAt: SimNet.clock,
+    ttl: 8,
+  }));
+  net.routers.get('a').handleDatabaseSnapshot(huge, 'b');
+
+  assert.ok(
+    net.routers.get('a').getStats().lsdbSize <= 400,
+    'a single oversized database push bypassed the LSDB bound'
+  );
+});
+
 console.log(`\n========================================`);
 console.log(`🏁 Routing Stress: ${passed}/${total} scenarios passed (${Math.round((passed / total) * 100)}%)`);
 console.log(`========================================\n`);

@@ -101,6 +101,7 @@ export class LinkStateRouter {
     evicted: 0,
     admissionRefused: 0,
     recomputes: 0,
+    seqRecovered: 0,
   };
 
   constructor(
@@ -136,6 +137,10 @@ export class LinkStateRouter {
       .map((n) => ({ peerId: n.peerId, costMs: Math.max(1, Math.round(n.costMs) || 1) }))
       .slice(0, this.config.maxNeighboursPerLsa);
 
+    // pendingEmit is checked alongside `changed` so a sequence recovery (or a suppressed
+    // emission) still produces an LSA even when our neighbour set is identical — after a
+    // reload the links are usually unchanged, and that is exactly when re-advertising
+    // matters most.
     const changed = !this.sameNeighbours(sane, this.myNeighbours);
     if (!changed && !this.pendingEmit) return null;
 
@@ -203,8 +208,31 @@ export class LinkStateRouter {
       return reject('lsaRejectedOversized');
     }
 
-    // Never let a remote advertisement overwrite our own view of our own links.
-    if (lsa.origin === this.myPeerId) return reject('lsaRejectedStale');
+    // An advertisement claiming to be from us.
+    //
+    // Never adopt it — our own links are something only we can observe. But it is not
+    // useless: it tells us what sequence number the room believes we are at, and that is the
+    // only way to recover from a restart.
+    //
+    // This matters more here than in a router network, because the dominant lifecycle event
+    // for a browser extension is the user refreshing the page. The peer keeps its identity
+    // and starts a fresh sequence at 1, while everyone else still holds, say, seq 47 — so
+    // every advertisement the returning peer sends is rejected as a replay, and it stays
+    // absent from the routing graph until its stale LSA ages out. For up to maxLsaAgeMs
+    // nobody can route to a peer that is sitting right there, connected.
+    //
+    // Jumping ahead of the stale sequence makes the next advertisement supersede it, which
+    // is what OSPF does on restart for the same reason. The database push on adjacency
+    // formation is what delivers our own stale LSA back to us, so the two mechanisms
+    // together close the loop.
+    if (lsa.origin === this.myPeerId) {
+      if (lsa.seq >= this.mySeq) {
+        this.mySeq = lsa.seq + 1;
+        this.pendingEmit = true; // re-advertise at the new sequence on the next tick
+        this.stats.seqRecovered++;
+      }
+      return reject('lsaRejectedStale');
+    }
 
     const existing = this.lsdb.get(lsa.origin);
     if (existing && lsa.seq <= existing.lsa.seq) {
@@ -298,6 +326,7 @@ export class LinkStateRouter {
   public getDatabaseSnapshot(): LSA[] {
     const out: LSA[] = [];
     for (const entry of this.lsdb.values()) {
+      if (out.length >= this.config.maxLsdbEntries) break;
       // TTL is refreshed for the push: these LSAs may have travelled far to reach us, and
       // their remaining hop budget says nothing about how far they must travel on this side.
       out.push({ ...entry.lsa, ttl: this.config.defaultTtl });

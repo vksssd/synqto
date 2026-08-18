@@ -1,6 +1,7 @@
 // ─── Share Group Modal (Generate Instant Invite Tokens) ───
 
 import React, { useState } from 'react';
+import { useModalA11y } from '@/shared/useModalA11y';
 import { StudyGroup } from './group.types';
 import { GroupService } from './group.service';
 import { Share2, X, Copy, Check, Lock, Globe, KeyRound } from 'lucide-react';
@@ -16,6 +17,7 @@ export const ShareGroupModal: React.FC<ShareGroupModalProps> = ({
   isOpen,
   onClose,
 }) => {
+  const { dialogProps } = useModalA11y(isOpen, onClose);
   const groupService = GroupService.getInstance();
   // Both hooks must run before the early return below — calling a hook after a conditional
   // return violates the Rules of Hooks and desynchronises hook order as the modal toggles.
@@ -34,13 +36,13 @@ export const ShareGroupModal: React.FC<ShareGroupModalProps> = ({
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '380px' }}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '380px' }} {...dialogProps} aria-labelledby="share-squad-title">
         <div className="glass-card-header">
           <div className="glass-card-title">
             <Share2 size={16} color="var(--primary)" />
-            <span>Share Study Squad</span>
+            <span id="share-squad-title">Share Study Squad</span>
           </div>
-          <button className="btn btn-ghost btn-icon btn-sm" onClick={onClose}>
+          <button className="btn btn-ghost btn-icon btn-sm" onClick={onClose} aria-label="Close dialog">
             <X size={16} />
           </button>
         </div>

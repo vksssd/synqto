@@ -1,21 +1,7 @@
 // ─── WhatsApp-style Chat Composer (Mentions Autocomplete, Image Paste, Screenshot, Code, Poll, Quiz, Files) ───
 
 import React, { useState, useRef } from 'react';
-import {
-  Send,
-  X,
-  EyeOff,
-  Plus,
-  Camera,
-  Image as ImageIcon,
-  Code,
-  BarChart2,
-  HelpCircle,
-  Paperclip,
-  Users,
-  Radio,
-  Volume2,
-} from 'lucide-react';
+import { Send, X, EyeOff, Plus, Camera, Code, BarChart2, HelpCircle, Paperclip, Users, Radio, Volume2, Image as ImageIcon } from 'lucide-react';
 import { ChatMessageItem } from './chat.service';
 import { PeerIdentity } from '@/core/network/packet';
 
@@ -470,7 +456,7 @@ const handleSend = () => {
             onChange={(e) => setStagedCaption(e.target.value)}
             style={{ flex: 1, fontSize: '11px' }}
             autoFocus
-          />
+           aria-label="Add image caption"/>
           <button
             type="button"
             className="btn btn-primary btn-sm"
@@ -733,7 +719,7 @@ const handleSend = () => {
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
           style={{ flex: 1, fontSize: '11.5px' }}
-        />
+         aria-label="Message or type @ to mention, paste image"/>
 
         {/* Send Button */}
         <button

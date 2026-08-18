@@ -1,8 +1,8 @@
 // ─── Group & Problem Squad Card Component ───
 
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { StudyGroup } from './group.types';
-import { Lock, Globe, Share2, Trash2, ArrowRight, LogOut, ExternalLink, Code2 } from 'lucide-react';
+import { Lock, Globe, Share2, Trash2, ArrowRight, LogOut, ExternalLink } from 'lucide-react';
 import { getPlatformColor } from '@/features/room/room-utils';
 
 interface GroupCardProps {
@@ -23,6 +23,31 @@ export const GroupCard: React.FC<GroupCardProps> = ({
   onDelete,
 }) => {
   const platformColor = group.isProblemGroup ? getPlatformColor(group.topicTag) : undefined;
+
+  // Deleting a squad is irreversible — it drops the record from local storage, and for a
+  // private squad whose password the user has not saved elsewhere that means permanently
+  // losing the ability to re-derive the room. It was previously a single click on a small
+  // trash icon with no confirmation. Two-step inline confirm is used rather than window
+  // .confirm() because a blocking native dialog over a side panel is jarring and easy to
+  // mis-click through.
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const confirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (confirmTimer.current) clearTimeout(confirmTimer.current);
+  }, []);
+
+  const handleDeleteClick = () => {
+    if (!confirmingDelete) {
+      setConfirmingDelete(true);
+      // Auto-revert so the card does not sit in a scary armed state indefinitely.
+      confirmTimer.current = setTimeout(() => setConfirmingDelete(false), 4000);
+      return;
+    }
+    if (confirmTimer.current) clearTimeout(confirmTimer.current);
+    setConfirmingDelete(false);
+    onDelete(group.id);
+  };
 
   return (
     <div
@@ -159,9 +184,10 @@ export const GroupCard: React.FC<GroupCardProps> = ({
               rel="noreferrer"
               className="btn btn-ghost btn-icon btn-sm"
               title="Open problem in new tab"
+              aria-label={`Open ${group.name} problem in a new tab`}
               style={{ color: 'var(--text-secondary)' }}
             >
-              <ExternalLink size={13} />
+              <ExternalLink size={13} aria-hidden={true} />
             </a>
           )}
 
@@ -169,16 +195,28 @@ export const GroupCard: React.FC<GroupCardProps> = ({
             className="btn btn-ghost btn-icon btn-sm"
             onClick={() => onShare(group)}
             title="Share Invite Code"
+            aria-label={`Share ${group.name}`}
           >
-            <Share2 size={13} />
+            <Share2 size={13} aria-hidden={true} />
           </button>
           <button
-            className="btn btn-ghost btn-icon btn-sm"
-            onClick={() => onDelete(group.id)}
-            title="Leave / Delete Group"
-            style={{ color: 'var(--text-dim)' }}
+            className={`btn btn-sm ${confirmingDelete ? 'btn-danger' : 'btn-ghost btn-icon'}`}
+            onClick={handleDeleteClick}
+            onBlur={() => setConfirmingDelete(false)}
+            title={confirmingDelete ? 'Click again to permanently delete' : 'Delete squad'}
+            aria-label={
+              confirmingDelete
+                ? `Confirm permanent deletion of ${group.name}`
+                : `Delete ${group.name}`
+            }
+            style={
+              confirmingDelete
+                ? { background: 'rgba(244, 63, 94, 0.9)', color: '#fff', fontSize: '10px', gap: '4px' }
+                : { color: 'var(--text-dim)' }
+            }
           >
-            <Trash2 size={13} />
+            <Trash2 size={13} aria-hidden={true} />
+            {confirmingDelete && <span>Sure?</span>}
           </button>
         </div>
       </div>

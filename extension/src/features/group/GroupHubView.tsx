@@ -10,16 +10,7 @@ import { CreateGroupModal } from './CreateGroupModal';
 import { PasswordPromptModal } from './PasswordPromptModal';
 import { JoinInviteModal } from './JoinInviteModal';
 import { ShareGroupModal } from './ShareGroupModal';
-import {
-  Users,
-  Plus,
-  Ticket,
-  Search,
-  Sparkles,
-  Lock,
-  Globe,
-  Code2,
-} from 'lucide-react';
+import { Users, Plus, Ticket, Sparkles } from 'lucide-react';
 
 interface GroupHubViewProps {
   currentRoom: RoomContext | null;

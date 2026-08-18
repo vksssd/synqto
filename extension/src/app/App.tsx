@@ -23,7 +23,7 @@ import { ThemeService } from '@/features/settings/theme.service';
 import { FocusTimerBar } from '@/features/timer/FocusTimerBar';
 import { TimerService } from '@/features/timer/timer.service';
 import { TimerState, PomodoroConfig } from '@/features/timer/timer.types';
-import { Sparkles, RefreshCw, Radio, Palette, Crown, AlertTriangle, CheckCircle, Clock } from 'lucide-react';
+import { Sparkles, RefreshCw, Palette, Crown, AlertTriangle, CheckCircle, Clock } from 'lucide-react';
 
 import { MicPermissionTab } from '@/features/voice/MicPermissionTab';
 

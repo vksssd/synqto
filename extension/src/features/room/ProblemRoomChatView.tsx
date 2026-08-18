@@ -11,7 +11,7 @@ import { TutorService } from '@/features/tutor/tutor.service';
 import { VoiceRoom } from '@/features/voice/VoiceRoom';
 import { VoiceService } from '@/features/voice/voice.service';
 import { RoomService } from './room.service';
-import { ArrowRight, Radio, Volume2, Mic, MicOff, Tv, ChevronDown, ChevronUp } from 'lucide-react';
+import { ArrowRight, Mic, MicOff, Tv } from 'lucide-react';
 
 interface ProblemRoomChatViewProps {
   room: RoomContext | null;
@@ -125,7 +125,7 @@ export const ProblemRoomChatView: React.FC<ProblemRoomChatViewProps> = ({
               value={customRoomInput}
               onChange={(e) => setCustomRoomInput(e.target.value)}
               style={{ fontSize: '11px', padding: '6px 10px' }}
-            />
+             aria-label="Or join custom room (e.g. system-design)"/>
             <button
               type="submit"
               className="btn btn-primary btn-sm"

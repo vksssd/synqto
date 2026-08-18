@@ -9,7 +9,8 @@ import { IdentityCard } from '@/features/identity/IdentityCard';
 import { StreakHeatmap } from '@/features/gamification/StreakHeatmap';
 import { BadgeGallery } from '@/features/gamification/BadgeGallery';
 import { SettingsCard } from './SettingsCard';
-import { User, Settings, Layers, Flame } from 'lucide-react';
+import { SyncCard } from '@/features/sync/SyncCard';
+import { User, Settings, Layers } from 'lucide-react';
 
 interface ProfileSettingsViewProps {
   isLeader: boolean;
@@ -140,7 +141,15 @@ export const ProfileSettingsView: React.FC<ProfileSettingsViewProps> = ({ isLead
 
       {/* 2. Settings & Network Section */}
       {(activeSection === 'all' || activeSection === 'settings') && (
-        <SettingsCard />
+        <>
+          <SettingsCard />
+          {/* SyncCard was fully built but never rendered anywhere, so users had no way to
+              see their live P2P topology, peer role or signaling state — the exact
+              information needed to tell "nobody else is here" apart from "I failed to
+              connect". The section is already titled "Settings & Network"; this is the
+              Network half. */}
+          <SyncCard />
+        </>
       )}
     </div>
   );

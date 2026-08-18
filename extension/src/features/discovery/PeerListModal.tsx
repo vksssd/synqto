@@ -1,6 +1,7 @@
 // ─── Online Peer Roster Modal Component ───
 
 import React from 'react';
+import { useModalA11y } from '@/shared/useModalA11y';
 import { X, Hand, Sparkles, Crown } from 'lucide-react';
 import { OnlinePeer, DiscoveryService } from './discovery.service';
 import { RichPresenceBadge } from '@/features/status/RichPresenceBadge';
@@ -23,6 +24,7 @@ export const PeerListModal: React.FC<PeerListModalProps> = ({
   myIdentity,
   leaderId,
 }) => {
+  const { dialogProps } = useModalA11y(isOpen, onClose);
   const discovery = DiscoveryService.getInstance();
 
   if (!isOpen) return null;
@@ -31,7 +33,7 @@ export const PeerListModal: React.FC<PeerListModalProps> = ({
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()} {...dialogProps} aria-labelledby="peer-list-title">
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ fontWeight: 600, fontSize: '14px', color: 'var(--text-primary)' }}>

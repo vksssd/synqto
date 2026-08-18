@@ -1,9 +1,10 @@
 // ─── Password Prompt Modal for Private Groups ───
 
 import React, { useState } from 'react';
+import { useModalA11y } from '@/shared/useModalA11y';
 import { StudyGroup } from './group.types';
 import { GroupService } from './group.service';
-import { Lock, X, Eye, EyeOff, ShieldCheck, ArrowRight } from 'lucide-react';
+import { Lock, X, Eye, EyeOff, ShieldCheck } from 'lucide-react';
 
 interface PasswordPromptModalProps {
   group: StudyGroup | null;
@@ -18,6 +19,7 @@ export const PasswordPromptModal: React.FC<PasswordPromptModalProps> = ({
   onClose,
   onSuccess,
 }) => {
+  const { dialogProps } = useModalA11y(isOpen, onClose);
   const groupService = GroupService.getInstance();
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -54,13 +56,13 @@ export const PasswordPromptModal: React.FC<PasswordPromptModalProps> = ({
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '360px' }}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '360px' }} {...dialogProps} aria-labelledby="squad-password-title">
         <div className="glass-card-header">
           <div className="glass-card-title">
             <Lock size={16} color="var(--accent-purple)" />
-            <span>Private Squad Access</span>
+            <span id="squad-password-title">Private Squad Access</span>
           </div>
-          <button className="btn btn-ghost btn-icon btn-sm" onClick={onClose}>
+          <button className="btn btn-ghost btn-icon btn-sm" onClick={onClose} aria-label="Close dialog">
             <X size={16} />
           </button>
         </div>
@@ -127,7 +129,7 @@ export const PasswordPromptModal: React.FC<PasswordPromptModalProps> = ({
                 autoFocus
                 required
                 style={{ paddingRight: '36px' }}
-              />
+               aria-label="Enter password"/>
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}

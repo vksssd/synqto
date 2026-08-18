@@ -1,36 +1,7 @@
 // ─── Extension Settings & Diagnostics Card (Clean UI + Day/Night/System Themes) ───
 
 import React, { useState, useEffect } from 'react';
-import {
-  Server,
-  Trash2,
-  Shield,
-  Info,
-  Check,
-  MessageSquare,
-  Plus,
-  X,
-  Sun,
-  Moon,
-  Monitor,
-  Layout,
-  Palette,
-  Sparkles,
-  Clock,
-  Flame,
-  RefreshCw,
-  CheckCircle,
-  AlertTriangle,
-  RotateCcw,
-  Search,
-  Type,
-  Sliders,
-  Eye,
-  SlidersHorizontal,
-  ChevronDown,
-  ChevronUp,
-  ChevronsUpDown,
-} from 'lucide-react';
+import { Server, Trash2, Shield, Info, Check, MessageSquare, Plus, X, Sun, Layout, Palette, Sparkles, Clock, RefreshCw, CheckCircle, AlertTriangle, RotateCcw, Search, Type, Eye, SlidersHorizontal, ChevronDown, ChevronUp, ChevronsUpDown } from 'lucide-react';
 import { SignalingService } from '@/core/network/signaling.service';
 import {
   ThemeService,
@@ -440,7 +411,7 @@ export const SettingsCard: React.FC = () => {
               background: 'rgba(0, 0, 0, 0.35)',
               borderRadius: '8px',
             }}
-          />
+           aria-label="Search settings (e.g. theme, timer, server, widget, data)"/>
           {searchQuery && (
             <button
               type="button"
@@ -1057,7 +1028,7 @@ export const SettingsCard: React.FC = () => {
                   height: '26px',
                   fontFamily: 'var(--font-mono)',
                 }}
-              />
+               aria-label="#6366f1"/>
 
               <button
                 type="submit"
@@ -1583,7 +1554,7 @@ export const SettingsCard: React.FC = () => {
                 value={newDomainInput}
                 onChange={(e) => setNewDomainInput(e.target.value)}
                 style={{ fontSize: '11px', padding: '4px 8px', flex: 1 }}
-              />
+               aria-label="Blocked site domain"/>
               <button type="submit" className="btn btn-primary btn-sm" disabled={!newDomainInput.trim()}>
                 <Plus size={12} />
               </button>
@@ -2096,7 +2067,7 @@ export const SettingsCard: React.FC = () => {
                     onChange={(e) => setServerUrl(e.target.value)}
                     placeholder="wss://synqto-server.onrender.com/ws/"
                     style={{ flex: 1, fontSize: '11px', padding: '6px 10px' }}
-                  />
+                   aria-label="wss://synqto-server.onrender.com/ws/"/>
                   <button className="btn btn-primary btn-sm" onClick={handleSaveAndReconnect} title="Save URL &amp; Connect">
                     {savedUrl ? <Check size={13} /> : 'Save &amp; Connect'}
                   </button>

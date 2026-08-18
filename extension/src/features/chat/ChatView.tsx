@@ -342,7 +342,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ myIdentity, roomId }) => {
                   value={codeTitle}
                   onChange={(e) => setCodeTitle(e.target.value)}
                   style={{ flex: 1, fontSize: '11px' }}
-                />
+                 aria-label="Snippet Title (optional)"/>
                 <select
                   value={codeLanguage}
                   onChange={(e) => setCodeLanguage(e.target.value)}
@@ -411,7 +411,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ myIdentity, roomId }) => {
                 onChange={(e) => setPollQuestion(e.target.value)}
                 style={{ fontSize: '11px' }}
                 autoFocus
-              />
+               aria-label="Ask a question (e.g. Which approach is faster?)"/>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                 {pollOptions.map((opt, idx) => (
@@ -427,7 +427,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ myIdentity, roomId }) => {
                         setPollOptions(updated);
                       }}
                       style={{ flex: 1, fontSize: '11px' }}
-                    />
+                     aria-label="Option"/>
                     {pollOptions.length > 2 && (
                       <button
                         type="button"
@@ -498,7 +498,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ myIdentity, roomId }) => {
                 onChange={(e) => setQuizQuestion(e.target.value)}
                 style={{ fontSize: '11px' }}
                 autoFocus
-              />
+               aria-label="Question (e.g. Time complexity of Heapify?)"/>
 
               <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
                 Select the radio button next to the <strong>correct answer</strong>:
@@ -525,7 +525,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ myIdentity, roomId }) => {
                         setQuizOptions(updated);
                       }}
                       style={{ flex: 1, fontSize: '11px' }}
-                    />
+                     aria-label="Choice"/>
                   </div>
                 ))}
               </div>

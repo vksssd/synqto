@@ -1,18 +1,9 @@
 // ─── Create Group Modal (Serverless & Zero-Knowledge) ───
 
 import React, { useState } from 'react';
+import { useModalA11y } from '@/shared/useModalA11y';
 import { GroupService } from './group.service';
-import {
-  X,
-  Lock,
-  Globe,
-  Sparkles,
-  Eye,
-  EyeOff,
-  Dices,
-  ShieldCheck,
-  Tag,
-} from 'lucide-react';
+import { X, Lock, Globe, Sparkles, Eye, EyeOff, Dices, ShieldCheck } from 'lucide-react';
 
 const TOPIC_PRESETS = [
   'LeetCode',
@@ -37,6 +28,7 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
   onClose,
   onSuccess,
 }) => {
+  const { dialogProps } = useModalA11y(isOpen, onClose);
   const groupService = GroupService.getInstance();
 
   const [name, setName] = useState('');
@@ -95,14 +87,14 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '400px' }}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '400px' }} {...dialogProps} aria-labelledby="create-squad-title">
         {/* Header */}
         <div className="glass-card-header" style={{ marginBottom: 4 }}>
           <div className="glass-card-title" style={{ fontSize: '15px' }}>
             <Sparkles size={16} color="var(--primary)" />
-            <span>Create Study Squad</span>
+            <span id="create-squad-title">Create Study Squad</span>
           </div>
-          <button className="btn btn-ghost btn-icon btn-sm" onClick={onClose}>
+          <button className="btn btn-ghost btn-icon btn-sm" onClick={onClose} aria-label="Close dialog">
             <X size={16} />
           </button>
         </div>
@@ -183,7 +175,7 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                 maxLength={40}
                 required
                 autoFocus
-              />
+               aria-label="Squad name"/>
             </div>
           </div>
 
@@ -254,7 +246,7 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               maxLength={80}
-            />
+             aria-label="Squad description or goal"/>
           </div>
 
           {/* Privacy Toggle (Public vs Private Password Protected) */}
@@ -327,7 +319,7 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                     onChange={(e) => setPassword(e.target.value)}
                     required={isPrivate}
                     style={{ paddingRight: '36px' }}
-                  />
+                   aria-label="Enter secret squad password"/>
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}

@@ -2881,7 +2881,7 @@ export const WhiteboardCanvas: React.FC = () => {
                 width: '140px',
                 outline: 'none',
               }}
-            />
+             aria-label="Type label text"/>
             <button
               type="button"
               className="btn btn-primary btn-sm"

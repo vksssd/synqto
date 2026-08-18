@@ -4,33 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { TutorService } from './tutor.service';
 import { TutorStageState, HandRaiseRequest, BroadcastType, ActiveStreamInfo } from './tutor.types';
 import { CodeTogether } from '../code/CodeTogether';
-import {
-  Mic,
-  MicOff,
-  Video,
-  VideoOff,
-  Monitor,
-  Hand,
-  Radio,
-  X,
-  Check,
-  Maximize2,
-  Minimize2,
-  Tv,
-  Plus,
-  Play,
-  ZoomIn,
-  ZoomOut,
-  RotateCcw,
-  Sliders,
-  Settings2,
-  Sparkles,
-  Volume2,
-  VolumeX,
-  Code2,
-  ExternalLink,
-  Camera,
-} from 'lucide-react';
+import { Mic, MicOff, Video, Monitor, Hand, Radio, X, Maximize2, Minimize2, Tv, Plus, ZoomIn, RotateCcw, Sliders, Settings2, Volume2, VolumeX, Code2, ExternalLink, Camera } from 'lucide-react';
 
 interface TutorStageProps {
   currentRoomId: string;
@@ -422,7 +396,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                   onChange={(e) => setStreamTitleInput(e.target.value)}
                   autoFocus
                   style={{ width: '100%', fontSize: '12px' }}
-                />
+                 aria-label="Session topic"/>
               </div>
 
               <div style={{ fontSize: '10px', color: 'var(--text-muted)', lineHeight: 1.4 }}>

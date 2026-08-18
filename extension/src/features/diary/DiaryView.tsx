@@ -1,33 +1,7 @@
 // ─── Synqto Personal Diary & Notes App View (Collapsible Sidebar + Markdown + Whiteboard + PDF Export) ───
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import {
-  BookOpen,
-  Plus,
-  Trash2,
-  Download,
-  Search,
-  Tag,
-  ExternalLink,
-  ChevronDown,
-  Edit3,
-  Code,
-  CheckSquare,
-  List,
-  Check,
-  FileText,
-  Palette,
-  Columns,
-  Printer,
-  Sparkles,
-  PanelLeftClose,
-  PanelLeftOpen,
-  Folder,
-  Calendar,
-  Smile,
-  Hash,
-  Share2,
-} from 'lucide-react';
+import { BookOpen, Plus, Trash2, Download, Search, Tag, ExternalLink, ChevronDown, Code, CheckSquare, List, FileText, Palette, Columns, Printer, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { DiaryService } from './diary.service';
 import { DiaryBook, DiaryEntry, DiaryMood, DiaryWhiteboardData } from './diary.types';
 import { DiaryWhiteboardCanvas } from './DiaryWhiteboardCanvas';
@@ -406,7 +380,7 @@ export const DiaryView: React.FC = () => {
                         onChange={(e) => setNewDiaryTitle(e.target.value)}
                         autoFocus
                         style={{ fontSize: '10px', padding: '4px 6px', flex: 1 }}
-                      />
+                       aria-label="Notebook name"/>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '4px' }}>
                       <button type="button" className="btn btn-ghost btn-sm" onClick={() => setIsCreatingDiary(false)} style={{ fontSize: '9px', padding: '2px 6px' }}>
@@ -530,7 +504,7 @@ export const DiaryView: React.FC = () => {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 style={{ fontSize: '10px', padding: '3px 6px 3px 22px', width: '100%' }}
-              />
+               aria-label="Search pages"/>
             </div>
 
             {/* List of Pages */}
@@ -620,7 +594,7 @@ export const DiaryView: React.FC = () => {
                   flex: 1,
                   minWidth: '150px',
                 }}
-              />
+               aria-label="Page Title (e.g. Binary Search Tree Inversion)"/>
 
               {/* View Switcher: Text / Whiteboard / Split */}
               <div
@@ -779,7 +753,7 @@ export const DiaryView: React.FC = () => {
                       fontSize: '8.5px',
                       width: '45px',
                     }}
-                  />
+                   aria-label="+tag"/>
                 </div>
               </div>
 

@@ -3,18 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { TimerService } from './timer.service';
 import { TimerState, PomodoroConfig, TimerMode } from './timer.types';
-import {
-  Play,
-  Pause,
-  RotateCcw,
-  Plus,
-  Flame,
-  Coffee,
-  Clock,
-  CheckCircle2,
-  Volume2,
-  VolumeX,
-} from 'lucide-react';
+import { Play, Pause, RotateCcw } from 'lucide-react';
 
 export const FocusTimerBar: React.FC = () => {
   const timerService = TimerService.getInstance();

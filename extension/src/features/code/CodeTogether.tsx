@@ -3,22 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { CodeService } from './code.service';
 import { CodeLanguage, CodeSessionState } from './code.types';
-import {
-  Play,
-  Copy,
-  Check,
-  RotateCcw,
-  Sparkles,
-  Terminal,
-  Code2,
-  Users,
-  ChevronDown,
-  Clock,
-  CheckCircle2,
-  AlertCircle,
-  FileCode2,
-  Share2,
-} from 'lucide-react';
+import { Play, Copy, Check, RotateCcw, Terminal, Code2, Users, ChevronDown, Clock, CheckCircle2, AlertCircle } from 'lucide-react';
 
 interface CodeTogetherProps {
   currentRoomId: string;

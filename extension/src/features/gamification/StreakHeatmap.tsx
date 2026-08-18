@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { StreakStats } from './gamification.types';
-import { Flame, Zap, CheckCircle2, Clock, Calendar, ChevronDown, ChevronUp } from 'lucide-react';
+import { Flame, Zap, ChevronDown, ChevronUp } from 'lucide-react';
 
 interface StreakHeatmapProps {
   stats: StreakStats;

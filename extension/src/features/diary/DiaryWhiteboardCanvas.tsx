@@ -2,43 +2,7 @@
 // Full Feature Parity: DSA Visualizers, Architecture Nodes, 18 Presets, 3D Isometric & Independent Styles
 
 import React, { useRef, useState, useEffect, useCallback } from 'react';
-import {
-  Pencil,
-  Clock,
-  Eraser,
-  Square,
-  Circle,
-  MoveRight,
-  Database,
-  Cloud,
-  Scale,
-  Server,
-  Layers,
-  Zap,
-  GitBranch,
-  Trash2,
-  Download,
-  Palette,
-  Type,
-  Minus,
-  RotateCcw,
-  Code,
-  Shield,
-  Smartphone,
-  Globe,
-  StickyNote,
-  Triangle,
-  Star,
-  LayoutGrid,
-  MousePointer,
-  Hand,
-  Copy,
-  Plus,
-  X,
-  Clipboard,
-  PenTool,
-  Highlighter,
-} from 'lucide-react';
+import { Pencil, Clock, Eraser, Circle, Server, Trash2, Type, RotateCcw, Code, Shield, Triangle, MousePointer, Copy, Plus, X, Clipboard, PenTool, Highlighter } from 'lucide-react';
 import { DiaryWhiteboardData } from './diary.types';
 
 interface Point {
@@ -1741,7 +1705,7 @@ export const DiaryWhiteboardCanvas: React.FC<{
                 width: '120px',
                 outline: 'none',
               }}
-            />
+             aria-label="Type label"/>
             <button
               type="button"
               className="btn btn-primary btn-sm"

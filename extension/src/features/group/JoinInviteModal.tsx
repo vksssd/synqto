@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { GroupService } from './group.service';
 import { GroupInvitePayload } from './group.types';
-import { Ticket, X, Lock, Globe, Eye, EyeOff, ArrowRight } from 'lucide-react';
+import { Ticket, X, Lock, Globe, Eye, EyeOff } from 'lucide-react';
 
 interface JoinInviteModalProps {
   isOpen: boolean;
@@ -203,7 +203,7 @@ export const JoinInviteModal: React.FC<JoinInviteModalProps> = ({
               autoComplete="off"
               spellCheck={false}
               aria-describedby="join-squad-hint"
-            />
+             aria-label="Squad name or invite token"/>
 
             {/* Live resolution preview: shows the exact handle the name normalizes to, so
                 two people can confirm they are typing the same thing before joining. */}
@@ -284,7 +284,7 @@ export const JoinInviteModal: React.FC<JoinInviteModalProps> = ({
                       onChange={(e) => setPassword(e.target.value)}
                       required
                       style={{ paddingRight: '36px' }}
-                    />
+                     aria-label="Enter squad password"/>
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}

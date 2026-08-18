@@ -1,7 +1,7 @@
 // ─── P2P Topology & Network Sync Card ───
 
 import React, { useState, useEffect } from 'react';
-import { Network, Activity, RefreshCw, Cpu } from 'lucide-react';
+import { Network } from 'lucide-react';
 import { TopologyService, TopologyState } from '@/core/network/topology.service';
 import { SignalingService } from '@/core/network/signaling.service';
 

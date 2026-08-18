@@ -8,7 +8,7 @@
 // real defect or exists because a plausible one had to be ruled out.
 
 import assert from 'assert';
-import { PeerSignaling } from '../src/core/network/peer-signaling.ts';
+import { PeerSignaling, MAX_SIGNAL_HOPS } from '../src/core/network/peer-signaling.ts';
 import { LinkMonitor } from '../src/core/network/link-monitor.ts';
 
 let passed = 0;
@@ -206,22 +206,35 @@ scenario('signal amplification is bounded and never recurses', () => {
   assert.strictEqual(applied.length, 1, `duplicate relayed offers were applied ${applied.length} times`);
 });
 
-scenario('a forwarded signal cannot be forwarded again', () => {
+scenario('the hop budget terminates forwarding', () => {
+  // This scenario previously asserted a hard 1-hop limit. That limit existed only because
+  // without a routing table there was no loop prevention, so refusing to forward twice was
+  // the only safe rule — at the cost of making a peer two hops away unreachable through the
+  // mesh. Link-state routing forwards along a shortest-path tree, which cannot cycle, so
+  // the budget is now a backstop rather than the primary defence.
+  //
+  // The property that must still hold is unchanged: a signal cannot circulate forever.
   const mesh = new SimMesh(['a', 'b', 'c'], { serverUp: false });
   mesh.linkAll();
 
-  const alreadyHopped = {
+  const exhausted = {
     targetPeerId: 'b',
     originPeerId: 'a',
     kind: 'offer',
     data: {},
     seq: 1,
-    hops: 1, // at the limit
+    hops: MAX_SIGNAL_HOPS, // budget spent
   };
-  mesh.nodes.get('c').signaling.handleInbound(alreadyHopped, { from: { peerId: 'a' } });
+  mesh.nodes.get('c').signaling.handleInbound(exhausted, { from: { peerId: 'a' } });
 
   assert.strictEqual(mesh.nodes.get('c').signaling.getStats().droppedHops, 1);
-  assert.strictEqual(mesh.nodes.get('b').applied.length, 0, 'hop limit did not hold');
+  assert.strictEqual(mesh.nodes.get('b').applied.length, 0, 'hop budget did not terminate forwarding');
+
+  // And one hop below the budget must still be forwarded, or the budget is off by one and
+  // reachability silently shrinks.
+  const withinBudget = { ...exhausted, seq: 2, hops: MAX_SIGNAL_HOPS - 1 };
+  mesh.nodes.get('c').signaling.handleInbound(withinBudget, { from: { peerId: 'a' } });
+  assert.ok(mesh.nodes.get('b').applied.length > 0, 'a signal inside the budget was dropped');
 });
 
 scenario('stale session descriptions are rejected, ICE is not', () => {

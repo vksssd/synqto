@@ -66,14 +66,19 @@ export interface SignalRouteResult {
 }
 
 /**
- * Signals take at most one relay hop.
+ * Hop budget for a relayed signal.
  *
- * Multi-hop forwarding would need loop prevention and a routing table, and buys very
- * little: if no single common neighbour exists, the mesh is partitioned badly enough that
- * the server is the honest answer. One hop covers every topology this app builds — TIER1 is
- * a full mesh (any peer is a common neighbour) and TIER2 clusters share a leader.
+ * This was 1, because without a routing table multi-hop forwarding had no loop prevention —
+ * a forwarded signal could circulate indefinitely, so refusing to forward twice was the only
+ * safe rule. That also capped reachability: a peer two hops away was unreachable through the
+ * mesh even when a perfectly good path existed.
+ *
+ * With link-state routing each forward follows a next-hop computed from a consistent
+ * shortest-path tree, which cannot cycle. The budget is retained purely as a backstop
+ * against a transiently inconsistent map during convergence, sized above the diameter of any
+ * topology this app builds (a 30-peer sparse mesh measures 4).
  */
-export const MAX_SIGNAL_HOPS = 1;
+export const MAX_SIGNAL_HOPS = 6;
 
 export class PeerSignaling {
   private myPeerId = '';
@@ -117,6 +122,8 @@ export class PeerSignaling {
     droppedHops: 0,
     untrackedOrigins: 0,
     admissionRefused: 0,
+    routed: 0,
+    unroutedFanout: 0,
   };
 
   constructor(
@@ -197,11 +204,39 @@ export class PeerSignaling {
    * Sorted for determinism, so logs and tests stay reproducible.
    */
   private pickRelays(targetPeerId: string): string[] {
+    // Exact next-hop when routing knows one.
+    //
+    // The fan-out below is a guess standing in for knowledge: three neighbours chosen
+    // arbitrarily, hoping one has a path. With a routing table we know which neighbour
+    // actually leads to the target, so one send replaces three — and it reaches targets the
+    // guess could not, because it follows multi-hop paths instead of only trying peers
+    // adjacent to the destination.
+    const routed = this.getNextHop?.(targetPeerId);
+    if (routed) {
+      this.counters.routed++;
+      return [routed];
+    }
+
+    // Fallback: no route known. Happens before the first LSAs converge, immediately after a
+    // partition, and for peers that have never been adjacent to anyone we can see. Blind
+    // fan-out is the right behaviour here — it is what discovers a path when the map is
+    // empty, and it is exactly how the signal that bootstraps routing gets through.
+    this.counters.unroutedFanout++;
     return this.getConnectedPeers()
       .filter((p) => p !== targetPeerId && p !== this.myPeerId)
       .sort()
       .slice(0, PeerSignaling.RELAY_FANOUT);
   }
+
+  /**
+   * Binds the routing table. Optional: PeerSignaling stays functional without it, falling
+   * back to fan-out, which keeps the two subsystems independently testable.
+   */
+  public bindRouter(getNextHop: (targetPeerId: string) => string | null): void {
+    this.getNextHop = getNextHop;
+  }
+
+  private getNextHop: ((targetPeerId: string) => string | null) | null = null;
 
   /**
    * Handles an inbound peer-signal packet: either apply it, or forward it one hop.

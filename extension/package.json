@@ -1,6 +1,6 @@
 {
   "name": "synqto-extension",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,7 +11,8 @@
     "package": "node scripts/package.mjs",
     "clean": "rimraf dist",
     "preview:ui": "vite --host 127.0.0.1",
-    "test:stress": "npx tsx scripts/stress-mesh.mjs"
+    "test:stress": "npx tsx scripts/stress-mesh.mjs",
+    "test:routing": "npx tsx scripts/stress-routing.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",

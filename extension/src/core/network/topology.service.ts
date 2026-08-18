@@ -17,6 +17,7 @@ import { TopologyView } from '../topology/topology-view';
 import { IRouteResolver } from '../topology/route-resolver';
 import { PeerSignaling, PeerSignalPayload } from './peer-signaling';
 import { LinkMonitor } from './link-monitor';
+import { LinkStateRouter, LSA } from '../topology/link-state';
 
 export interface TopologyState {
   isLeader: boolean;
@@ -41,6 +42,8 @@ export class TopologyService {
 
   private peerSignaling: PeerSignaling;
   private linkMonitor: LinkMonitor;
+  private router: LinkStateRouter;
+  private routerTimer: any = null;
 
   private myIdentity: PeerIdentity | null = null;
   private currentRoomId = '';
@@ -116,6 +119,9 @@ export class TopologyService {
       },
       (peerId) => this.handleDeadLink(peerId)
     );
+
+    this.router = new LinkStateRouter('');
+    this.peerSignaling.bindRouter((targetPeerId) => this.router.nextHop(targetPeerId));
 
     this.bindTierCoordinatorListeners();
 
@@ -203,6 +209,8 @@ export class TopologyService {
     this.peerSignaling.setMyPeerId(identity.peerId);
     this.peerSignaling.reset();
     this.linkMonitor.reset();
+    this.router.setMyPeerId(identity.peerId);
+    this.router.reset();
 
     // Connect to signaling server
     this.signaling.connect(roomId, identity.peerId, identity.nickname);
@@ -210,12 +218,15 @@ export class TopologyService {
     // Start background topology reconciliation and link liveness loops
     this.startReconciliationLoop();
     this.linkMonitor.start();
+    this.startRoutingLoop();
   }
 
   public leave() {
     this.stopReconciliationLoop();
     this.linkMonitor.stop();
     this.linkMonitor.reset();
+    this.stopRoutingLoop();
+    this.router.reset();
     this.peerSignaling.reset();
     this.clearAllRetryTimers();
     if (this.leaderMesh) {
@@ -543,6 +554,105 @@ export class TopologyService {
     });
   }
 
+  // ───────────────────────────────────────────────────────────────────────────
+  // Link-state routing
+  // ───────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Periodically re-advertises our neighbour set and ages out departed peers.
+   *
+   * The router rate-limits its own emissions, so calling this on a short tick is safe: it
+   * only produces an LSA when something actually changed and the cooldown has elapsed.
+   */
+  private startRoutingLoop() {
+    this.stopRoutingLoop();
+    this.routerTimer = setInterval(() => {
+      this.router.ageOut();
+      this.advertiseNeighbours();
+    }, 2000);
+  }
+
+  private stopRoutingLoop() {
+    if (this.routerTimer) {
+      clearInterval(this.routerTimer);
+      this.routerTimer = null;
+    }
+  }
+
+  /** Publishes our current neighbour set with measured link costs. */
+  private advertiseNeighbours() {
+    if (!this.myIdentity) return;
+
+    // Cost is the monitor's smoothed RTT where we have one. A link we have not measured yet
+    // gets a neutral estimate rather than 0 — claiming a free link would make every path
+    // prefer to route through us before we know anything about it.
+    const health = new Map(this.linkMonitor.getHealth().map((h) => [h.peerId, h.rttMs]));
+    const neighbours = this.webrtc.getConnectedPeers().map((peerId) => ({
+      peerId,
+      costMs: health.get(peerId) ?? 50,
+    }));
+
+    const lsa = this.router.updateLocalNeighbours(neighbours);
+    if (lsa) this.floodLSA(lsa, null);
+  }
+
+  /**
+   * Floods an LSA to every neighbour except the one it arrived from (split horizon).
+   *
+   * Sent directly rather than through the route resolver: flooding is how the routing table
+   * is built, so it cannot depend on the routing table being correct yet.
+   */
+  private floodLSA(lsa: LSA, exceptPeerId: string | null) {
+    if (!this.myIdentity) return;
+    for (const peerId of this.webrtc.getConnectedPeers()) {
+      if (peerId === exceptPeerId) continue;
+      const packet = createPacket(
+        'link:lsa' as any,
+        this.myIdentity,
+        this.currentRoomId,
+        { ...lsa, ttl: Math.max(0, lsa.ttl - 1) },
+        peerId,
+        { channelPriority: 'control', priority: 'CONTROL' }
+      );
+      this.webrtc.sendPacket(peerId, packet);
+    }
+  }
+
+  /**
+   * Pushes our whole database to a peer whose link has just come up.
+   *
+   * Required for correctness, not merely as an optimisation. Flooding only propagates LSAs
+   * as they are generated, so without this exchange two peers that were previously apart
+   * would each keep a database the other never learns — a healed partition would stay
+   * partitioned in the routing tables, and a peer joining an established room would learn
+   * only about future changes rather than the room as it already is.
+   */
+  private syncDatabaseWith(peerId: string) {
+    if (!this.myIdentity) return;
+    const lsas = this.router.getDatabaseSnapshot();
+    if (lsas.length === 0) return;
+
+    const packet = createPacket(
+      'link:lsdb_sync' as any,
+      this.myIdentity,
+      this.currentRoomId,
+      { lsas },
+      peerId,
+      { channelPriority: 'bulk', priority: 'CONTROL' }
+    );
+    this.webrtc.sendPacket(peerId, packet);
+  }
+
+  /** Routing diagnostics. */
+  public getRoutingStats() {
+    return this.router.getStats();
+  }
+
+  /** The verified topology this peer can see, for persistence and diagnostics. */
+  public getKnownTopology() {
+    return this.router.getTopology();
+  }
+
   /**
    * A link the monitor has declared dead: probes went unanswered while the channel still
    * reported itself open.
@@ -636,12 +746,22 @@ export class TopologyService {
           this.retryTimers.delete(peerId);
         }
 
+        // New adjacency: exchange databases, then re-advertise so the rest of the room
+        // learns about this link. Order matters — the peer needs our database before our
+        // new LSA references it.
+        this.syncDatabaseWith(peerId);
+        this.advertiseNeighbours();
+
         if (this.isLeader && !this.backboneLeaders.has(peerId)) {
           this.clusterPeers.add(peerId);
         }
       } else if (status === 'disconnected' || status === 'failed') {
         this.clusterPeers.delete(peerId);
         this.standbyPeers.delete(peerId);
+
+        // Withdraw the link promptly. Waiting for the periodic advertisement would leave
+        // the rest of the room routing through an edge that no longer exists.
+        this.advertiseNeighbours();
 
         // Instant Sub-300ms Failover Check:
         // If primary assigned leader dropped, immediately flip to pre-warmed standby leader!
@@ -710,6 +830,21 @@ export class TopologyService {
     if (packet.type === ('link:pong' as any)) {
       const probeId = (packet.payload as { probeId?: string })?.probeId ?? '0';
       this.linkMonitor.notePong(fromPeerId, Number(probeId) || 0);
+      return;
+    }
+
+    if (packet.type === ('link:lsa' as any)) {
+      const lsa = packet.payload as LSA;
+      const res = this.router.handleLSA(lsa, fromPeerId);
+      if (res.accepted && res.reflood) this.floodLSA(lsa, fromPeerId);
+      return;
+    }
+
+    if (packet.type === ('link:lsdb_sync' as any)) {
+      const lsas = (packet.payload as { lsas?: LSA[] })?.lsas ?? [];
+      const novel = this.router.handleDatabaseSnapshot(lsas, fromPeerId);
+      // Anything genuinely new to us is new to our other neighbours too.
+      for (const lsa of novel) this.floodLSA(lsa, fromPeerId);
       return;
     }
 

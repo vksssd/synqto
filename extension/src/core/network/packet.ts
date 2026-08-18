@@ -54,6 +54,8 @@ export type PacketType =
   | 'sync:delta_response'
   | 'topology:digest'
   | 'signal:peer'
+  | 'link:lsa'
+  | 'link:lsdb_sync'
   | 'link:probe'
   | 'link:pong'
   | 'relay:packet'

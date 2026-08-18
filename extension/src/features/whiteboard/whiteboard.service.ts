@@ -1,6 +1,7 @@
 // ─── Collaborative & Personal Whiteboard Service (Multi-Page Notebook, Multi-Window Sync & P2P Collab Mesh) ───
 
 import { NetworkService } from '@/core/network/network.service';
+import { globalClock, compareHLC } from '@/core/network/hybrid-clock';
 import { IdentityService } from '@/features/identity/identity.service';
 import {
   WhiteboardStroke,
@@ -444,6 +445,17 @@ export class WhiteboardService {
       }
 
       if (changed) {
+        // Restore a deterministic z-order. Union-merge appends in arrival order, which
+        // differs per peer; sorting on the stroke stamp makes overlapping strokes paint
+        // identically everywhere.
+        for (const pg of this.collabNotebook.pages) {
+          pg.strokes.sort((x, y) =>
+            compareHLC(
+              { hlc: x.hlc, timestamp: x.timestamp, peerId: x.peerId },
+              { hlc: y.hlc, timestamp: y.timestamp, peerId: y.peerId }
+            )
+          );
+        }
         this.saveCollabNotebook();
         this.notifyNotebookListeners();
         this.notifyListeners();
@@ -810,6 +822,7 @@ export class WhiteboardService {
       geometry,
       text,
       timestamp: Date.now(),
+      hlc: globalClock.tick(),
     };
 
     if (tool === 'temp_pen') {

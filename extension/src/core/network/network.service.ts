@@ -6,6 +6,7 @@ import { TopologyPolicy, ADAPTIVE_POLICY } from '../topology/topology.types';
 import { DeliveryReceipt } from './reliable-transport';
 import { TransportRouter } from '../transport/transport-router';
 import { PacketPipeline } from './packet-pipeline';
+import { globalClock } from './hybrid-clock';
 
 export class NetworkService {
   private static instance: NetworkService | null = null;
@@ -26,6 +27,27 @@ export class NetworkService {
     // Bind TransportRouter to low-level P2P physical transport
     this.transportRouter.bindP2PSender((packet, targetPeerId) => {
       return this.topology.sendP2PPacket(packet, targetPeerId);
+    });
+
+    // Ingest inbound P2P packets into the same pipeline the relay path uses.
+    //
+    // This binding was missing entirely. TopologyService.deliverLocally fanned every packet
+    // arriving over a WebRTC DataChannel out to `topology.packetListeners` — a Set that
+    // nothing in the codebase ever subscribed to. So the inbound P2P path ran dedup, digest
+    // interception and TTL relaying correctly and then dropped the packet on the floor at
+    // the final step.
+    //
+    // Only the server-relay path reached application handlers, because RelayTransport
+    // subscribes to signaling 'relay:packet' directly and feeds TransportRouter. That is why
+    // this was not obvious in normal use: rooms still worked, just entirely via TIER3 relay,
+    // with the P2P mesh carrying traffic that was silently discarded on arrival. It is also
+    // why the test suite did not catch it — the simulation harness calls
+    // transportRouter.routeIncoming() itself and never exercises this seam.
+    //
+    // routeIncoming is transport-agnostic by contract ("from any physical transport") and
+    // applies its own dedup and epoch fencing, so P2P and relay ingress converge here.
+    this.topology.onPacket((packet) => {
+      this.transportRouter.routeIncoming(packet);
     });
 
     // Deliver ordered & reassembled packets from PacketPipeline to application features
@@ -171,7 +193,20 @@ export class NetworkService {
     return this.topology.getState();
   }
 
+  /** Identity this service was initialised with, or null before init(). */
+  public getMyIdentity(): PeerIdentity | null {
+    return this.myIdentity;
+  }
+
   private dispatchPacket(packet: NetworkPacket) {
+    // Merge the sender's hybrid timestamp BEFORE any handler runs.
+    //
+    // This ordering matters. A handler may itself send a packet in response, and that reply
+    // must carry a timestamp strictly greater than the packet that caused it — otherwise a
+    // reply can sort before the message it answers. Merging first guarantees that for every
+    // handler, without each one having to remember to do it.
+    globalClock.update(packet.hlc);
+
     // 1. Dispatch to registered type handlers
     const handlers = this.packetHandlers.get(packet.type);
     if (handlers) {

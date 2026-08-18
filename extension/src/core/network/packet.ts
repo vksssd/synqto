@@ -1,6 +1,8 @@
 // ─── Network Packet Schema ───
 // All P2P data flows as NetworkPacket instances over WebRTC DataChannels.
 
+import { HLC, globalClock } from './hybrid-clock';
+
 export type PacketType =
   | 'chat:message'
   | 'chat:ack'
@@ -207,6 +209,18 @@ export interface NetworkPacket {
   seq?: number;
   /** Logical Lamport clock for deterministic causal ordering of application events. */
   lamportTime?: number;
+  /**
+   * Hybrid logical timestamp — the field receivers should sort on.
+   *
+   * `timestamp` above is a raw Date.now() from the sender's machine and is NOT safely
+   * sortable across peers: clock skew routinely reorders it, so a reply can land before the
+   * message it answers. `hlc` carries the same wall-clock meaning while remaining causally
+   * correct. See core/network/hybrid-clock.ts.
+   *
+   * Optional only for wire compatibility with pre-0.5 peers; every packet this client sends
+   * has it.
+   */
+  hlc?: HLC;
   /** Topology epoch under which this packet was created. */
   topologyEpoch?: number;
 }
@@ -262,6 +276,10 @@ export function createPacket(
     roomId,
     payload,
     timestamp: Date.now(),
+    // Stamped here rather than at each call site: createPacket is the single chokepoint
+    // every outbound packet passes through, so this is the only place that can guarantee
+    // no packet type is ever missed.
+    hlc: globalClock.tick(),
     ttl: DEFAULT_TTL,
     priority: defaultPriority,
     channelPriority: options?.channelPriority || (isBulk ? 'bulk' : 'control'),
@@ -376,6 +394,16 @@ export interface StoredChatMessage {
   mentions?: string[];
   reactions?: Record<string, string[]>;
   status?: 'pending' | 'sent' | 'delivered' | 'read';
+  /**
+   * Ordering keys must survive persistence.
+   *
+   * Without these, every message restored from chrome.storage on reload came back with no
+   * ordering key and was sorted purely by raw epoch-ms against live messages that had one —
+   * so reopening a room could rearrange the whole conversation.
+   */
+  seq?: number;
+  lamportTime?: number;
+  hlc?: HLC;
 }
 
 // ─── Presence payload types ───

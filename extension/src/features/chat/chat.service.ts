@@ -20,6 +20,7 @@ import {
   QuizData,
   FileAttachmentData,
 } from '@/core/network/packet';
+import { HLC, compareHLC } from '@/core/network/hybrid-clock';
 import { uuid, debounce } from '@/shared/utils';
 
 export type MessageAckStatus = 'pending' | 'sent' | 'delivered' | 'read';
@@ -31,6 +32,37 @@ export interface ChatMessageItem extends StoredChatMessage {
   receivedAcks?: Set<string>;
   seq?: number;
   lamportTime?: number;
+  /** Hybrid logical timestamp — the ordering key. See orderMessages below. */
+  hlc?: HLC;
+}
+
+/**
+ * The single ordering comparator for the message list.
+ *
+ * There were previously three different comparators in this file, and two of them were
+ * actively wrong:
+ *
+ *     (a.lamportTime || a.timestamp) - (b.lamportTime || b.timestamp)
+ *
+ * That expression compares values from two scales twelve orders of magnitude apart. A
+ * Lamport counter is a small integer (1, 2, 3...); a timestamp is epoch milliseconds
+ * (~1.79e12). So any message missing `lamportTime` was compared as a number ~1.79e12 and
+ * sorted after *every* message that had one — permanently, no matter when it was actually
+ * sent. Messages arriving via `chat:history:response` were exactly that case, because the
+ * history projection dropped seq/lamportTime on the way out. The visible symptom: pull in
+ * history, then receive one new message, and the entire history jumps to the bottom of the
+ * conversation. The `||` also meant a legitimate lamportTime of 0 fell through to the
+ * timestamp branch.
+ *
+ * Ordering is now HLC-based everywhere, with one comparator used by every code path.
+ */
+function orderMessages(list: ChatMessageItem[]): void {
+  list.sort((a, b) =>
+    compareHLC(
+      { hlc: a.hlc, timestamp: a.timestamp, peerId: a.from?.peerId },
+      { hlc: b.hlc, timestamp: b.timestamp, peerId: b.from?.peerId }
+    )
+  );
 }
 
 export interface ChatNotificationData {
@@ -156,7 +188,7 @@ export class ChatService {
       });
 
       if (added) {
-        this.messages.sort((a, b) => (a.lamportTime || a.timestamp) - (b.lamportTime || b.timestamp));
+        orderMessages(this.messages);
         this.saveMessagesDebounced();
         this.emitMessages();
       }
@@ -185,6 +217,7 @@ export class ChatService {
         timestamp: packet.timestamp,
         seq: packet.seq,
         lamportTime: packet.lamportTime,
+        hlc: packet.hlc,
         messageType: payload.messageType || 'text',
         replyTo: payload.replyTo,
         replyPreview: payload.replyPreview,
@@ -201,7 +234,7 @@ export class ChatService {
       };
 
       this.messages.push(msg);
-      this.messages.sort((a, b) => (a.lamportTime || a.timestamp) - (b.lamportTime || b.timestamp));
+      orderMessages(this.messages);
       this.saveMessagesDebounced();
       this.emitMessages();
 
@@ -331,6 +364,12 @@ export class ChatService {
           from: m.from,
           text: m.text,
           timestamp: m.timestamp,
+          // seq/lamportTime/hlc were omitted here, which is what broke history ordering:
+          // the receiver had no ordering key for these messages and sorted them by raw
+          // epoch-ms against other messages' Lamport counters. They must survive the trip.
+          seq: m.seq,
+          lamportTime: m.lamportTime,
+          hlc: m.hlc,
           messageType: m.messageType,
           replyTo: m.replyTo,
           replyPreview: m.replyPreview,
@@ -368,7 +407,7 @@ export class ChatService {
       });
 
       if (added) {
-        this.messages.sort((a, b) => a.timestamp - b.timestamp);
+        orderMessages(this.messages);
         this.saveMessagesDebounced();
         this.emitMessages();
       }
@@ -746,7 +785,7 @@ public sendMessage(
       msg.reactions,
   };
 
-  this.network.broadcast(
+  const sentPacket = this.network.broadcast(
     'chat:message',
     payload,
     {
@@ -756,6 +795,21 @@ public sendMessage(
         this.lamportClock,
     }
   );
+
+  // Adopt the exact stamp that went out on the wire.
+  //
+  // The local copy is built before the broadcast, so it has no HLC yet. It must not be
+  // stamped independently: a second globalClock.tick() would yield a *different* value from
+  // the one every other peer sees, so the sender's own message list could order differently
+  // from everyone else's — the one view where an inconsistency is most obvious. Taking the
+  // packet's stamp keeps all replicas identical.
+  if (sentPacket?.hlc) {
+    msg.hlc = sentPacket.hlc;
+    const mine = this.messages.find((m) => m.id === msg.id);
+    if (mine) mine.hlc = sentPacket.hlc;
+    orderMessages(this.messages);
+    this.emitMessages();
+  }
 
   // ─────────────────────────────────────────────
   // Reliable retry
@@ -1177,6 +1231,7 @@ public sendMessage(
               isSelf,
             };
           });
+          orderMessages(this.messages);
           this.emitMessages();
         }
       }
@@ -1211,6 +1266,9 @@ public sendMessage(
         mentions: m.mentions,
         reactions: m.reactions,
         status: m.status,
+        seq: m.seq,
+        lamportTime: m.lamportTime,
+        hlc: m.hlc,
       }));
 
       if (typeof chrome !== 'undefined' && chrome.storage?.local) {

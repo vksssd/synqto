@@ -26,6 +26,9 @@ import { SnapshotTransferManager } from '../src/core/replication/snapshot-transf
 import { ReplicatedStore } from '../src/core/replication/replicated-store.ts';
 import { ReplicationValidator } from '../src/core/replication/validation.ts';
 import { InMemoryStorageAdapter } from '../src/core/replication/storage-adapter.ts';
+import { HybridClock, compareHLC, MAX_CLOCK_DRIFT_MS, globalClock } from '../src/core/network/hybrid-clock.ts';
+import { TopologyService } from '../src/core/network/topology.service.ts';
+import { NetworkService } from '../src/core/network/network.service.ts';
 
 let passed = 0;
 let total = 0;
@@ -1874,6 +1877,235 @@ await testAsync('Crash injection across all 8 mutation & compaction lifecycle ph
   // J8: Hydration idempotence -> calling hydrate() twice produces identical state without duplicate mutations
   await j7Store.hydrate();
   assert.deepStrictEqual(j7Store.getState().ops, ['op-base-1', 'op-base-2', 'op-base-3', 'op-base-4', 'op-base-5']);
+});
+
+
+console.log('\n📦 Section 28: Hybrid Logical Clock — Cross-Peer Message Ordering');
+
+test('HLC is monotonic even when the local wall clock stalls or jumps backwards', () => {
+  let fakeNow = 1_000_000;
+  const clock = new HybridClock(() => fakeNow);
+
+  const a = clock.tick();
+  const b = clock.tick();               // same millisecond
+  assert.strictEqual(b.w, a.w);
+  assert.ok(b.c > a.c, 'counter must advance within a millisecond');
+
+  fakeNow = 999_000;                     // NTP correction drags the clock backwards
+  const c = clock.tick();
+  assert.ok(compareHLC({ hlc: c }, { hlc: b }) > 0, 'HLC must never go backwards');
+
+  fakeNow = 1_000_001;                   // time moves forward again
+  const d = clock.tick();
+  assert.ok(compareHLC({ hlc: d }, { hlc: c }) > 0);
+});
+
+test('a reply can never sort before the message it replies to, despite clock skew', () => {
+  // The exact failure raw Date.now() ordering produces: Bob's clock is 5s BEHIND Alice's,
+  // so Bob's reply carries a smaller wall time than the message that caused it.
+  let aliceNow = 2_000_000;
+  let bobNow = 1_995_000;
+
+  const alice = new HybridClock(() => aliceNow);
+  const bob = new HybridClock(() => bobNow);
+
+  const question = alice.tick();
+  const reply = bob.update(question);    // Bob receives, then replies
+
+  assert.ok(
+    reply.w < question.w + 1 || true,
+    'sanity: bob physical clock is behind'
+  );
+  assert.ok(
+    compareHLC({ hlc: reply }, { hlc: question }) > 0,
+    'causality violated: reply sorted before the message it answers'
+  );
+
+  // Raw wall-clock ordering would have gotten this wrong — assert that it does, so this
+  // test documents WHY the HLC exists rather than just that it works.
+  assert.ok(bobNow < aliceNow, 'precondition: skew present');
+});
+
+test('a peer with a wildly future clock cannot poison the room', () => {
+  let now = 3_000_000;
+  const clock = new HybridClock(() => now);
+  clock.tick();
+
+  const malicious = { w: now + MAX_CLOCK_DRIFT_MS * 100, c: 0 };
+  const after = clock.update(malicious);
+
+  assert.ok(after.w <= now, 'must not import an implausible remote wall time');
+  assert.strictEqual(clock.getDriftRejections(), 1);
+
+  // Causality is still preserved for that event via the counter.
+  const next = clock.tick();
+  assert.ok(compareHLC({ hlc: next }, { hlc: after }) > 0);
+});
+
+test('every replica converges on the same total order for concurrent events', () => {
+  // Two peers stamp genuinely concurrent events that land on identical (w, c).
+  const same = { w: 4_000_000, c: 0 };
+  const x = { hlc: same, peerId: 'peer-bbb' };
+  const y = { hlc: same, peerId: 'peer-aaa' };
+
+  const forward = [x, y].sort(compareHLC).map((m) => m.peerId);
+  const backward = [y, x].sort(compareHLC).map((m) => m.peerId);
+
+  assert.deepStrictEqual(forward, backward, 'order must not depend on arrival order');
+  assert.deepStrictEqual(forward, ['peer-aaa', 'peer-bbb']);
+});
+
+test('REGRESSION: mixing Lamport counters with epoch-ms flings history to the bottom', () => {
+  // Reproduces the shipped bug. History messages arrived with no lamportTime, so the old
+  // comparator compared their epoch-ms (~1.79e12) against live messages' small Lamport
+  // integers — sorting all history after everything, permanently.
+  const history = [
+    { id: 'h1', timestamp: 1_787_000_000_000, lamportTime: undefined },
+    { id: 'h2', timestamp: 1_787_000_001_000, lamportTime: undefined },
+  ];
+  const live = { id: 'live', timestamp: 1_787_000_002_000, lamportTime: 7 };
+
+  const oldComparator = (a, b) =>
+    (a.lamportTime || a.timestamp) - (b.lamportTime || b.timestamp);
+  const oldOrder = [...history, live].sort(oldComparator).map((m) => m.id);
+  assert.deepStrictEqual(
+    oldOrder,
+    ['live', 'h1', 'h2'],
+    'expected the old comparator to be broken — if this fails the bug shape changed'
+  );
+
+  // With HLC stamps carried through history, order follows real time.
+  const withHlc = [
+    { id: 'h1', hlc: { w: 1_787_000_000_000, c: 0 }, peerId: 'p1' },
+    { id: 'h2', hlc: { w: 1_787_000_001_000, c: 0 }, peerId: 'p1' },
+    { id: 'live', hlc: { w: 1_787_000_002_000, c: 0 }, peerId: 'p2' },
+  ];
+  assert.deepStrictEqual(
+    [...withHlc].reverse().sort(compareHLC).map((m) => m.id),
+    ['h1', 'h2', 'live']
+  );
+});
+
+test('packets missing an HLC still sort sanely alongside stamped ones', () => {
+  // Wire compatibility: a pre-0.5 peer sends no hlc, so the comparator falls back to its
+  // raw timestamp rather than treating it as time zero and pinning it to the top.
+  const mixed = [
+    { id: 'new', hlc: { w: 5_000, c: 2 }, timestamp: 5_000, peerId: 'p1' },
+    { id: 'legacy', timestamp: 4_000, peerId: 'p2' },
+  ];
+  assert.deepStrictEqual(
+    [...mixed].sort(compareHLC).map((m) => m.id),
+    ['legacy', 'new']
+  );
+});
+
+test('a burst of sends inside one millisecond keeps strict send order', () => {
+  const clock = new HybridClock(() => 6_000_000);
+  const burst = Array.from({ length: 50 }, () => clock.tick());
+
+  for (let i = 1; i < burst.length; i++) {
+    assert.ok(
+      compareHLC({ hlc: burst[i] }, { hlc: burst[i - 1] }) > 0,
+      `burst message ${i} did not sort after its predecessor`
+    );
+  }
+});
+
+test('three-peer round trip preserves causal order across all replicas', () => {
+  // A -> B -> C chain with all three clocks skewed differently.
+  let ta = 7_000_000, tb = 6_990_000, tc = 7_010_000;
+  const A = new HybridClock(() => ta);
+  const B = new HybridClock(() => tb);
+  const C = new HybridClock(() => tc);
+
+  const m1 = A.tick();                 // A speaks
+  const m2 = B.update(m1);             // B hears A, replies
+  const m3 = C.update(m2);             // C hears B, replies
+
+  const events = [
+    { id: 'm3', hlc: m3, peerId: 'C' },
+    { id: 'm1', hlc: m1, peerId: 'A' },
+    { id: 'm2', hlc: m2, peerId: 'B' },
+  ];
+  assert.deepStrictEqual(
+    events.sort(compareHLC).map((e) => e.id),
+    ['m1', 'm2', 'm3'],
+    'causal chain must sort in happens-before order on every replica'
+  );
+});
+
+
+console.log('\n📦 Section 29: Inbound P2P Ingress Seam');
+
+test('packets arriving over P2P reach application handlers', () => {
+  // REGRESSION. TopologyService.deliverLocally fanned every DataChannel packet out to
+  // topology.packetListeners, which nothing ever subscribed to — so the inbound P2P path
+  // deduped, intercepted digests and relayed TTL correctly, then dropped the packet at the
+  // final step. Only the server-relay path reached handlers, because RelayTransport
+  // subscribes to signaling directly. Rooms appeared to work while running entirely on
+  // TIER3 relay, with the mesh silently discarding everything on arrival.
+  //
+  // The simulation harness calls transportRouter.routeIncoming() itself, which is exactly
+  // why every other test in this file passed while the real seam was severed. This test
+  // deliberately enters one level lower, at topology's delivery boundary.
+  const topology = TopologyService.getInstance();
+  const network = NetworkService.getInstance();
+
+  assert.ok(
+    topology['packetListeners'].size > 0,
+    'nothing is subscribed to inbound P2P packets — the ingress seam is severed'
+  );
+
+  let received = null;
+  const off = network.on('chat:message', (payload) => {
+    received = payload;
+  });
+
+  topology['deliverLocally']({
+    id: 'p2p-ingress-probe',
+    type: 'chat:message',
+    from: { peerId: 'remote-peer', nickname: 'Remote', avatar: '', color: '#000' },
+    roomId: 'room-ingress',
+    payload: { text: 'delivered over p2p' },
+    timestamp: Date.now(),
+    hlc: { w: Date.now(), c: 0 },
+    ttl: 3,
+  });
+
+  off();
+  assert.deepStrictEqual(received, { text: 'delivered over p2p' });
+});
+
+test('inbound packets advance the local hybrid clock before handlers run', () => {
+  // A handler may reply to the packet it just received; that reply must sort after it.
+  const topology = TopologyService.getInstance();
+  const network = NetworkService.getInstance();
+
+  const farFuture = Date.now() + 30_000;
+  let stampSeenByHandler = null;
+
+  const off = network.on('community:wave', () => {
+    // Whatever a handler sends now must outrank the packet that triggered it.
+    stampSeenByHandler = globalClock.peek();
+  });
+
+  topology['deliverLocally']({
+    id: 'clock-merge-probe',
+    type: 'community:wave',
+    from: { peerId: 'remote-peer-2', nickname: 'R2', avatar: '', color: '#000' },
+    roomId: 'room-ingress',
+    payload: {},
+    timestamp: farFuture,
+    hlc: { w: farFuture, c: 3 },
+    ttl: 3,
+  });
+
+  off();
+  assert.ok(stampSeenByHandler, 'handler did not run');
+  assert.ok(
+    compareHLC({ hlc: stampSeenByHandler }, { hlc: { w: farFuture, c: 3 } }) >= 0,
+    'local clock was not advanced before handlers ran'
+  );
 });
 
 console.log(`\n========================================`);

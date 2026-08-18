@@ -1,3 +1,4 @@
+import { HLC } from '@/core/network/hybrid-clock';
 // ─── Collaborative & Personal Whiteboard Types, Tools, Backgrounds, System Design & Notebook ───
 
 export type WhiteboardToolType =
@@ -93,6 +94,16 @@ export interface WhiteboardStroke {
   };
   text?: string;
   timestamp: number;
+  /**
+   * Hybrid logical timestamp, used to give strokes a deterministic z-order.
+   *
+   * Canvas rendering is painter's algorithm: later strokes paint over earlier ones. Strokes
+   * were merged into arrival order, so two peers whose sync responses arrived in different
+   * orders could paint overlapping strokes in different z-orders — the same board looking
+   * different on each screen. Ordering on a stamp rather than arrival makes every replica
+   * render identically.
+   */
+  hlc?: HLC;
   expiresAt?: number; // For disappearing ink strokes
 }
 

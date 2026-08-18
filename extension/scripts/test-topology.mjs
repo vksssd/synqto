@@ -2,7 +2,11 @@
 
 import assert from 'assert';
 import { TierCoordinator } from '../src/core/topology/tier-coordinator.ts';
-import { TOPOLOGY_THRESHOLDS } from '../src/core/topology/topology.types.ts';
+import {
+  TOPOLOGY_THRESHOLDS,
+  ADAPTIVE_POLICY,
+  DIRECT_ONLY_POLICY,
+} from '../src/core/topology/topology.types.ts';
 import { LeaderElectionEngine } from '../src/core/topology/leader-election.ts';
 import { LeaderMesh } from '../src/core/topology/leader-mesh.ts';
 import {
@@ -255,6 +259,90 @@ test('Tier thresholds keep a real hysteresis margin so boundary churn cannot fla
     `MAX_LEADERS (${t.MAX_LEADERS}) x cluster watermark (${SERVER_CLUSTER_HIGH_WATERMARK}) must cover TIER2_MAX (${t.TIER2_MAX})`
   );
   assert.ok(t.MIN_LEADERS >= 3, 'Trinity quorum requires at least 3 leaders');
+});
+
+// ─── 5b. CoFocus DIRECT_ONLY Topology Policy Invariant ───
+//
+// This is the load-bearing architectural guarantee for CoFocus (Watcher/Together):
+//   session.mode ∈ {WATCHER, TOGETHER}  ⇒  tier === TIER1_FULL_MESH, always.
+//
+// It must hold structurally — NOT because a 2-peer session happens to sit below
+// TIER1_PROMOTE_AT. These tests deliberately drive peer counts far past every threshold
+// so that if someone later retunes the thresholds, or a third peer reaches a CoFocus room,
+// the guarantee still holds and this suite fails loudly if it ever stops holding.
+console.log('\n📦 Section 5b: CoFocus DIRECT_ONLY Topology Policy');
+
+test('TierCoordinator defaults to ADAPTIVE_POLICY (pre-CoFocus behaviour preserved)', () => {
+  const coordinator = new TierCoordinator();
+  const policy = coordinator.getPolicy();
+  assert.deepStrictEqual(policy, ADAPTIVE_POLICY);
+  assert.ok(policy.allowRelay, 'default policy must still permit relay');
+  assert.ok(policy.allowLeaderElection, 'default policy must still permit leader election');
+  assert.strictEqual(policy.allowedTiers.length, 3, 'default policy must allow all three tiers');
+});
+
+test('DIRECT_ONLY policy pins tier to TIER1 far beyond the TIER1 promote threshold', () => {
+  const coordinator = new TierCoordinator(DIRECT_ONLY_POLICY);
+
+  // Well past TIER1_PROMOTE_AT (9) — an adaptive room would be TIER1_EVALUATING here.
+  coordinator.updatePeerCount(TOPOLOGY_THRESHOLDS.TIER1_PROMOTE_AT);
+  assert.strictEqual(coordinator.getCurrentTier(), 'TIER1_FULL_MESH');
+  assert.strictEqual(coordinator.getLifecycleState(), 'STABLE_TIER1');
+  assert.strictEqual(
+    coordinator.getActiveTransaction(),
+    null,
+    'DIRECT_ONLY must not even open a migration transaction'
+  );
+});
+
+test('DIRECT_ONLY policy pins tier to TIER1 past the TIER2->TIER3 relay threshold too', () => {
+  const coordinator = new TierCoordinator(DIRECT_ONLY_POLICY);
+
+  // Absurd peer count, past TIER2_PROMOTE_AT (51). Still TIER1.
+  coordinator.updatePeerCount(TOPOLOGY_THRESHOLDS.TIER2_PROMOTE_AT + 500);
+  assert.strictEqual(coordinator.getCurrentTier(), 'TIER1_FULL_MESH');
+  assert.strictEqual(coordinator.getLifecycleState(), 'STABLE_TIER1');
+  assert.strictEqual(coordinator.getActiveTransaction(), null);
+});
+
+test('DIRECT_ONLY invariant survives repeated peer-count churn', () => {
+  const coordinator = new TierCoordinator(DIRECT_ONLY_POLICY);
+
+  // Churn across every threshold boundary repeatedly. An adaptive coordinator would be
+  // scheduling and cancelling transitions throughout; DIRECT_ONLY must be inert.
+  for (const count of [1, 2, 9, 3, 51, 2, 200, 1, 12, 2]) {
+    coordinator.updatePeerCount(count);
+    assert.strictEqual(
+      coordinator.getCurrentTier(),
+      'TIER1_FULL_MESH',
+      `tier escaped TIER1 at peerCount=${count}`
+    );
+    assert.strictEqual(
+      coordinator.getLifecycleState(),
+      'STABLE_TIER1',
+      `lifecycle left STABLE_TIER1 at peerCount=${count}`
+    );
+  }
+});
+
+test('DIRECT_ONLY policy forbids relay and leader election', () => {
+  // These two flags are what TopologyService/TransportRouter branch on to skip LeaderMesh
+  // construction and to refuse server-relay fallback. If either flipped to true, a CoFocus
+  // session could put the signaling server into its data path.
+  assert.strictEqual(DIRECT_ONLY_POLICY.allowRelay, false);
+  assert.strictEqual(DIRECT_ONLY_POLICY.allowLeaderElection, false);
+  assert.deepStrictEqual(DIRECT_ONLY_POLICY.allowedTiers, ['TIER1_FULL_MESH']);
+});
+
+test('An ADAPTIVE coordinator still promotes — proving the guard is policy-driven, not disabled', () => {
+  // Control case. If this ever fails, the DIRECT_ONLY guard has leaked into adaptive rooms
+  // and broken Group/Problem room scaling, which would be a far worse regression than the
+  // bug the guard prevents.
+  const coordinator = new TierCoordinator(ADAPTIVE_POLICY);
+  coordinator.updatePeerCount(TOPOLOGY_THRESHOLDS.TIER1_PROMOTE_AT);
+  assert.strictEqual(coordinator.getLifecycleState(), 'TIER1_EVALUATING');
+  assert.ok(coordinator.getActiveTransaction(), 'adaptive room must still open a transaction');
+  assert.strictEqual(coordinator.getActiveTransaction().toTier, 'TIER2_MULTI_LEADER');
 });
 
 // ─── 6. TopologyView & Monotonic Ordering ───

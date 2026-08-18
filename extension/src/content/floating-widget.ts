@@ -1,4 +1,5 @@
 import { FabSettings, DEFAULT_FAB_SETTINGS, FAB_STORAGE_KEY, SYNQTO_FAB_STORAGE_KEY, FabPosition } from '@/features/settings/fab-settings.types';
+import { THEME_SETTINGS_STORAGE_KEY } from '@/features/settings/theme.service';
 import { detectResource } from './resource-detector';
 import { getPlatformBadgeColor, computeRoomId } from '@/features/room/room-utils';
 import {
@@ -312,7 +313,11 @@ export class FloatingWidget {
       const res = await chrome.storage.local.get([
         FAB_STORAGE_KEY,
         SYNQTO_FAB_STORAGE_KEY,
-        'synqto_theme_settings',
+        // Single source of truth for theming across sidepanel, popup card and FAB.
+        // This previously read 'synqto_theme_settings', which NOTHING ever writes —
+        // ThemeService persists to 'synqto_theme_custom_settings'. So the widget silently
+        // ignored every theme change and drifted permanently out of sync with the panel.
+        THEME_SETTINGS_STORAGE_KEY,
         'synqto_collab_notebook',
         'synqto_active_problem',
         'nerd_buddy_active_problem',
@@ -322,8 +327,8 @@ export class FloatingWidget {
         'nerd_buddy_peer_count',
       ]);
 
-      if (res.synqto_theme_settings) {
-        this.themeSettings = res.synqto_theme_settings;
+      if (res[THEME_SETTINGS_STORAGE_KEY]) {
+        this.themeSettings = res[THEME_SETTINGS_STORAGE_KEY];
       }
 
       if (res.synqto_collab_notebook && Array.isArray(res.synqto_collab_notebook.pages)) {
@@ -431,6 +436,10 @@ export class FloatingWidget {
       this.hostElement.remove();
       this.hostElement = null;
       this.shadow = null;
+      // The shadow root is gone, so the injected <style> node is gone with it. Clear the
+      // signature or a later re-create would skip re-injecting the stylesheet and render
+      // the widget completely unstyled.
+      this.lastStyleSignature = '';
     }
   }
 
@@ -479,6 +488,9 @@ export class FloatingWidget {
     this.hostElement.style.setProperty('bottom', `${bottom}px`, 'important');
   }
 
+  /** Signature of the currently injected stylesheet, so it is only re-parsed on real change. */
+  private lastStyleSignature = '';
+
   private render() {
     if (!this.shadow) return;
     const contentMode = this.settings.popupContentMode || (this.settings.enableWhiteboard ? 'both' : 'chat_only');
@@ -502,7 +514,18 @@ export class FloatingWidget {
     const isNearTop = this.currentPosition.bottom > (window.innerHeight - 540);
     const isNearLeft = this.currentPosition.right > (window.innerWidth - 420);
 
-    this.shadow.innerHTML = `
+    // RENDER SPLIT — static stylesheet vs dynamic body.
+    //
+    // This used to be a single `this.shadow.innerHTML = ...` covering ~53KB of markup,
+    // INCLUDING a ~16KB <style> block, and render() is called from ~30 places (every button
+    // click). Replacing shadow.innerHTML tears down and re-parses the entire stylesheet each
+    // time, which is the visible "blink": for one frame the widget has no styles at all. It
+    // also destroys focus, scroll position, in-flight CSS transitions and any text the user
+    // was typing, and churns every event listener.
+    //
+    // The stylesheet only changes when the theme changes, so it is injected once into a
+    // dedicated <style> node and left alone. Re-renders now touch only the body container.
+    const styleHtml = `
       <style>
         :host {
           ${this.getThemeCSS()}
@@ -1053,7 +1076,9 @@ export class FloatingWidget {
           background: rgba(99, 102, 241, 0.2);
           color: #ffffff;
         }
-      </style>
+      </style>`;
+
+    const bodyHtml = `
 
       <!-- In-Page Popup Card Window -->
       <div class="popup-card" id="nb-popup-card">
@@ -1500,6 +1525,31 @@ export class FloatingWidget {
         </button>
       </div>
     `;
+
+    // Inject the stylesheet exactly once (and only re-inject when the theme string
+    // actually changes), then swap only the body. This is what removes the blink.
+    let styleNode = this.shadow.getElementById('synqto-widget-style') as HTMLStyleElement | null;
+    if (!styleNode) {
+      styleNode = document.createElement('style');
+      styleNode.id = 'synqto-widget-style';
+      styleNode.textContent = styleHtml.replace(/^\s*<style>/, '').replace(/<\/style>\s*$/, '');
+      this.shadow.appendChild(styleNode);
+      this.lastStyleSignature = styleHtml.length + ':' + contentMode;
+    } else {
+      const sig = styleHtml.length + ':' + contentMode;
+      if (sig !== this.lastStyleSignature) {
+        styleNode.textContent = styleHtml.replace(/^\s*<style>/, '').replace(/<\/style>\s*$/, '');
+        this.lastStyleSignature = sig;
+      }
+    }
+
+    let bodyNode = this.shadow.getElementById('synqto-widget-body') as HTMLDivElement | null;
+    if (!bodyNode) {
+      bodyNode = document.createElement('div');
+      bodyNode.id = 'synqto-widget-body';
+      this.shadow.appendChild(bodyNode);
+    }
+    bodyNode.innerHTML = bodyHtml;
 
     this.attachEventListeners();
     if (isWhiteboardTab) {
@@ -3575,8 +3625,8 @@ export class FloatingWidget {
             }
             this.render();
           }
-          if (changes.synqto_theme_settings) {
-            this.themeSettings = changes.synqto_theme_settings.newValue;
+          if (changes[THEME_SETTINGS_STORAGE_KEY]) {
+            this.themeSettings = changes[THEME_SETTINGS_STORAGE_KEY].newValue;
             this.render();
           }
           if (changes.synqto_collab_notebook) {

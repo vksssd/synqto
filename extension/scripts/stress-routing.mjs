@@ -12,6 +12,9 @@
 
 import assert from 'assert';
 import { LinkStateRouter } from '../src/core/topology/link-state.ts';
+import { planMesh, planIsSymmetric } from '../src/core/topology/mesh-plan.ts';
+import { LinkAffinity, isInteractiveType } from '../src/core/topology/link-affinity.ts';
+import { DEFAULT_TTL } from '../src/core/network/packet.ts';
 
 let passed = 0;
 let total = 0;
@@ -153,6 +156,51 @@ class SimNet {
       queue = next;
     }
     return rounds;
+  }
+
+  /**
+   * Simulates a TIER1 broadcast with reverse-path forwarding, mirroring
+   * TopologyService.routeIncomingPacket. Returns delivery coverage and send count.
+   */
+  broadcast(originId, ttl = 3) {
+    const received = new Set([originId]);
+    let sends = 0;
+    const seen = new Set(); // per-peer dedup, as the real dedup window provides
+
+    const queue = [];
+    const rootChildren = this.routers.get(originId).getBroadcastChildren(originId);
+    for (const peerId of rootChildren ?? this.neighbours(originId).map((n) => n.peerId)) {
+      sends++;
+      queue.push({ at: peerId, from: originId, ttl });
+    }
+
+    while (queue.length) {
+      const { at, from, ttl: t } = queue.shift();
+      const dedupKey = `${at}`;
+      if (!seen.has(dedupKey)) {
+        seen.add(dedupKey);
+        received.add(at);
+      } else {
+        continue; // duplicate: dropped at step 1 in the real path
+      }
+
+      const remaining = t - 1;
+      if (remaining <= 0) continue;
+
+      // RPF: forward only if this arrived from our next hop toward the origin.
+      const upstream = this.routers.get(at).nextHop(originId);
+      if (upstream && upstream !== from) continue;
+
+      const children = this.routers.get(at).getBroadcastChildren(originId);
+      const targets = children ?? this.neighbours(at).map((n) => n.peerId);
+      for (const n of targets) {
+        if (n === from || n === originId) continue;
+        sends++;
+        queue.push({ at: n, from: at, ttl: remaining });
+      }
+    }
+
+    return { covered: received.size, sends };
   }
 
   /** Injects a raw LSA at one peer without it passing through a real neighbour. */
@@ -588,6 +636,280 @@ scenario('a database push cannot be used to flood one peer in a single message',
     net.routers.get('a').getStats().lsdbSize <= 400,
     'a single oversized database push bypassed the LSDB bound'
   );
+});
+
+
+console.log('\n── Sparse mesh planning ──');
+
+scenario('plan is symmetric for every roster size', () => {
+  // Asymmetry is not cosmetic: one peer dials while the other tears down, producing a
+  // connect/disconnect loop indistinguishable from a flaky network.
+  for (let n = 2; n <= 60; n++) {
+    const peers = Array.from({ length: n }, (_, i) => `p${String(i).padStart(3, '0')}`);
+    assert.ok(planIsSymmetric(peers), `asymmetric plan at n=${n}`);
+  }
+});
+
+scenario('plan is symmetric for unsorted and irregular peer IDs', () => {
+  // Real peer IDs are UUIDs, not p000..p0NN. Sorting must be the only thing that matters.
+  const peers = [
+    'zeta-9', 'alpha-1', 'Mike-3', '0001', 'omega', 'b', 'A', 'zz', 'm-42', 'q7',
+    'peer-with-a-very-long-identifier-0000000001', '~tilde', '99bottles',
+  ];
+  assert.ok(planIsSymmetric(peers), 'asymmetric plan with irregular IDs');
+});
+
+scenario('the graph is connected at every size, never merely probably', () => {
+  for (let n = 2; n <= 60; n++) {
+    const peers = Array.from({ length: n }, (_, i) => `p${String(i).padStart(3, '0')}`);
+    const adj = new Map(peers.map((p) => [p, planMesh(p, peers).desired]));
+
+    const seen = new Set([peers[0]]);
+    const queue = [peers[0]];
+    while (queue.length) {
+      const cur = queue.shift();
+      for (const next of adj.get(cur)) {
+        if (!seen.has(next)) {
+          seen.add(next);
+          queue.push(next);
+        }
+      }
+    }
+    assert.strictEqual(seen.size, n, `graph partitioned at n=${n}: reached ${seen.size}/${n}`);
+  }
+});
+
+scenario('degree stays bounded as the room grows', () => {
+  for (const n of [12, 20, 30, 50, 80]) {
+    const peers = Array.from({ length: n }, (_, i) => `p${String(i).padStart(3, '0')}`);
+    let worst = 0;
+    for (const p of peers) worst = Math.max(worst, planMesh(p, peers).desired.size);
+    assert.ok(worst <= 8, `degree grew to ${worst} at n=${n}`);
+  }
+});
+
+scenario('small rooms stay a full mesh', () => {
+  // Sparsity below the threshold would add hops to cursor traffic while saving nothing.
+  const peers = Array.from({ length: 6 }, (_, i) => `p${i}`);
+  const plan = planMesh('p0', peers);
+  assert.ok(plan.isFullMesh);
+  assert.strictEqual(plan.desired.size, 5);
+});
+
+scenario('diameter stays inside the hop budget across room sizes', () => {
+  // Measured behaviour of the geometric chord ladder at degree 6. Diameter grows
+  // logarithmically while degree stays flat, which is the whole point: a 50-peer room costs
+  // each peer 6 connections instead of 49.
+  const budget = { 10: 2, 20: 3, 30: 4, 50: 4, 80: 5, 100: 5 };
+
+  for (const [sizeStr, maxHops] of Object.entries(budget)) {
+    const n = Number(sizeStr);
+    const peers = Array.from({ length: n }, (_, i) => `p${String(i).padStart(3, '0')}`);
+    const adj = new Map(peers.map((p) => [p, planMesh(p, peers).desired]));
+
+    let diameter = 0;
+    for (const src of peers) {
+      const dist = new Map([[src, 0]]);
+      const queue = [src];
+      while (queue.length) {
+        const cur = queue.shift();
+        for (const next of adj.get(cur)) {
+          if (!dist.has(next)) {
+            dist.set(next, dist.get(cur) + 1);
+            queue.push(next);
+          }
+        }
+      }
+      assert.strictEqual(dist.size, n, `${src} cannot reach the whole room at n=${n}`);
+      for (const d of dist.values()) diameter = Math.max(diameter, d);
+    }
+    assert.ok(diameter <= maxHops, `n=${n}: diameter ${diameter} exceeds the ${maxHops}-hop budget`);
+  }
+});
+
+scenario('a peer missing from the roster gets an empty plan rather than a wrong one', () => {
+  const peers = Array.from({ length: 20 }, (_, i) => `p${i}`);
+  const plan = planMesh('stranger', peers);
+  assert.strictEqual(plan.desired.size, 0, 'planned links from a position it does not hold');
+});
+
+scenario('planned mesh actually routes end to end', () => {
+  // The plan and the router must agree: build the planned graph, run link-state over it,
+  // and confirm every pair resolves. A plan that routing cannot use is worthless.
+  const peers = Array.from({ length: 20 }, (_, i) => `q${String(i).padStart(2, '0')}`);
+  const net = new SimNet(peers);
+  for (const p of peers) {
+    for (const other of planMesh(p, peers).desired) net.link(p, other, 30);
+  }
+  net.settle();
+
+  for (const src of peers) {
+    for (const dst of peers) {
+      if (src === dst) continue;
+      const t = net.trace(src, dst);
+      assert.ok(t.reached, `${src} -> ${dst} unreachable over the planned mesh`);
+      assert.ok(!t.looped, `${src} -> ${dst} looped`);
+    }
+  }
+});
+
+
+console.log('\n── Link affinity: protecting co-editing from sparsity ──');
+
+scenario('a co-editing pair keeps a direct link the plan would shed', () => {
+  let t = 0;
+  const aff = new LinkAffinity({ now: () => t });
+
+  // Sparsity is the right trade for the room and the wrong trade for this pair: routed 3-4
+  // hops their keystrokes go from ~40ms to ~150ms, past where co-editing feels live.
+  for (let i = 0; i < 60; i++) {
+    t += 50;
+    aff.note('partner', 'code:delta');
+  }
+  assert.ok(aff.shouldKeep('partner'), 'tore down the link between two people co-editing');
+});
+
+scenario('an idle peer does not hold a link open', () => {
+  let t = 0;
+  const aff = new LinkAffinity({ now: () => t });
+  for (let i = 0; i < 3; i++) {
+    t += 50;
+    aff.note('acquaintance', 'code:cursor');
+  }
+  assert.ok(!aff.shouldKeep('acquaintance'), 'held a link for negligible traffic');
+});
+
+scenario('chat traffic alone never promotes a link', () => {
+  // Chat tolerates a hop; nobody perceives 100ms in a message they are reading. Promoting on
+  // chat would rebuild the full mesh in any busy room.
+  let t = 0;
+  const aff = new LinkAffinity({ now: () => t });
+  for (let i = 0; i < 500; i++) {
+    t += 10;
+    aff.note('chatty', 'chat:message');
+  }
+  assert.ok(!aff.shouldKeep('chatty'), 'chat volume promoted a link');
+  assert.ok(!isInteractiveType('chat:message'));
+  assert.ok(isInteractiveType('code:delta'));
+});
+
+scenario('a promoted link is not dropped by a brief pause in typing', () => {
+  // Without a minimum hold, pausing to think drops the link and the next keystroke pays a
+  // full reconnection. The oscillation is worse than either steady state.
+  let t = 0;
+  const aff = new LinkAffinity({ now: () => t });
+  for (let i = 0; i < 60; i++) {
+    t += 50;
+    aff.note('partner', 'code:delta');
+  }
+  assert.ok(aff.shouldKeep('partner'));
+
+  t += 8000; // eight seconds of thinking
+  assert.ok(aff.shouldKeep('partner'), 'a pause in typing tore down an active collaboration');
+});
+
+scenario('affinity releases the link once collaboration really stops', () => {
+  let t = 0;
+  const aff = new LinkAffinity({ now: () => t });
+  for (let i = 0; i < 60; i++) {
+    t += 50;
+    aff.note('partner', 'code:delta');
+  }
+  assert.ok(aff.shouldKeep('partner'));
+
+  t += 10 * 60 * 1000; // ten minutes later
+  assert.ok(!aff.shouldKeep('partner'), 'held a link long after collaboration ended');
+});
+
+scenario('affinity cannot rebuild a full mesh in a busy room', () => {
+  // Every pair interacting must not defeat sparsity — that would restore the N-1 cost the
+  // plan exists to remove.
+  let t = 0;
+  const aff = new LinkAffinity({ now: () => t });
+  const peers = Array.from({ length: 30 }, (_, i) => `p${i}`);
+
+  for (let round = 0; round < 60; round++) {
+    for (const p of peers) {
+      t += 1;
+      aff.note(p, 'canvas:cursor');
+    }
+  }
+
+  const kept = peers.filter((p) => aff.shouldKeep(p));
+  assert.ok(kept.length <= 4, `promoted ${kept.length} links, defeating the degree target`);
+});
+
+scenario('affinity state is bounded against a flood', () => {
+  let t = 0;
+  const aff = new LinkAffinity({ now: () => t });
+  for (let i = 0; i < 10_000; i++) {
+    t += 1;
+    aff.note(`flood-${i}`, 'code:cursor');
+  }
+  assert.ok(aff.getStats().tracked <= 200, `affinity map grew to ${aff.getStats().tracked}`);
+});
+
+scenario('a promoted link survives the flood that follows it', () => {
+  // The eviction trap again: a promoted link losing its state would be silently demoted, and
+  // the pair would drop to multi-hop mid-collaboration.
+  let t = 0;
+  const aff = new LinkAffinity({ now: () => t });
+  for (let i = 0; i < 60; i++) {
+    t += 50;
+    aff.note('partner', 'code:delta');
+  }
+  assert.ok(aff.shouldKeep('partner'), 'precondition: promoted');
+
+  for (let i = 0; i < 5000; i++) {
+    t += 1;
+    aff.note(`flood-${i}`, 'code:cursor');
+  }
+  assert.ok(aff.shouldKeep('partner'), 'a flood evicted an actively promoted link');
+});
+
+
+console.log('\n── Broadcast over a sparse mesh ──');
+
+scenario('DEFAULT_TTL is large enough for the planned mesh diameter', () => {
+  // A TTL below the diameter silently truncates every broadcast: peers beyond the hop
+  // budget never receive it, and nothing reports an error.
+  const peers = Array.from({ length: 30 }, (_, i) => `p${String(i).padStart(3, '0')}`);
+  const net = new SimNet(peers);
+  for (const p of peers) for (const o of planMesh(p, peers).desired) net.link(p, o, 30);
+  net.settle();
+
+  const withDefaultTtl = net.broadcast(peers[0], DEFAULT_TTL);
+  assert.strictEqual(
+    withDefaultTtl.covered,
+    30,
+    `DEFAULT_TTL=${DEFAULT_TTL} reached only ${withDefaultTtl.covered}/30 peers`
+  );
+});
+
+scenario('every peer receives a broadcast over a 30-peer sparse mesh', () => {
+  const peers = Array.from({ length: 30 }, (_, i) => `p${String(i).padStart(3, '0')}`);
+  const net = new SimNet(peers);
+  for (const p of peers) for (const o of planMesh(p, peers).desired) net.link(p, o, 30);
+  net.settle();
+
+  for (const origin of peers) {
+    const { covered } = net.broadcast(origin, 12);
+    assert.strictEqual(covered, 30, `broadcast from ${origin} reached only ${covered}/30`);
+  }
+});
+
+scenario('RPF keeps broadcast cost near tree size, not mesh size', () => {
+  const peers = Array.from({ length: 30 }, (_, i) => `p${String(i).padStart(3, '0')}`);
+  const net = new SimNet(peers);
+  for (const p of peers) for (const o of planMesh(p, peers).desired) net.link(p, o, 30);
+  net.settle();
+
+  const { sends, covered } = net.broadcast(peers[0], 12);
+  assert.strictEqual(covered, 30);
+
+  // A full mesh would be 29 sends from the origin alone. Plain flooding over this graph
+  // would be about 2*|E| = ~180. RPF should land far below flooding.
+  assert.ok(sends < 90, `RPF used ${sends} sends, no better than flooding`);
 });
 
 console.log(`\n========================================`);

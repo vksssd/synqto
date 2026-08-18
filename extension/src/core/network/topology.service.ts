@@ -18,6 +18,8 @@ import { IRouteResolver } from '../topology/route-resolver';
 import { PeerSignaling, PeerSignalPayload } from './peer-signaling';
 import { LinkMonitor } from './link-monitor';
 import { LinkStateRouter, LSA } from '../topology/link-state';
+import { planMesh } from '../topology/mesh-plan';
+import { LinkAffinity, isInteractiveType } from '../topology/link-affinity';
 
 export interface TopologyState {
   isLeader: boolean;
@@ -44,6 +46,7 @@ export class TopologyService {
   private linkMonitor: LinkMonitor;
   private router: LinkStateRouter;
   private routerTimer: any = null;
+  private affinity: LinkAffinity = new LinkAffinity();
 
   private myIdentity: PeerIdentity | null = null;
   private currentRoomId = '';
@@ -211,6 +214,7 @@ export class TopologyService {
     this.linkMonitor.reset();
     this.router.setMyPeerId(identity.peerId);
     this.router.reset();
+    this.affinity.reset();
 
     // Connect to signaling server
     this.signaling.connect(roomId, identity.peerId, identity.nickname);
@@ -227,6 +231,7 @@ export class TopologyService {
     this.linkMonitor.reset();
     this.stopRoutingLoop();
     this.router.reset();
+    this.affinity.reset();
     this.peerSignaling.reset();
     this.clearAllRetryTimers();
     if (this.leaderMesh) {
@@ -275,18 +280,38 @@ export class TopologyService {
     const currentTier = this.tierCoordinator.getCurrentTier();
 
     if (currentTier === 'TIER1_FULL_MESH') {
-      // Tier 1 (Full Mesh): Connect directly to all known room peers
-      this.allPeers.forEach((peerId) => {
+      // Tier 1: hold the planned link set.
+      //
+      // For rooms at or below the full-mesh threshold this is still every peer, so nothing
+      // changes for the common case. Above it the plan thins out to a ring plus chords,
+      // which is what allows the tier to hold more peers than N-1 connections each would
+      // permit. The plan is deterministic and symmetric, so both endpoints of every link
+      // agree it should exist without any negotiation.
+      const plan = planMesh(this.myIdentity.peerId, this.allPeers);
+
+      plan.desired.forEach((peerId) => {
         if (peerId === this.myIdentity?.peerId) return;
         const isConnected = this.webrtc.isConnected(peerId);
         const isConnecting = this.webrtc.isConnecting(peerId);
 
         if (!isConnected && !isConnecting) {
+          // Lower peer ID initiates, so a link is dialled from exactly one side.
           if ((this.myIdentity?.peerId || '') < peerId) {
             this.webrtc.initiateConnection(peerId);
           }
         }
       });
+
+      // Shed links the plan no longer wants — but never one that is carrying latency
+      // sensitive traffic. Adaptive promotion (see shouldKeepLink) is what stops a sparse
+      // plan from tearing down the direct link between two people actively co-editing.
+      if (!plan.isFullMesh) {
+        for (const peerId of this.webrtc.getConnectedPeers()) {
+          if (plan.desired.has(peerId)) continue;
+          if (this.shouldKeepLink(peerId)) continue;
+          this.webrtc.closeConnection(peerId);
+        }
+      }
       return;
     }
 
@@ -394,6 +419,7 @@ export class TopologyService {
         }
         this.peerSignaling.forget(peerId);
         this.linkMonitor.forget(peerId);
+        this.affinity.forget(peerId);
       }
     }
   }
@@ -552,6 +578,17 @@ export class TopologyService {
         this.routeIncomingPacket(packet.from.peerId, packet);
       }
     });
+  }
+
+  /**
+   * Whether to hold a link the mesh plan wants to shed.
+   *
+   * The plan optimises the room; this protects the pair. Two people co-editing would
+   * otherwise have their direct link torn down and their keystrokes routed 3-4 hops, which
+   * is the difference between collaboration feeling live and feeling broken.
+   */
+  private shouldKeepLink(peerId: string): boolean {
+    return this.affinity.shouldKeep(peerId);
   }
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -812,6 +849,7 @@ export class TopologyService {
     // 2b. Link liveness. Any inbound packet is evidence of life; probes are answered
     // immediately and never surface to the application.
     this.linkMonitor.noteInbound(fromPeerId);
+    this.affinity.note(fromPeerId, packet.type);
 
     if (packet.type === ('link:probe' as any)) {
       const probeId = (packet.payload as { probeId?: string })?.probeId ?? '';
@@ -867,7 +905,59 @@ export class TopologyService {
       ttl: remainingTtl,
     };
 
-    // 5. Relay logic (Only Leaders relay packets in Tier 2!)
+    // 5a. TIER1 broadcast propagation by reverse-path forwarding.
+    //
+    // TIER1 previously did no relaying whatsoever, and that was correct while the tier was a
+    // full mesh: every peer received every broadcast directly from its origin, so forwarding
+    // would only have produced duplicates. A sparse mesh silently invalidates that
+    // assumption — peers more than one hop from the sender would simply never receive
+    // broadcasts, which is a total delivery failure that looks like the app not working
+    // rather than like a routing bug.
+    //
+    // RPF rather than plain flooding, and rather than an explicitly computed spanning tree:
+    //
+    //   - Plain flooding delivers, but every edge carries the packet in both directions:
+    //     roughly N*k transmissions where a tree needs N-1. In a 30-peer room that is 180
+    //     sends instead of 29.
+    //   - An explicit tree is efficient but brittle. Peers must agree on it, and while they
+    //     disagree — precisely during the churn when reliability matters most — packets fall
+    //     off the tree and are lost outright, with no redundancy to cover the gap.
+    //
+    // RPF gets the tree's efficiency without storing a tree: forward a broadcast only if it
+    // arrived from the neighbour we would use to reach its origin. That condition is true on
+    // exactly one incoming edge per peer, so the shortest-path tree emerges implicitly from
+    // the routing table and re-forms automatically whenever routes change.
+    //
+    // If routing has no opinion yet (pre-convergence, or an origin outside our map) we fall
+    // back to forwarding anyway: duplicates are cheap and already deduplicated at step 1,
+    // whereas dropping would lose the packet entirely.
+    const isBroadcast = !packet.to;
+    if (this.tierCoordinator.getCurrentTier() === 'TIER1_FULL_MESH' && isBroadcast) {
+      const originId = packet.from?.peerId;
+      if (originId && originId !== this.myIdentity?.peerId) {
+        const upstream = this.router.nextHop(originId);
+        const onReversePath = !upstream || upstream === fromPeerId;
+
+        if (onReversePath) {
+          // Send only to the peers for which we are the parent in the origin's tree. Every
+          // peer derives the same tree from the same map, so this delivers to everyone while
+          // transmitting once per tree edge rather than once per mesh edge.
+          const children = this.router.getBroadcastChildren(originId);
+          const targets =
+            children ??
+            // No map for this origin yet: forward broadly rather than lose the packet.
+            this.webrtc.getConnectedPeers().filter((p) => p !== fromPeerId && p !== originId);
+
+          for (const peerId of targets) {
+            if (peerId === fromPeerId || peerId === originId) continue;
+            this.webrtc.sendPacket(peerId, relayPacket);
+          }
+        }
+      }
+      return;
+    }
+
+    // 5b. Relay logic (Only Leaders relay packets in Tier 2!)
     if (this.tierCoordinator.getCurrentTier() === 'TIER2_MULTI_LEADER' && this.isLeader) {
       const isFromBackbone = this.backboneLeaders.has(fromPeerId);
 
@@ -1052,6 +1142,11 @@ export class TopologyService {
 
   public sendP2PPacket(packet: NetworkPacket, targetPeerId?: PeerId): boolean {
     if (targetPeerId) {
+      // Outbound interactive traffic counts toward affinity too. Scoring only inbound would
+      // mean the peer doing the typing never promotes the link to the peer watching — the
+      // relationship is mutual even when the traffic is mostly one way.
+      this.affinity.note(targetPeerId, packet.type);
+
       if (this.webrtc.isConnected(targetPeerId)) {
         return this.webrtc.sendPacket(targetPeerId, packet);
       }
@@ -1061,13 +1156,31 @@ export class TopologyService {
     // P2P Broadcast
     const currentTier = this.tierCoordinator.getCurrentTier();
     if (currentTier === 'TIER1_FULL_MESH') {
+      // Send to our neighbours only; RPF at each receiver carries it the rest of the way.
+      //
+      // Iterating connected peers rather than allPeers is what turns the cost from O(N) into
+      // O(degree). In a full-mesh-sized room the two are identical, so small rooms are
+      // unaffected; above the sparsity threshold this is the send-amplification saving.
+      const children = this.router.getBroadcastChildren(this.myIdentity!.peerId);
+      const targets = children ?? this.webrtc.getConnectedPeers();
+
       let anySent = false;
-      this.allPeers.forEach((peerId) => {
-        if (peerId !== this.myIdentity?.peerId && this.webrtc.isConnected(peerId)) {
+      for (const peerId of targets) {
+        if (peerId === this.myIdentity?.peerId) continue;
+        if (!this.webrtc.isConnected(peerId)) continue;
+        this.webrtc.sendPacket(peerId, packet);
+        anySent = true;
+      }
+
+      // If the tree told us to send to nobody but we do have neighbours, fall back. A tree
+      // computed from a stale map must never silently swallow a broadcast at its source.
+      if (!anySent) {
+        for (const peerId of this.webrtc.getConnectedPeers()) {
+          if (peerId === this.myIdentity?.peerId) continue;
           this.webrtc.sendPacket(peerId, packet);
           anySent = true;
         }
-      });
+      }
       return anySent;
     }
 

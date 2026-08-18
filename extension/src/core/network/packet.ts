@@ -230,8 +230,20 @@ export interface NetworkPacket {
   topologyEpoch?: number;
 }
 
-/** Default TTL for new packets. */
-export const DEFAULT_TTL = 3;
+/**
+ * Default hop budget for new packets.
+ *
+ * Raised from 3 when TIER1 became a sparse mesh. A TTL below the mesh diameter silently
+ * truncates every broadcast — peers beyond the budget simply never receive it, with nothing
+ * reporting an error, which presents as "the app does not work for some people" rather than
+ * as a routing fault. The planned mesh measures a diameter of 4 at 30 peers and 5 at 100, so
+ * this leaves comfortable margin.
+ *
+ * Raising it is safe because loop protection does not come from TTL: broadcasts are
+ * deduplicated on arrival and forwarded only along the shortest-path tree. TTL is the
+ * backstop for a transiently inconsistent map, not the primary bound.
+ */
+export const DEFAULT_TTL = 10;
 
 /** Create a new NetworkPacket with sensible defaults. */
 export function createPacket(

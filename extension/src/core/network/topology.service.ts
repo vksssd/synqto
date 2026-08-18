@@ -15,6 +15,8 @@ import {
 } from '../topology/topology.types';
 import { TopologyView } from '../topology/topology-view';
 import { IRouteResolver } from '../topology/route-resolver';
+import { PeerSignaling, PeerSignalPayload } from './peer-signaling';
+import { LinkMonitor } from './link-monitor';
 
 export interface TopologyState {
   isLeader: boolean;
@@ -35,6 +37,10 @@ export class TopologyService {
   private webrtc: WebRTCService;
   private tierCoordinator: TierCoordinator;
   private leaderMesh: LeaderMesh | null = null;
+  private static readonly MAX_RECONNECT_DELAY_MS = 15000;
+
+  private peerSignaling: PeerSignaling;
+  private linkMonitor: LinkMonitor;
 
   private myIdentity: PeerIdentity | null = null;
   private currentRoomId = '';
@@ -69,6 +75,47 @@ export class TopologyService {
     // Constructed with the default (adaptive) policy; init() replaces it with the policy for
     // the room actually being joined.
     this.tierCoordinator = new TierCoordinator(ADAPTIVE_POLICY);
+
+    this.peerSignaling = new PeerSignaling(
+      (peerId) => this.webrtc.isConnected(peerId),
+      () => this.webrtc.getConnectedPeers(),
+      (targetPeerId, payload) => {
+        // Signals ride the control channel as ordinary packets. sendP2PPacket is not used
+        // here: it consults the route resolver, which is topology state that may itself be
+        // stale during exactly the failures this path exists to repair. A signal must go to
+        // a specific neighbour we know is reachable right now, so it goes direct.
+        const packet = createPacket(
+          'signal:peer' as any,
+          this.myIdentity!,
+          this.currentRoomId,
+          payload,
+          targetPeerId,
+          { channelPriority: 'control', priority: 'CONTROL' }
+        );
+        return this.webrtc.sendPacket(targetPeerId, packet);
+      },
+      (targetPeerId, kind, data) => {
+        if (kind === 'offer') this.signaling.sendOffer(targetPeerId, data as any);
+        else if (kind === 'answer') this.signaling.sendAnswer(targetPeerId, data as any);
+        else this.signaling.sendIce(targetPeerId, data as any);
+      }
+    );
+
+    this.linkMonitor = new LinkMonitor(
+      () => this.webrtc.getConnectedPeers(),
+      (peerId, probeId) => {
+        const packet = createPacket(
+          'link:probe' as any,
+          this.myIdentity!,
+          this.currentRoomId,
+          { probeId },
+          peerId,
+          { channelPriority: 'control', priority: 'CONTROL' }
+        );
+        return this.webrtc.sendPacket(peerId, packet);
+      },
+      (peerId) => this.handleDeadLink(peerId)
+    );
 
     this.bindTierCoordinatorListeners();
 
@@ -153,16 +200,23 @@ export class TopologyService {
     }
 
     this.webrtc.setMyPeerId(identity.peerId);
+    this.peerSignaling.setMyPeerId(identity.peerId);
+    this.peerSignaling.reset();
+    this.linkMonitor.reset();
 
     // Connect to signaling server
     this.signaling.connect(roomId, identity.peerId, identity.nickname);
 
-    // Start background topology reconciliation loop
+    // Start background topology reconciliation and link liveness loops
     this.startReconciliationLoop();
+    this.linkMonitor.start();
   }
 
   public leave() {
     this.stopReconciliationLoop();
+    this.linkMonitor.stop();
+    this.linkMonitor.reset();
+    this.peerSignaling.reset();
     this.clearAllRetryTimers();
     if (this.leaderMesh) {
       this.leaderMesh.stop();
@@ -267,27 +321,95 @@ export class TopologyService {
     if (this.retryTimers.has(peerId)) return;
 
     const attempts = this.retryAttempts.get(peerId) || 0;
-    const delay = Math.min(8000, 1500 * Math.pow(1.5, Math.min(attempts, 4))) + Math.floor(Math.random() * 1000);
+
+    // Full jitter rather than a fixed base plus a small random tail.
+    //
+    // The previous form was `base + random(0..1000)`: once the exponential term saturated at
+    // 8s every peer retried inside the same 1s window. That is the synchronised-retry storm
+    // backoff exists to prevent, and it is worst exactly when it matters most — after a
+    // network blip that dropped many links at once, when the whole room retries together.
+    // Sampling uniformly across the whole window spreads them properly.
+    const window = Math.min(
+      TopologyService.MAX_RECONNECT_DELAY_MS,
+      1500 * Math.pow(1.6, Math.min(attempts, 6))
+    );
+    const delay = Math.max(500, Math.random() * window);
     this.retryAttempts.set(peerId, attempts + 1);
 
     const timer = setTimeout(() => {
       this.retryTimers.delete(peerId);
-      if (this.allPeers.has(peerId) && !this.webrtc.isConnected(peerId)) {
-        console.log(`[TopologyService] Reconnecting to peer ${peerId} (attempt #${attempts + 1})...`);
-        this.webrtc.restartIce(peerId);
+
+      // The peer may have left, or the link may have healed on its own, while we waited.
+      if (!this.allPeers.has(peerId)) {
+        this.retryAttempts.delete(peerId);
+        this.peerSignaling.forget(peerId);
+        return;
       }
+      if (this.webrtc.isConnected(peerId)) {
+        this.retryAttempts.delete(peerId);
+        return;
+      }
+
+      // restartIce reuses the existing PeerConnection and its gathered candidates when one
+      // survives, and falls back to a fresh connection when it does not. Either way the
+      // resulting offer is routed by PeerSignaling, so this repair does not need the server
+      // as long as any mesh path to the peer exists.
+      this.webrtc.restartIce(peerId);
+
+      // Keep trying. There is no attempt ceiling by design: a peer listed in allPeers is one
+      // the room still believes is present, and giving up would leave a permanent hole in
+      // the mesh that nothing else repairs. The backoff bounds the cost, and roster removal
+      // is what actually stops it.
+      this.schedulePeerReconnection(peerId);
     }, delay);
 
     this.retryTimers.set(peerId, timer);
   }
 
+  /**
+   * Drops reconnection state for peers no longer in the roster.
+   *
+   * retryAttempts was only ever cleared on a successful connect, so every peer that left
+   * while disconnected left an entry behind for the lifetime of the session.
+   */
+  private pruneDepartedPeers() {
+    for (const peerId of Array.from(this.retryAttempts.keys())) {
+      if (!this.allPeers.has(peerId)) {
+        this.retryAttempts.delete(peerId);
+        const timer = this.retryTimers.get(peerId);
+        if (timer) {
+          clearTimeout(timer);
+          this.retryTimers.delete(peerId);
+        }
+        this.peerSignaling.forget(peerId);
+        this.linkMonitor.forget(peerId);
+      }
+    }
+  }
+
   private setupSignalingListeners() {
     // 1. Roster updates from server (Dual-Leader aware)
     this.signaling.on('roster', (roster: RosterData) => {
+      // Reject a roster that does not contain us.
+      //
+      // The roster is authoritative for membership, so acting on a bad one is destructive:
+      // allPeers drives isLinkRequired, and pruneDepartedPeers tears down reconnection state
+      // for anyone absent. A roster without us is not a roster for our room — it is a
+      // half-initialised broadcast from a server that has just restarted and not yet
+      // re-registered us, or a message for a room we have already left. Applying it would
+      // empty allPeers and permanently stop repairing links that are merely idle, which is
+      // exactly the wrong response to a server restart.
+      if (!Array.isArray(roster?.peers) || roster.peers.length === 0) return;
+      const me = roster.peers.find((p) => p.peerId === this.myIdentity?.peerId);
+      if (!me) {
+        console.warn('[TopologyService] Ignoring roster that does not list this peer');
+        return;
+      }
+
       this.allPeers = new Set(roster.peers.map((p) => p.peerId));
       this.tierCoordinator.updatePeerCount(roster.peers.length);
+      this.pruneDepartedPeers();
 
-      const me = roster.peers.find((p) => p.peerId === this.myIdentity?.peerId);
       this.isLeader = me ? me.isLeader : false;
 
       if (this.isLeader) {
@@ -421,15 +543,85 @@ export class TopologyService {
     });
   }
 
+  /**
+   * A link the monitor has declared dead: probes went unanswered while the channel still
+   * reported itself open.
+   *
+   * Torn down explicitly rather than left to ICE consent timeout, because until the wrapper
+   * is gone `isConnected()` keeps returning true and every send into it is silently lost.
+   * Repair is then immediate for peers we still expect to be in the room.
+   */
+  private handleDeadLink(peerId: string): void {
+    console.warn(`[TopologyService] Link to ${peerId} unresponsive — tearing down and repairing`);
+    this.webrtc.closeConnection(peerId);
+    this.clusterPeers.delete(peerId);
+    this.standbyPeers.delete(peerId);
+
+    if (this.allPeers.has(peerId) && this.isLinkRequired(peerId)) {
+      this.schedulePeerReconnection(peerId);
+    }
+    this.emitState();
+  }
+
+  /**
+   * Whether we are supposed to hold a link to this peer under the current tier.
+   *
+   * TIER1 was previously absent from this test, so in a full mesh no peer counted as
+   * required and a dropped link was never scheduled for reconnection from the event path —
+   * it healed only when the 3.5s reconciler next happened to run, and only via a fresh
+   * connection rather than an ICE restart.
+   */
+  private isLinkRequired(peerId: string): boolean {
+    if (this.tierCoordinator.getCurrentTier() === 'TIER1_FULL_MESH') {
+      return this.allPeers.has(peerId);
+    }
+    return (
+      peerId === this.assignedLeader ||
+      peerId === this.assignedStandbyLeader ||
+      this.backboneLeaders.has(peerId)
+    );
+  }
+
+  /**
+   * Applies a signal that arrived over the mesh instead of the server.
+   *
+   * Identical handling to the server path — the transport a signal took is not something
+   * WebRTC needs to know, and keeping the two paths convergent here is what makes
+   * "reconnect without the server" behave exactly like a normal reconnect.
+   */
+  private async applyPeerSignal(signal: PeerSignalPayload): Promise<void> {
+    try {
+      if (signal.kind === 'offer') {
+        await this.webrtc.handleIncomingOffer(
+          signal.originPeerId,
+          signal.data as RTCSessionDescriptionInit
+        );
+      } else if (signal.kind === 'answer') {
+        await this.webrtc.handleIncomingAnswer(
+          signal.originPeerId,
+          signal.data as RTCSessionDescriptionInit
+        );
+      } else {
+        await this.webrtc.handleIncomingIce(
+          signal.originPeerId,
+          signal.data as RTCIceCandidateInit
+        );
+      }
+    } catch (err) {
+      console.warn('[TopologyService] Failed to apply peer-relayed signal:', err);
+    }
+  }
+
+  /** Signal routing counters — how much traffic avoided the server. */
+  public getSignalingStats() {
+    return this.peerSignaling.getStats();
+  }
+
   private setupWebRTCListeners() {
     this.webrtc.onSignalNeeded((targetPeerId, type, payload) => {
-      if (type === 'offer') {
-        this.signaling.sendOffer(targetPeerId, payload);
-      } else if (type === 'answer') {
-        this.signaling.sendAnswer(targetPeerId, payload);
-      } else if (type === 'ice') {
-        this.signaling.sendIce(targetPeerId, payload);
-      }
+      // Route through the mesh where possible; the server is the last resort, not the
+      // default. See core/network/peer-signaling.ts for the preference order.
+      this.peerSignaling.route(targetPeerId, type, payload);
     });
 
     this.webrtc.onPacket((fromPeerId, packet) => {
@@ -465,12 +657,7 @@ export class TopologyService {
         }
 
         // Schedule automatic reconnection if this peer is part of our required topology links
-        const isRequiredPeer =
-          peerId === this.assignedLeader ||
-          peerId === this.assignedStandbyLeader ||
-          this.backboneLeaders.has(peerId);
-
-        if (isRequiredPeer && this.allPeers.has(peerId)) {
+        if (this.isLinkRequired(peerId) && this.allPeers.has(peerId)) {
           this.schedulePeerReconnection(peerId);
         }
       }
@@ -488,7 +675,45 @@ export class TopologyService {
     }
     this.markPacketSeen(packet.id);
 
-    // 2. Intercept leader digests
+    // 2. Intercept peer-relayed signaling.
+    //
+    // Handled here rather than as an ordinary application packet because a signal may need
+    // forwarding to a third peer, and because it must reach WebRTC even while the app layer
+    // is unhealthy — repairing the transport cannot depend on the transport being usable.
+    if (packet.type === ('signal:peer' as any)) {
+      const signal = this.peerSignaling.handleInbound(
+        packet.payload as PeerSignalPayload,
+        packet
+      );
+      if (signal) this.applyPeerSignal(signal);
+      return; // never delivered to application handlers
+    }
+
+    // 2b. Link liveness. Any inbound packet is evidence of life; probes are answered
+    // immediately and never surface to the application.
+    this.linkMonitor.noteInbound(fromPeerId);
+
+    if (packet.type === ('link:probe' as any)) {
+      const probeId = (packet.payload as { probeId?: string })?.probeId ?? '';
+      const pong = createPacket(
+        'link:pong' as any,
+        this.myIdentity!,
+        this.currentRoomId,
+        { probeId },
+        fromPeerId,
+        { channelPriority: 'control', priority: 'CONTROL' }
+      );
+      this.webrtc.sendPacket(fromPeerId, pong);
+      return;
+    }
+
+    if (packet.type === ('link:pong' as any)) {
+      const probeId = (packet.payload as { probeId?: string })?.probeId ?? '0';
+      this.linkMonitor.notePong(fromPeerId, Number(probeId) || 0);
+      return;
+    }
+
+    // 3. Intercept leader digests
     if (packet.type === ('topology:digest' as any) && this.leaderMesh) {
       this.leaderMesh.recordDigest(packet.payload as LeaderDigest);
     }

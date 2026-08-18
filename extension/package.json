@@ -1,6 +1,6 @@
 {
   "name": "synqto-extension",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,7 +10,8 @@
     "test:soak": "npx tsx scripts/run-soak-simulation.mjs",
     "package": "node scripts/package.mjs",
     "clean": "rimraf dist",
-    "preview:ui": "vite --host 127.0.0.1"
+    "preview:ui": "vite --host 127.0.0.1",
+    "test:stress": "npx tsx scripts/stress-mesh.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",

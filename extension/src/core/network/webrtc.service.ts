@@ -21,6 +21,27 @@ export class WebRTCService {
   private connections: Map<string, PeerConnectionWrapper> = new Map();
   private pendingIceCandidates: Map<string, RTCIceCandidateInit[]> = new Map();
 
+  /**
+   * Locally-gathered candidates per peer, kept so a reconnect can be primed instead of
+   * re-gathering from zero. See getCachedCandidates.
+   */
+  private lastKnownCandidates: Map<string, RTCIceCandidateInit[]> = new Map();
+
+  /**
+   * Bounds on ICE buffering.
+   *
+   * pendingIceCandidates is filled directly from the network by handleIncomingIce, before
+   * any connection exists — so it is attacker-reachable and must be bounded on both axes.
+   * A peer that trickles candidates forever, or a room where many peers signal and vanish,
+   * would otherwise grow it without limit for the lifetime of the session.
+   *
+   * 40 candidates is generous: a typical host gathers 4-12 (host, srflx, relay per
+   * interface/family). 200 peers far exceeds any real room.
+   */
+  private static readonly MAX_PENDING_ICE_PER_PEER = 40;
+  private static readonly MAX_ICE_PEERS = 200;
+  private iceDropped = 0;
+
   // Distinct local media tracks
   private localAudioTrack: MediaStreamTrack | null = null;
   private localVideoTrack: MediaStreamTrack | null = null;
@@ -423,10 +444,27 @@ export class WebRTCService {
   ): Promise<void> {
     const wrapper = this.connections.get(remotePeerId);
     if (!wrapper || !wrapper.pc || !wrapper.pc.remoteDescription || wrapper.pc.signalingState === 'closed') {
+      // Buffer until the remote description exists — but bounded on both axes, because this
+      // path is reachable from the network before any connection is established.
+      if (
+        !this.pendingIceCandidates.has(remotePeerId) &&
+        this.pendingIceCandidates.size >= WebRTCService.MAX_ICE_PEERS
+      ) {
+        this.iceDropped++;
+        return;
+      }
       if (!this.pendingIceCandidates.has(remotePeerId)) {
         this.pendingIceCandidates.set(remotePeerId, []);
       }
-      this.pendingIceCandidates.get(remotePeerId)!.push(candidate);
+      const queue = this.pendingIceCandidates.get(remotePeerId)!;
+      if (queue.length >= WebRTCService.MAX_PENDING_ICE_PER_PEER) {
+        // Drop the oldest: later candidates are generally the more useful ones (srflx and
+        // relay arrive after host), so discarding the tail would bias toward unusable
+        // host-only candidates on a restricted network.
+        queue.shift();
+        this.iceDropped++;
+      }
+      queue.push(candidate);
       return;
     }
 
@@ -458,8 +496,19 @@ export class WebRTCService {
 
     pc.onicecandidate = (event) => {
       if (event.candidate) {
-        this.signalNeededListeners.forEach((fn) => fn(remotePeerId, 'ice', event.candidate?.toJSON()));
+        const json = event.candidate.toJSON();
+
+        // Cache our own candidates so a later reconnect to this peer can be primed rather
+        // than re-gathered from zero. Bounded by the same per-peer cap as the inbound queue.
+        const cached = this.lastKnownCandidates.get(remotePeerId) || [];
+        if (cached.length < WebRTCService.MAX_PENDING_ICE_PER_PEER) {
+          cached.push(json);
+          this.lastKnownCandidates.set(remotePeerId, cached);
+        }
+
+        this.signalNeededListeners.forEach((fn) => fn(remotePeerId, 'ice', json));
       }
+      // event.candidate === null means gathering is complete; nothing to send.
     };
 
     pc.onconnectionstatechange = () => {
@@ -643,6 +692,16 @@ export class WebRTCService {
   }
 
   public closeConnection(remotePeerId: string) {
+    // Drop buffered ICE first, unconditionally.
+    //
+    // This used to sit at the end of the method, after an early `if (!wrapper) return`.
+    // ICE candidates arriving for a peer we never built a PeerConnection for — a peer that
+    // signalled and then vanished, or one whose offer never arrived — were buffered by
+    // handleIncomingIce and then never reachable by any cleanup path, because there was no
+    // wrapper for closeConnection to find. The buffer grew for the lifetime of the session.
+    this.pendingIceCandidates.delete(remotePeerId);
+    this.lastKnownCandidates.delete(remotePeerId);
+
     const wrapper = this.connections.get(remotePeerId);
     if (!wrapper) return;
 
@@ -666,7 +725,6 @@ export class WebRTCService {
     }
 
     this.connections.delete(remotePeerId);
-    this.pendingIceCandidates.delete(remotePeerId);
   }
 
   public closeAll() {

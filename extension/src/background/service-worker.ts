@@ -124,23 +124,54 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
     });
   } else if (message.type === 'OPEN_SIDEPANEL') {
+    // chrome.sidePanel.open() must be invoked synchronously inside this handler to stay
+    // within the caller's user-gesture window, and it can still legitimately fail (no
+    // gesture, panel disabled for the tab, older Chrome). Previously every failure was
+    // swallowed by .catch(() => {}) AND sendResponse({success:true}) was sent regardless,
+    // so a FAB click that did nothing still reported success and the user got no feedback
+    // and no fallback instruction. Report the real outcome instead.
     const tabId = sender.tab?.id;
     const windowId = sender.tab?.windowId;
-    if (tabId && (chrome.sidePanel as any)?.open) {
-      (chrome.sidePanel as any).open({ tabId }).catch(() => {
-        if (windowId) {
-          (chrome.sidePanel as any).open({ windowId }).catch(() => {});
+    const sidePanel = (chrome.sidePanel as any);
+
+    if (!sidePanel?.open) {
+      sendResponse({ success: false, reason: 'unsupported' });
+      return true;
+    }
+
+    const markOpen = () => {
+      chrome.storage.local.set({
+        synqto_sidepanel_open: true,
+        nerd_buddy_sidepanel_open: true,
+      });
+    };
+
+    const attempt = tabId ? sidePanel.open({ tabId }) : (windowId ? sidePanel.open({ windowId }) : Promise.reject(new Error('no target')));
+
+    Promise.resolve(attempt)
+      .then(() => {
+        markOpen();
+        sendResponse({ success: true });
+      })
+      .catch((err: any) => {
+        // Retry at window scope before giving up — tab-scoped open fails on some pages.
+        if (windowId && tabId) {
+          Promise.resolve(sidePanel.open({ windowId }))
+            .then(() => {
+              markOpen();
+              sendResponse({ success: true });
+            })
+            .catch((err2: any) => {
+              console.warn('[ServiceWorker] sidePanel.open failed', err2);
+              sendResponse({ success: false, reason: 'gesture', message: String(err2?.message || err2) });
+            });
+        } else {
+          console.warn('[ServiceWorker] sidePanel.open failed', err);
+          sendResponse({ success: false, reason: 'gesture', message: String(err?.message || err) });
         }
       });
-    } else if (windowId && (chrome.sidePanel as any)?.open) {
-      (chrome.sidePanel as any).open({ windowId }).catch(() => {});
-    }
-    chrome.storage.local.set({
-      synqto_sidepanel_open: true,
-      nerd_buddy_sidepanel_open: true,
-    });
-    sendResponse({ success: true });
-    return true;
+
+    return true; // async sendResponse
   } else if (message.type === 'SEND_PAGE_CHAT_MESSAGE') {
     // Forward to sidepanel for P2P mesh distribution
     chrome.runtime.sendMessage(message).catch(() => {});
@@ -168,7 +199,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     });
     return true; // asynchronous sendResponse
   }
-  return true;
+
+  // Return FALSE (implicitly, by not returning true) for every branch that does not call
+  // sendResponse asynchronously.
+  //
+  // This previously returned `true` unconditionally, which tells Chrome "a response is
+  // coming later" and holds the message channel open until it times out. Almost no branch
+  // above ever responds, so every message leaked a port — and the hot paths here are
+  // LOCAL_CURSOR_MOVE and CODE_DELTA_LOCAL, which fire continuously while a user moves the
+  // mouse or types. That produced a steady stream of leaked channels and the familiar
+  // "message port closed before a response was received" console spam.
+  return false;
 });
 
 // 5. Broadcast settings changes immediately to all active tabs

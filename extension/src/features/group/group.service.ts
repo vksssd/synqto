@@ -101,12 +101,166 @@ export class GroupService {
    * If password protected: uses zero-knowledge deterministic SHA-256 room derivation.
    * The signaling server never receives or knows the password.
    */
-  public async createGroup(params: CreateGroupParams): Promise<StudyGroup> {
-    const cleanSlug = params.name
+  // ─── Public handle contract ───
+  //
+  // A public group's roomId is derived deterministically from its name alone:
+  //
+  //     roomId = group:<handle>-pub-<fnv1a(handle + ":public")>
+  //
+  // That means the handle IS a globally resolvable address: any two peers who type the
+  // same group name independently compute the same roomId and land in the same room, with
+  // no directory service and no invite exchange. This is what makes groups searchable by
+  // name in a fully serverless architecture.
+  //
+  // Because of that, normalization MUST be identical everywhere. It was previously inlined
+  // in createGroup only, so any second call site that slugified even slightly differently
+  // would silently resolve to a DIFFERENT room and the two users would never meet — with no
+  // error surfaced. It lives here now as the single source of truth.
+  //
+  // Consequence worth being explicit about: handles are not owned or reserved. Two groups
+  // created with the same name ARE the same public room. That is the discovery mechanism,
+  // not a collision bug — but it does mean a public handle is guessable, so anything
+  // requiring privacy must use the password path, which mixes the secret into the room hash.
+
+  /** Maximum handle length; keeps derived room IDs bounded. */
+  public static readonly MAX_HANDLE_LENGTH = 28;
+
+  /**
+   * Clears the creator flag on a group the user joined rather than founded.
+   *
+   * Accepting an invite routes through createGroup (the room ID for a private squad can
+   * only be derived client-side from the password), which stamps isCreator=true on the
+   * caller. Without this correction every invited member was recorded as the squad's
+   * creator, which misrepresents ownership in the UI.
+   */
+  public markAsJoinedNotCreated(groupId: string): void {
+    const g = this.groups.find((grp) => grp.id === groupId);
+    if (!g || !g.isCreator) return;
+    g.isCreator = false;
+    g.creatorPeerId = undefined;
+    this.saveToStorage();
+    this.emitChange();
+  }
+
+  /**
+   * Normalizes a group name (or a typed "@handle") into its canonical handle form.
+   * Idempotent: toHandle(toHandle(x)) === toHandle(x).
+   */
+  public static toHandle(nameOrHandle: string): string {
+    const cleaned = (nameOrHandle || '')
+      .trim()
+      .replace(/^@+/, '') // tolerate users typing "@squad"
       .toLowerCase()
       .replace(/[^a-z0-9-_]/g, '-')
-      .slice(0, 28)
-      .replace(/-+$/, '');
+      .slice(0, GroupService.MAX_HANDLE_LENGTH)
+      .replace(/-+$/, '')
+      .replace(/^-+/, '');
+    return cleaned || 'squad';
+  }
+
+  /** True if the input normalizes to something a peer could actually resolve. */
+  public static isValidHandle(nameOrHandle: string): boolean {
+    const h = GroupService.toHandle(nameOrHandle);
+    return h.length >= 2 && h !== 'squad';
+  }
+
+  /** Computes the public room ID a handle resolves to. Mirrors createGroup exactly. */
+  public static resolvePublicRoomId(nameOrHandle: string): string {
+    const handle = GroupService.toHandle(nameOrHandle);
+    return `group:${handle}-pub-${fnv1aHash(handle + ':public')}`;
+  }
+
+  /**
+   * Searches locally known groups by name, handle, description or topic.
+   * Returns matches ranked with exact-handle first so typing a full name lands on it.
+   */
+  public searchGroups(query: string): StudyGroup[] {
+    const raw = (query || '').trim().toLowerCase();
+    if (!raw) return [...this.groups];
+
+    const handle = GroupService.toHandle(raw);
+    const scored = this.groups
+      .map((g) => {
+        let score = -1;
+        if (g.slug === handle) score = 100;
+        else if (g.name.toLowerCase() === raw) score = 90;
+        else if (g.slug.startsWith(handle)) score = 70;
+        else if (g.name.toLowerCase().includes(raw)) score = 50;
+        else if (g.description?.toLowerCase().includes(raw)) score = 20;
+        else if (g.topicTag.toLowerCase().includes(raw)) score = 10;
+        return { g, score };
+      })
+      .filter((s) => s.score >= 0)
+      .sort((a, b) => b.score - a.score);
+
+    return scored.map((s) => s.g);
+  }
+
+  /**
+   * Joins a PUBLIC group purely by its name/handle, with no invite token.
+   *
+   * If the handle matches a group already known locally, that record is reused so the
+   * user keeps its avatar/description/history. Otherwise a lightweight stub is created
+   * pointing at the derived room — the peers already in that room supply the real
+   * identity of the group once connected.
+   */
+  public async joinByHandle(
+    nameOrHandle: string
+  ): Promise<{ success: boolean; group?: StudyGroup; error?: string }> {
+    if (!GroupService.isValidHandle(nameOrHandle)) {
+      return {
+        success: false,
+        error: 'Enter at least 2 letters or numbers (for example: leetcode-grind)',
+      };
+    }
+
+    const handle = GroupService.toHandle(nameOrHandle);
+    const roomId = GroupService.resolvePublicRoomId(handle);
+
+    // Prefer an existing local record for this handle/room.
+    const existing = this.groups.find((g) => g.roomId === roomId || (!g.isPrivate && g.slug === handle));
+    if (existing) {
+      const res = await this.joinGroup(existing);
+      return res.success
+        ? { success: true, group: existing }
+        : { success: false, error: res.error };
+    }
+
+    const identity = await this.identityService.getOrCreateIdentity();
+    const stub: StudyGroup = {
+      id: uuid(),
+      name: nameOrHandle.trim().replace(/^@+/, '') || handle,
+      slug: handle,
+      avatar: '🔍',
+      isPrivate: false,
+      topicTag: 'General',
+      roomId,
+      createdAt: Date.now(),
+      creatorPeerId: identity.peerId,
+      isCreator: false,
+      isMember: true,
+      joinedAt: Date.now(),
+    };
+
+    this.groups = [stub, ...this.groups.filter((g) => g.roomId !== roomId)];
+    this.saveToStorage();
+    this.emitChange();
+
+    await this.roomService.joinGroupRoom({
+      roomId: stub.roomId,
+      name: stub.name,
+      slug: stub.slug,
+      avatar: stub.avatar,
+      isPrivate: false,
+      description: stub.description,
+      topicTag: stub.topicTag,
+    });
+
+    return { success: true, group: stub };
+  }
+
+  public async createGroup(params: CreateGroupParams): Promise<StudyGroup> {
+    const cleanSlug = GroupService.toHandle(params.name);
 
     let roomId = '';
     let passwordHash: string | undefined = undefined;

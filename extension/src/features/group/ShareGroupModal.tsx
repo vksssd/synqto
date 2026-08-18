@@ -17,7 +17,10 @@ export const ShareGroupModal: React.FC<ShareGroupModalProps> = ({
   onClose,
 }) => {
   const groupService = GroupService.getInstance();
+  // Both hooks must run before the early return below — calling a hook after a conditional
+  // return violates the Rules of Hooks and desynchronises hook order as the modal toggles.
   const [copied, setCopied] = useState(false);
+  const [handleCopied, setHandleCopied] = useState(false);
 
   if (!isOpen || !group) return null;
 
@@ -97,10 +100,69 @@ export const ShareGroupModal: React.FC<ShareGroupModalProps> = ({
           </div>
         )}
 
+        {/* Public handle — the simplest way to share a public squad.
+            A public squad's room is derived from its name, so anyone who types the handle
+            resolves to the same room. Surfacing it avoids forcing a token exchange for
+            squads that never needed one. Private squads are deliberately excluded: their
+            room ID mixes in the password, so the handle alone does not grant access. */}
+        {!group.isPrivate && (
+          <div>
+            <label
+              htmlFor="squad-handle"
+              style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}
+            >
+              Squad Handle — share this, no token needed
+            </label>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                background: 'rgba(0, 0, 0, 0.4)',
+                border: '1px solid var(--border-medium)',
+                borderRadius: 'var(--radius-md)',
+                padding: '6px 8px',
+                marginBottom: '12px',
+              }}
+            >
+              <input
+                id="squad-handle"
+                type="text"
+                readOnly
+                value={`@${group.slug}`}
+                onFocus={(e) => e.currentTarget.select()}
+                style={{
+                  flex: 1,
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#a5b4fc',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  outline: 'none',
+                }}
+              />
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => {
+                  navigator.clipboard.writeText(`@${group.slug}`).catch(() => {});
+                  setHandleCopied(true);
+                  setTimeout(() => setHandleCopied(false), 1600);
+                }}
+                aria-label={`Copy squad handle @${group.slug}`}
+              >
+                {handleCopied ? <Check size={12} /> : <Copy size={12} />}
+                <span>{handleCopied ? 'Copied' : 'Copy'}</span>
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Invite Code Box */}
         <div>
           <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
-            Squad Invite Token
+            {group.isPrivate ? 'Squad Invite Token (includes access)' : 'Squad Invite Token (alternative)'}
           </label>
           <div
             style={{

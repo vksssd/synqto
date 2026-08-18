@@ -33,6 +33,7 @@ export const GroupHubView: React.FC<GroupHubViewProps> = ({ currentRoom, onOpenC
   const [groups, setGroups] = useState<StudyGroup[]>([]);
   const [selectedTopic, setSelectedTopic] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
+  const [isJoiningHandle, setIsJoiningHandle] = useState(false);
 
   // Modals
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -81,22 +82,44 @@ export const GroupHubView: React.FC<GroupHubViewProps> = ({ currentRoom, onOpenC
     groupService.deleteGroup(groupId);
   };
 
-  const filteredGroups = groups.filter((g) => {
-    let matchesTopic = true;
-    if (selectedTopic === 'All') {
-      matchesTopic = true;
-    } else if (selectedTopic === 'Problems') {
-      matchesTopic = Boolean(g.isProblemGroup || g.topicTag === 'LeetCode' || g.topicTag === 'Codeforces' || g.topicTag === 'NeetCode');
-    } else {
-      matchesTopic = g.topicTag === selectedTopic;
+  const matchesTopicFilter = (g: StudyGroup) => {
+    if (selectedTopic === 'All') return true;
+    if (selectedTopic === 'Problems') {
+      return Boolean(
+        g.isProblemGroup ||
+          g.topicTag === 'LeetCode' ||
+          g.topicTag === 'Codeforces' ||
+          g.topicTag === 'NeetCode'
+      );
     }
+    return g.topicTag === selectedTopic;
+  };
 
-    const matchesSearch =
-      g.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (g.description && g.description.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      g.topicTag.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesTopic && matchesSearch;
-  });
+  // Ranked search (exact handle > exact name > prefix > substring) so typing a full squad
+  // name puts it first instead of burying it behind incidental description matches.
+  const filteredGroups = (searchQuery.trim() ? groupService.searchGroups(searchQuery) : groups)
+    .filter(matchesTopicFilter);
+
+  // A public squad's room ID derives from its name, so a name that matches nothing locally
+  // is still joinable — the squad may simply exist only on other peers. Offer that instead
+  // of a dead end.
+  const searchHandle = searchQuery.trim() ? GroupService.toHandle(searchQuery) : '';
+  const canJoinSearchedHandle =
+    GroupService.isValidHandle(searchQuery) &&
+    !groups.some((g) => g.slug === searchHandle && !g.isPrivate);
+
+  const handleJoinSearchedHandle = async () => {
+    if (!canJoinSearchedHandle || isJoiningHandle) return;
+    try {
+      setIsJoiningHandle(true);
+      const res = await groupService.joinByHandle(searchQuery);
+      if (res.success) {
+        setSearchQuery('');
+      }
+    } finally {
+      setIsJoiningHandle(false);
+    }
+  };
 
   const topics = ['All', 'Problems', 'LeetCode', 'System Design', 'Algorithms', 'General'];
 
@@ -200,13 +223,34 @@ export const GroupHubView: React.FC<GroupHubViewProps> = ({ currentRoom, onOpenC
               gap: '8px',
             }}
           >
-            <Sparkles size={24} color="var(--text-dim)" />
+            <Sparkles size={24} color="var(--text-dim)" aria-hidden="true" />
             <div style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-secondary)' }}>
-              No study squads or problem groups found
+              {searchQuery.trim() ? `No local squad matches “${searchQuery.trim()}”` : 'No study squads or problem groups found'}
             </div>
-            <div style={{ fontSize: '11px', maxWidth: '240px' }}>
-              Create your own serverless squad with or without a password, or scan a problem on your current tab!
-            </div>
+
+            {/* A public squad's room is derived from its name, so a name unknown locally is
+                still joinable — it may exist only on other peers. Without this the search
+                dead-ends and the squad is unreachable despite being perfectly valid. */}
+            {canJoinSearchedHandle ? (
+              <>
+                <div style={{ fontSize: '11px', maxWidth: '260px' }}>
+                  Squads live on peers, not a server — so this one may exist even though you
+                  haven't seen it. Join <strong>@{searchHandle}</strong> to find out.
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={handleJoinSearchedHandle}
+                  disabled={isJoiningHandle}
+                >
+                  {isJoiningHandle ? 'Joining…' : `Join @${searchHandle}`}
+                </button>
+              </>
+            ) : (
+              <div style={{ fontSize: '11px', maxWidth: '240px' }}>
+                Create your own serverless squad with or without a password, or scan a problem on your current tab!
+              </div>
+            )}
             <button
               type="button"
               className="btn btn-primary btn-sm"

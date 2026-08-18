@@ -25,30 +25,83 @@ export const JoinInviteModal: React.FC<JoinInviteModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  // Input accepts EITHER an NBGRP invite token OR a plain group name/@handle. A public
+  // group's room ID derives deterministically from its handle, so a name alone is enough
+  // to resolve and join — no invite exchange and no directory service required.
+  const trimmed = inviteInput.trim();
+  const looksLikeToken = /^NBGRP:/i.test(trimmed);
+  const handlePreview = !looksLikeToken && trimmed ? GroupService.toHandle(trimmed) : '';
+  const canJoinByHandle = !looksLikeToken && GroupService.isValidHandle(trimmed);
+
   useEffect(() => {
-    if (!inviteInput.trim()) {
+    if (!trimmed) {
       setParsedPayload(null);
       setErrorMsg(null);
       return;
     }
 
-    const payload = groupService.parseInviteCode(inviteInput.trim());
+    if (!looksLikeToken) {
+      // Handle mode — nothing to parse, validity is reflected inline below the field.
+      setParsedPayload(null);
+      setErrorMsg(null);
+      return;
+    }
+
+    const payload = groupService.parseInviteCode(trimmed);
     if (payload) {
       setParsedPayload(payload);
       if (payload.pwd) {
         setPassword(payload.pwd);
       }
       setErrorMsg(null);
-    } else if (inviteInput.trim().length > 8) {
+    } else {
       setParsedPayload(null);
-      setErrorMsg('Invalid invite code format (must start with NBGRP:)');
+      setErrorMsg('That invite token looks incomplete — copy the whole NBGRP:… string.');
     }
-  }, [inviteInput]);
+  }, [trimmed, looksLikeToken]);
+
+  // Escape closes the dialog. Modals previously trapped the user into clicking the X or
+  // the backdrop, which is both an accessibility failure and a common source of "stuck"
+  // reports when the backdrop is covered by another element.
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // ── Join by name/handle ──
+    if (!looksLikeToken) {
+      if (!canJoinByHandle) {
+        setErrorMsg('Enter a squad name (at least 2 letters or numbers) or paste an invite token.');
+        return;
+      }
+      try {
+        setIsSubmitting(true);
+        setErrorMsg(null);
+        const res = await groupService.joinByHandle(trimmed);
+        if (!res.success) {
+          setErrorMsg(res.error || 'Could not join that squad');
+          return;
+        }
+        onSuccess?.();
+        onClose();
+      } catch (err: any) {
+        setErrorMsg(err?.message || 'Failed to join squad by name');
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
+
+    // ── Join via invite token ──
     if (!parsedPayload) {
       setErrorMsg('Please paste a valid invite token');
       return;
@@ -63,7 +116,13 @@ export const JoinInviteModal: React.FC<JoinInviteModalProps> = ({
       setIsSubmitting(true);
       setErrorMsg(null);
 
-      // Create or import group from payload
+      // Private squads must go through createGroup because the room ID is derived from
+      // the password, which only the joining client knows. Public squads resolve straight
+      // from the handle.
+      //
+      // NOTE: createGroup stamps isCreator/creatorPeerId on the caller. Accepting an invite
+      // does NOT make you the creator, so the flag is corrected immediately afterwards —
+      // previously every invited member was recorded as the squad's creator.
       const group = await groupService.createGroup({
         name: parsedPayload.name,
         description: parsedPayload.description,
@@ -72,6 +131,8 @@ export const JoinInviteModal: React.FC<JoinInviteModalProps> = ({
         password: parsedPayload.isPrivate ? password : undefined,
         topicTag: parsedPayload.topicTag || 'General',
       });
+
+      groupService.markAsJoinedNotCreated(group.id);
 
       onSuccess?.();
       onClose();
@@ -84,23 +145,31 @@ export const JoinInviteModal: React.FC<JoinInviteModalProps> = ({
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '380px' }}>
+      <div
+        className="modal-content"
+        onClick={(e) => e.stopPropagation()}
+        style={{ maxWidth: '380px' }}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="join-squad-title"
+      >
         <div className="glass-card-header">
           <div className="glass-card-title">
-            <Ticket size={16} color="var(--accent-cyan)" />
-            <span>Join Squad via Invite Code</span>
+            <Ticket size={16} color="var(--accent-cyan)" aria-hidden="true" />
+            <span id="join-squad-title">Find or Join a Squad</span>
           </div>
-          <button className="btn btn-ghost btn-icon btn-sm" onClick={onClose}>
-            <X size={16} />
+          <button className="btn btn-ghost btn-icon btn-sm" onClick={onClose} aria-label="Close dialog">
+            <X size={16} aria-hidden="true" />
           </button>
         </div>
 
         <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-          Paste a <code>NBGRP:...</code> token to join a peer squad.
+          Type a squad <strong>name</strong> to find it, or paste an <code>NBGRP:…</code> invite token.
         </p>
 
         {errorMsg && (
           <div
+            role="alert"
             style={{
               padding: '6px 10px',
               borderRadius: 'var(--radius-sm)',
@@ -116,18 +185,42 @@ export const JoinInviteModal: React.FC<JoinInviteModalProps> = ({
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           <div>
-            <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
-              Invite Token
+            <label
+              htmlFor="join-squad-input"
+              style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}
+            >
+              Squad name or invite token
             </label>
             <input
+              id="join-squad-input"
               type="text"
               className="input-glass"
-              placeholder="Paste NBGRP:... token"
+              placeholder="e.g. leetcode-grind  ·  or NBGRP:…"
               value={inviteInput}
               onChange={(e) => setInviteInput(e.target.value)}
               autoFocus
               required
+              autoComplete="off"
+              spellCheck={false}
+              aria-describedby="join-squad-hint"
             />
+
+            {/* Live resolution preview: shows the exact handle the name normalizes to, so
+                two people can confirm they are typing the same thing before joining. */}
+            <div id="join-squad-hint" aria-live="polite" style={{ marginTop: '5px', minHeight: '14px' }}>
+              {handlePreview && (
+                <span style={{ fontSize: '10.5px', color: canJoinByHandle ? 'var(--accent-cyan)' : 'var(--text-muted)' }}>
+                  {canJoinByHandle ? (
+                    <>Joins public squad <strong>@{handlePreview}</strong></>
+                  ) : (
+                    <>Keep typing — needs at least 2 letters or numbers</>
+                  )}
+                </span>
+              )}
+              {looksLikeToken && !parsedPayload && !errorMsg && (
+                <span style={{ fontSize: '10.5px', color: 'var(--text-muted)' }}>Reading invite token…</span>
+              )}
+            </div>
           </div>
 
           {/* Parsed Group Preview Card */}
@@ -223,7 +316,14 @@ export const JoinInviteModal: React.FC<JoinInviteModalProps> = ({
               type="submit"
               className="btn btn-primary"
               style={{ flex: 1.5 }}
-              disabled={isSubmitting || !parsedPayload || (parsedPayload.isPrivate && !password.trim())}
+              disabled={
+                isSubmitting ||
+                // Handle mode needs only a resolvable name; token mode needs a parsed
+                // payload (and a password when the squad is private).
+                (looksLikeToken
+                  ? !parsedPayload || (parsedPayload.isPrivate && !password.trim())
+                  : !canJoinByHandle)
+              }
             >
               {isSubmitting ? 'Joining...' : 'Join Squad'}
             </button>

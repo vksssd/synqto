@@ -846,7 +846,6 @@ const MainApp: React.FC = () => {
         }}
         unreadCount={unreadCount}
         peerCount={peers.length}
-        currentStreak={currentStreak}
       />
     </div>
   );

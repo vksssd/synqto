@@ -17,7 +17,20 @@ export class PacketPipeline {
 
   private myIdentity: PeerIdentity | null = null;
   private currentRoomId: RoomId = '';
+  /**
+   * Per-stream send counters, keyed `streamId` for broadcast and `streamId:peerId` for
+   * unicast.
+   *
+   * The unicast form makes this grow with every peer ever addressed, and it was cleared only
+   * on init — so a long session in a busy room accumulated an entry per (stream, peer) pair
+   * for its whole lifetime. Small individually, unbounded collectively, and keyed by a
+   * remote-supplied peer ID.
+   *
+   * Bounded two ways: forgetPeer() prunes precisely when the roster says a peer has left,
+   * and MAX_STREAM_SCOPES is the backstop for anything that slips past that.
+   */
   private localStreamSeq: Map<string, number> = new Map();
+  private static readonly MAX_STREAM_SCOPES = 2000;
 
   private onDeliverToAppFn: ((packet: NetworkPacket) => void) | null = null;
 
@@ -81,6 +94,18 @@ export class PacketPipeline {
       const streamScope = targetPeerId ? `${packet.streamId}:${targetPeerId}` : packet.streamId;
       const currentSeq = this.localStreamSeq.get(streamScope) ?? 1;
       packet.seq = currentSeq;
+
+      if (
+        !this.localStreamSeq.has(streamScope) &&
+        this.localStreamSeq.size >= PacketPipeline.MAX_STREAM_SCOPES
+      ) {
+        // Evict the oldest scope. Insertion order is a reasonable proxy here because a
+        // scope's counter only advances while that stream is in use, and reaching this cap
+        // at all means something is wrong with roster pruning rather than with traffic.
+        const oldest = this.localStreamSeq.keys().next().value;
+        if (oldest !== undefined) this.localStreamSeq.delete(oldest);
+      }
+
       this.localStreamSeq.set(streamScope, currentSeq + 1);
     }
 
@@ -242,6 +267,21 @@ export class PacketPipeline {
 
   public getReliableTransport(): ReliableTransport {
     return this.reliableTransport;
+  }
+
+  /**
+   * Drops send-sequence state for a departed peer.
+   *
+   * Called from roster pruning. Precise removal is preferable to eviction: a peer that
+   * rejoins should restart its stream sequence from 1, and leaving a stale counter behind
+   * would make the receiver's ordering buffer wait forever for sequence numbers that the
+   * returning peer will never send.
+   */
+  public forgetPeer(peerId: string): void {
+    const suffix = `:${peerId}`;
+    for (const scope of Array.from(this.localStreamSeq.keys())) {
+      if (scope.endsWith(suffix)) this.localStreamSeq.delete(scope);
+    }
   }
 
   public clear(): void {

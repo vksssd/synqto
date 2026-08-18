@@ -1062,6 +1062,89 @@ scenario('the adjacency cache is dropped when an LSA ages out', () => {
   assert.strictEqual(a.nextHop('b'), null, 'stale route survived age-out — cache not invalidated');
 });
 
+
+console.log('\n── Wire limits: database sync must fit the transport ──');
+
+scenario('a database push never exceeds the chunker threshold', () => {
+  // syncDatabaseWith sends directly over the DataChannel, deliberately bypassing the
+  // PacketPipeline so that repair works even when the pipeline is unhealthy. The cost of
+  // that choice is that nothing chunks it — so the snapshot must bound its own size.
+  //
+  // This matters more than a generic size limit: the database push is what merges healed
+  // partitions. If it silently fails to send, two halves of a room never reconverge, which
+  // is precisely the bug the push was added to fix.
+  let clock = 1_000_000;
+  const CHUNK_RAW_SIZE = 7168;
+
+  for (const [n, degree] of [[24, 6], [50, 6], [300, 6], [300, 64]]) {
+    const peers = Array.from({ length: n }, (_, i) => `peer-${'x'.repeat(20)}-${String(i).padStart(3, '0')}`);
+    const r = new LinkStateRouter(peers[0], { now: () => clock });
+
+    for (let i = 0; i < n; i++) {
+      const nbs = Array.from({ length: degree }, (_, j) => ({
+        peerId: peers[(i + j + 1) % n],
+        costMs: 30,
+      }));
+      if (i === 0) r.updateLocalNeighbours(nbs);
+      else r.handleLSA({ origin: peers[i], seq: 1, neighbours: nbs, issuedAt: clock, ttl: 8 }, peers[1]);
+    }
+
+    const batches = r.getDatabaseSnapshotBatches();
+    assert.ok(batches.length > 0, `n=${n} deg=${degree}: produced no batches`);
+
+    for (const batch of batches) {
+      const bytes = JSON.stringify({ lsas: batch }).length;
+      assert.ok(
+        bytes <= CHUNK_RAW_SIZE,
+        `n=${n} deg=${degree}: a batch was ${bytes}B, over the ${CHUNK_RAW_SIZE}B limit`
+      );
+    }
+
+    // And nothing may be silently dropped in the process.
+    const total = batches.reduce((sum, b) => sum + b.length, 0);
+    assert.strictEqual(total, r.getDatabaseSnapshot().length, `n=${n}: batching lost LSAs`);
+  }
+});
+
+scenario('a single oversized LSA still ships rather than being silently dropped', () => {
+  // An LSA at the neighbour cap could in principle exceed a batch on its own. Losing it
+  // would leave a permanent hole in every other peer's map.
+  let clock = 1_000_000;
+  const r = new LinkStateRouter('me', { now: () => clock });
+  const huge = Array.from({ length: 64 }, (_, i) => ({
+    peerId: `enormous-peer-identifier-${'y'.repeat(60)}-${i}`,
+    costMs: 30,
+  }));
+  r.updateLocalNeighbours(huge);
+
+  const batches = r.getDatabaseSnapshotBatches();
+  const total = batches.reduce((sum, b) => sum + b.length, 0);
+  assert.strictEqual(total, 1, 'an oversized LSA was dropped instead of sent alone');
+});
+
+scenario('batches reassemble into the same database on the receiver', () => {
+  let clock = 1_000_000;
+  const n = 40;
+  const peers = Array.from({ length: n }, (_, i) => `p${String(i).padStart(3, '0')}`);
+  const sender = new LinkStateRouter(peers[0], { now: () => clock });
+  for (let i = 0; i < n; i++) {
+    const nbs = [{ peerId: peers[(i + 1) % n], costMs: 30 }, { peerId: peers[(i + 2) % n], costMs: 30 }];
+    if (i === 0) sender.updateLocalNeighbours(nbs);
+    else sender.handleLSA({ origin: peers[i], seq: 1, neighbours: nbs, issuedAt: clock, ttl: 8 }, peers[1]);
+  }
+
+  const receiver = new LinkStateRouter('fresh', { now: () => clock });
+  for (const batch of sender.getDatabaseSnapshotBatches()) {
+    receiver.handleDatabaseSnapshot(batch, peers[0]);
+  }
+
+  assert.strictEqual(
+    receiver.getStats().lsdbSize,
+    sender.getStats().lsdbSize,
+    'receiver database did not match after batched transfer'
+  );
+});
+
 console.log(`\n========================================`);
 console.log(`🏁 Routing Stress: ${passed}/${total} scenarios passed (${Math.round((passed / total) * 100)}%)`);
 console.log(`========================================\n`);

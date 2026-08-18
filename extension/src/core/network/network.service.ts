@@ -55,6 +55,13 @@ export class NetworkService {
       this.dispatchPacket(packet);
     });
 
+    // Prune per-peer send state when the roster confirms a departure. Without this the
+    // pipeline's stream counters accumulate an entry per (stream, peer) for the lifetime of
+    // the session.
+    this.topology.onPeerDeparted((peerId) => {
+      this.packetPipeline.forgetPeer(peerId);
+    });
+
     // Keep TransportRouter's active view in sync with TopologyService state changes
     this.topology.onStateChange(() => {
       this.transportRouter.updateView(this.topology.getActiveView());

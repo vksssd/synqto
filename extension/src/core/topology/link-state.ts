@@ -347,6 +347,67 @@ export class LinkStateRouter {
   }
 
   /**
+   * The database push, split into messages that fit the transport.
+   *
+   * syncDatabaseWith sends directly over the DataChannel, bypassing the PacketPipeline on
+   * purpose — repair must work even when the pipeline is unhealthy, since an unhealthy
+   * pipeline is one of the things repair exists to fix. The price of that choice is that
+   * nothing chunks the message, so the snapshot has to bound itself.
+   *
+   * It was not doing so, and the numbers were not marginal. Measured serialized payloads
+   * against the project's own 7 KiB chunking threshold:
+   *
+   *     24-peer room, degree 6      10 KB    1.4x over
+   *     50-peer room, degree 6      21 KB    3.0x over
+   *     LSDB at cap, degree 6      127 KB   17.7x over
+   *     LSDB at cap, max degree      1 MB  151.2x over
+   *
+   * So a room at the current TIER1_MAX already exceeded it on every adjacency formation.
+   * The consequence is worse than a dropped message: the database push is what merges
+   * healed partitions, so a push that fails to send leaves two halves of a room permanently
+   * unable to see each other — the exact failure the push was introduced to fix, silently
+   * reintroduced by the size of the thing being pushed.
+   *
+   * An LSA larger than the budget on its own is sent alone rather than dropped: losing it
+   * would leave a permanent hole in every receiver's map, which is far worse than one
+   * oversized message.
+   */
+  public getDatabaseSnapshotBatches(maxBytes = 6144): LSA[][] {
+    const all = this.getDatabaseSnapshot();
+    const batches: LSA[][] = [];
+
+    let current: LSA[] = [];
+    let currentBytes = 2; // the enclosing array's brackets
+
+    for (const lsa of all) {
+      const size = JSON.stringify(lsa).length + 1;
+
+      if (size > maxBytes) {
+        // Too big to share a batch with anything. Flush what we have and ship it alone.
+        if (current.length > 0) {
+          batches.push(current);
+          current = [];
+          currentBytes = 2;
+        }
+        batches.push([lsa]);
+        continue;
+      }
+
+      if (currentBytes + size > maxBytes && current.length > 0) {
+        batches.push(current);
+        current = [];
+        currentBytes = 2;
+      }
+
+      current.push(lsa);
+      currentBytes += size;
+    }
+
+    if (current.length > 0) batches.push(current);
+    return batches;
+  }
+
+  /**
    * Applies a database push from a new neighbour. Returns the LSAs that were new to us and
    * therefore need onward flooding.
    */

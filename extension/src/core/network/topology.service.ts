@@ -77,6 +77,11 @@ export class TopologyService {
   // Listeners for UI state and packet routing
   private packetListeners: Set<(packet: NetworkPacket) => void> = new Set();
   private stateListeners: Set<(state: TopologyState) => void> = new Set();
+  /**
+   * Notified when the roster confirms a peer has left, so layers that key state by peer ID
+   * can prune precisely rather than relying on their own eviction heuristics.
+   */
+  private onPeerDepartedFns: Set<(peerId: string) => void> = new Set();
 
   private constructor() {
     this.signaling = SignalingService.getInstance();
@@ -475,6 +480,7 @@ export class TopologyService {
         this.peerSignaling.forget(peerId);
         this.linkMonitor.forget(peerId);
         this.affinity.forget(peerId);
+        this.onPeerDepartedFns.forEach((fn) => fn(peerId));
       }
     }
   }
@@ -782,18 +788,29 @@ export class TopologyService {
    */
   private syncDatabaseWith(peerId: string) {
     if (!this.myIdentity) return;
-    const lsas = this.router.getDatabaseSnapshot();
-    if (lsas.length === 0) return;
 
-    const packet = createPacket(
-      'link:lsdb_sync' as any,
-      this.myIdentity,
-      this.currentRoomId,
-      { lsas },
-      peerId,
-      { channelPriority: 'bulk', priority: 'CONTROL' }
-    );
-    this.webrtc.sendPacket(peerId, packet);
+    // Batched to fit the DataChannel. This send deliberately bypasses the PacketPipeline —
+    // and therefore the chunker — so the snapshot bounds its own message size. A 24-peer
+    // room already produced a 10 KB payload, well past the 7 KiB the chunker exists to
+    // split, and an unsent push means a healed partition never merges.
+    const batches = this.router.getDatabaseSnapshotBatches();
+    for (const lsas of batches) {
+      if (lsas.length === 0) continue;
+      const packet = createPacket(
+        'link:lsdb_sync' as any,
+        this.myIdentity,
+        this.currentRoomId,
+        { lsas },
+        peerId,
+        { channelPriority: 'bulk', priority: 'CONTROL' }
+      );
+      if (!this.webrtc.sendPacket(peerId, packet)) {
+        // The link went away mid-push. Stop rather than burning sends into a dead channel;
+        // the next adjacency event will push again from scratch, and the exchange is
+        // idempotent so a partial transfer costs nothing.
+        break;
+      }
+    }
   }
 
   /** Routing diagnostics. */
@@ -1321,6 +1338,12 @@ export class TopologyService {
     }
 
     return false;
+  }
+
+  /** Subscribes to roster-confirmed peer departures. */
+  public onPeerDeparted(handler: (peerId: string) => void): () => void {
+    this.onPeerDepartedFns.add(handler);
+    return () => this.onPeerDepartedFns.delete(handler);
   }
 
   public onStateChange(handler: (state: TopologyState) => void): () => void {

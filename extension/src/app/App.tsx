@@ -337,8 +337,8 @@ const MainApp: React.FC = () => {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <span style={{ fontSize: '15px' }}>⚡</span>
-          <span style={{ fontWeight: 700, fontSize: '13px', color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>
+          <span style={{ fontSize: 'var(--font-size-lg)' }}>⚡</span>
+          <span style={{ fontWeight: 700, fontSize: 'var(--font-size-md)', color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>
             Synqto
           </span>
           <span
@@ -355,7 +355,7 @@ const MainApp: React.FC = () => {
           <span
             onClick={!isConnected ? handleManualReconnect : undefined}
             style={{
-              fontSize: '8.5px',
+              fontSize: 'var(--font-size-2xs)',
               padding: '1px 5px',
               borderRadius: '4px',
               background: isConnected ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.2)',
@@ -378,7 +378,7 @@ const MainApp: React.FC = () => {
             onClick={() => timerService.setEnabled(!timerConfig.enabled)}
             title={timerConfig.enabled ? 'Focus Timer is Active (Click to Hide)' : 'Enable Pomodoro Focus Timer & Stopwatch'}
             style={{
-              fontSize: '11px',
+              fontSize: 'var(--font-size-sm)',
               padding: '3px 8px',
               display: 'flex',
               alignItems: 'center',
@@ -405,7 +405,7 @@ const MainApp: React.FC = () => {
             onClick={() => setCurrentTab(currentTab === 'whiteboard' ? 'chat' : 'whiteboard')}
             title="Open Collaborative Whiteboard & Private Diary"
             style={{
-              fontSize: '11px',
+              fontSize: 'var(--font-size-sm)',
               padding: '3px 8px',
               display: 'flex',
               alignItems: 'center',
@@ -427,7 +427,7 @@ const MainApp: React.FC = () => {
             disabled={isDetecting}
             title="Force scan active tab to auto-detect and join problem room"
             style={{
-              fontSize: '11px',
+              fontSize: 'var(--font-size-sm)',
               padding: '3px 8px',
               display: 'flex',
               alignItems: 'center',
@@ -457,7 +457,7 @@ const MainApp: React.FC = () => {
             background: 'linear-gradient(135deg, #ef4444, #dc2626)',
             color: '#ffffff',
             padding: '7px 12px',
-            fontSize: '11px',
+            fontSize: 'var(--font-size-sm)',
             fontWeight: 600,
             display: 'flex',
             alignItems: 'center',
@@ -486,7 +486,7 @@ const MainApp: React.FC = () => {
               background: 'rgba(0, 0, 0, 0.3)',
               padding: '2px 8px',
               borderRadius: '5px',
-              fontSize: '10.5px',
+              fontSize: 'var(--font-size-xs)',
               fontWeight: 700,
               whiteSpace: 'nowrap',
               flexShrink: 0,
@@ -521,7 +521,7 @@ const MainApp: React.FC = () => {
             alignItems: 'center',
             justifyContent: 'space-between',
             gap: '8px',
-            fontSize: '11.5px',
+            fontSize: 'var(--font-size-sm)',
             fontWeight: 600,
             animation: 'slideDown 0.2s ease-out',
           }}
@@ -530,7 +530,7 @@ const MainApp: React.FC = () => {
             {serverToast.type === 'success' ? <CheckCircle size={14} color="#ffffff" /> : <AlertTriangle size={14} color="#ffffff" />}
             <span>{serverToast.message}</span>
           </div>
-          <span style={{ fontSize: '10px', background: 'rgba(0,0,0,0.25)', padding: '2px 6px', borderRadius: '4px', color: '#fff' }}>
+          <span style={{ fontSize: 'var(--font-size-xs)', background: 'rgba(0,0,0,0.25)', padding: '2px 6px', borderRadius: '4px', color: '#fff' }}>
             P2P Active 🌐
           </span>
         </div>
@@ -553,7 +553,7 @@ const MainApp: React.FC = () => {
             display: 'flex',
             alignItems: 'center',
             gap: '8px',
-            fontSize: '12px',
+            fontSize: 'var(--font-size-md)',
             fontWeight: 500,
             animation: 'slideUp 0.2s ease-out',
           }}
@@ -603,7 +603,7 @@ const MainApp: React.FC = () => {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                fontSize: '15px',
+                fontSize: 'var(--font-size-lg)',
                 flexShrink: 0,
               }}
             >
@@ -611,7 +611,7 @@ const MainApp: React.FC = () => {
             </div>
             <div style={{ overflow: 'hidden' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span style={{ fontWeight: 700, fontSize: '11px', color: '#f8fafc' }}>
+                <span style={{ fontWeight: 700, fontSize: 'var(--font-size-sm)', color: '#f8fafc' }}>
                   {chatToast.sender.nickname}
                 </span>
                 {chatToast.isMention && (
@@ -619,7 +619,7 @@ const MainApp: React.FC = () => {
                     style={{
                       background: 'rgba(0,0,0,0.3)',
                       color: '#fef08a',
-                      fontSize: '9px',
+                      fontSize: 'var(--font-size-2xs)',
                       fontWeight: 800,
                       padding: '1px 5px',
                       borderRadius: '4px',
@@ -633,7 +633,7 @@ const MainApp: React.FC = () => {
               <p
                 style={{
                   margin: 0,
-                  fontSize: '11px',
+                  fontSize: 'var(--font-size-sm)',
                   color: 'rgba(255,255,255,0.85)',
                   whiteSpace: 'nowrap',
                   overflow: 'hidden',
@@ -658,7 +658,7 @@ const MainApp: React.FC = () => {
               color: 'rgba(255,255,255,0.6)',
               cursor: 'pointer',
               padding: '2px',
-              fontSize: '13px',
+              fontSize: 'var(--font-size-md)',
             }}
           >
             ✕
@@ -735,7 +735,7 @@ const MainApp: React.FC = () => {
                 </div>
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span style={{ fontWeight: 700, color: '#ffffff', fontSize: '13px' }}>
+                    <span style={{ fontWeight: 700, color: '#ffffff', fontSize: 'var(--font-size-md)' }}>
                       {identity?.nickname || 'You'}
                     </span>
                     <span
@@ -743,7 +743,7 @@ const MainApp: React.FC = () => {
                         background: 'rgba(16, 185, 129, 0.2)',
                         border: '1px solid rgba(16, 185, 129, 0.4)',
                         color: '#34d399',
-                        fontSize: '9px',
+                        fontSize: 'var(--font-size-2xs)',
                         fontWeight: 700,
                         padding: '1px 5px',
                         borderRadius: '4px',
@@ -757,12 +757,12 @@ const MainApp: React.FC = () => {
                       </span>
                     )}
                   </div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                  <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>
                     Status: Active • You
                   </div>
                 </div>
               </div>
-              <span style={{ fontSize: '11px', color: '#a5b4fc', fontWeight: 600 }}>
+              <span style={{ fontSize: 'var(--font-size-sm)', color: '#a5b4fc', fontWeight: 600 }}>
                 (Self)
               </span>
             </div>
@@ -789,10 +789,10 @@ const MainApp: React.FC = () => {
                     {peer.identity.avatar}
                   </div>
                   <div>
-                    <div style={{ fontWeight: 600, color: '#f8fafc', fontSize: '13px' }}>
+                    <div style={{ fontWeight: 600, color: '#f8fafc', fontSize: 'var(--font-size-md)' }}>
                       {peer.identity.nickname}
                     </div>
-                    <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                    <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>
                       Status: {peer.status}
                     </div>
                   </div>

@@ -37,7 +37,7 @@ export const RichPresenceBadge: React.FC<RichPresenceBadgeProps> = ({
           display: 'inline-flex',
           alignItems: 'center',
           gap: '4px',
-          fontSize: '11px',
+          fontSize: 'var(--font-size-sm)',
           color: 'var(--text-muted)',
         }}
       >
@@ -51,7 +51,7 @@ export const RichPresenceBadge: React.FC<RichPresenceBadgeProps> = ({
             display: 'inline-flex',
             alignItems: 'center',
             gap: '4px',
-            fontSize: '11px',
+            fontSize: 'var(--font-size-sm)',
             color: 'var(--text-secondary)',
             maxWidth: '160px',
             overflow: 'hidden',

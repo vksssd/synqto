@@ -1915,7 +1915,7 @@ export const WhiteboardCanvas: React.FC = () => {
                   border: isActive ? '1px solid var(--primary)' : '1px solid transparent',
                   cursor: 'pointer',
                   color: isActive ? '#ffffff' : 'var(--text-muted)',
-                  fontSize: '9.5px',
+                  fontSize: 'var(--font-size-xs)',
                   fontWeight: isActive ? 700 : 500,
                   whiteSpace: 'nowrap',
                 }}
@@ -1938,7 +1938,7 @@ export const WhiteboardCanvas: React.FC = () => {
                       }
                     }}
                     style={{
-                      fontSize: '9px',
+                      fontSize: 'var(--font-size-2xs)',
                       background: 'rgba(0,0,0,0.5)',
                       color: '#fff',
                       border: '1px solid var(--primary)',
@@ -1997,7 +1997,7 @@ export const WhiteboardCanvas: React.FC = () => {
             className="btn btn-secondary btn-sm"
             onClick={() => whiteboardService.addPage()}
             title="Add New Notebook Page"
-            style={{ fontSize: '9.5px', padding: '2px 6px', display: 'flex', alignItems: 'center', gap: '2px' }}
+            style={{ fontSize: 'var(--font-size-xs)', padding: '2px 6px', display: 'flex', alignItems: 'center', gap: '2px' }}
           >
             <Plus size={10} />
             <span>Page</span>
@@ -2008,7 +2008,7 @@ export const WhiteboardCanvas: React.FC = () => {
         <div style={{ display: 'flex', gap: '3px', alignItems: 'center' }}>
           <span
             style={{
-              fontSize: '8.5px',
+              fontSize: 'var(--font-size-2xs)',
               fontWeight: 700,
               padding: '1px 5px',
               borderRadius: '4px',
@@ -2030,7 +2030,7 @@ export const WhiteboardCanvas: React.FC = () => {
             className="btn btn-ghost btn-sm"
             onClick={() => whiteboardService.duplicatePage(notebook.activePageId)}
             title="Duplicate Active Page"
-            style={{ fontSize: '9px', padding: '2px 5px', color: 'var(--text-muted)' }}
+            style={{ fontSize: 'var(--font-size-2xs)', padding: '2px 5px', color: 'var(--text-muted)' }}
           >
             <Copy size={9} style={{ marginRight: '2px' }} />
             <span>Duplicate</span>
@@ -2041,7 +2041,7 @@ export const WhiteboardCanvas: React.FC = () => {
             className="btn btn-ghost btn-sm"
             onClick={handleOpenPopupStandaloneWindow}
             title="Popout to Standalone Window"
-            style={{ fontSize: '9px', padding: '2px 5px', color: 'var(--text-muted)' }}
+            style={{ fontSize: 'var(--font-size-2xs)', padding: '2px 5px', color: 'var(--text-muted)' }}
           >
             <ExternalLink size={9} style={{ marginRight: '2px' }} />
             <span>Popout</span>
@@ -2130,7 +2130,7 @@ export const WhiteboardCanvas: React.FC = () => {
             }}
             style={{
               padding: '2px 6px',
-              fontSize: '9.5px',
+              fontSize: 'var(--font-size-xs)',
               fontWeight: 600,
               borderRadius: '4px',
               border: '1px solid var(--border-subtle)',
@@ -2152,7 +2152,7 @@ export const WhiteboardCanvas: React.FC = () => {
             }}
             style={{
               padding: '2px 6px',
-              fontSize: '9.5px',
+              fontSize: 'var(--font-size-xs)',
               fontWeight: 600,
               borderRadius: '4px',
               border: '1px solid var(--border-subtle)',
@@ -2174,7 +2174,7 @@ export const WhiteboardCanvas: React.FC = () => {
             }}
             style={{
               padding: '2px 6px',
-              fontSize: '9.5px',
+              fontSize: 'var(--font-size-xs)',
               fontWeight: 600,
               borderRadius: '4px',
               border: '1px solid var(--border-subtle)',
@@ -2196,7 +2196,7 @@ export const WhiteboardCanvas: React.FC = () => {
             }}
             style={{
               padding: '2px 6px',
-              fontSize: '9.5px',
+              fontSize: 'var(--font-size-xs)',
               fontWeight: 600,
               borderRadius: '4px',
               border: '1px solid var(--border-subtle)',
@@ -2220,7 +2220,7 @@ export const WhiteboardCanvas: React.FC = () => {
               }}
               title="🔒 Private Scratchpad (Offline, Independent)"
               style={{
-                fontSize: '8.5px',
+                fontSize: 'var(--font-size-2xs)',
                 fontWeight: 700,
                 padding: '2px 5px',
                 borderRadius: '3px',
@@ -2240,7 +2240,7 @@ export const WhiteboardCanvas: React.FC = () => {
               }}
               title="👥 Collaborative Room Board (Synced across all peers and windows)"
               style={{
-                fontSize: '8.5px',
+                fontSize: 'var(--font-size-2xs)',
                 fontWeight: 700,
                 padding: '2px 5px',
                 borderRadius: '3px',
@@ -2317,7 +2317,7 @@ export const WhiteboardCanvas: React.FC = () => {
             flexShrink: 0,
           }}
         >
-          <span style={{ fontSize: '8.5px', color: 'var(--text-muted)', fontWeight: 600 }}>Shapes:</span>
+          <span style={{ fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)', fontWeight: 600 }}>Shapes:</span>
           {[
             { id: 'line', icon: Minus, label: 'Line' },
             { id: 'arrow', icon: MoveRight, label: 'Arrow (➡️)' },
@@ -2349,7 +2349,7 @@ export const WhiteboardCanvas: React.FC = () => {
                   background: isActive ? 'rgba(99, 102, 241, 0.25)' : 'transparent',
                   color: isActive ? '#c7d2fe' : 'var(--text-muted)',
                   cursor: 'pointer',
-                  fontSize: '9px',
+                  fontSize: 'var(--font-size-2xs)',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '3px',
@@ -2377,7 +2377,7 @@ export const WhiteboardCanvas: React.FC = () => {
             flexShrink: 0,
           }}
         >
-          <span style={{ fontSize: '8.5px', color: '#7dd3fc', fontWeight: 700 }}>🔲 DSA:</span>
+          <span style={{ fontSize: 'var(--font-size-2xs)', color: '#7dd3fc', fontWeight: 700 }}>🔲 DSA:</span>
           {[
             { id: 'array_cells', icon: LayoutGrid, label: 'Array Cells [0..N]', color: '#38bdf8' },
             { id: 'two_pointers', icon: MoveRight, label: 'Two Pointers (L/R)', color: '#ec4899' },
@@ -2405,7 +2405,7 @@ export const WhiteboardCanvas: React.FC = () => {
                   background: isActive ? `${toolColor}33` : 'transparent',
                   color: isActive ? '#ffffff' : '#7dd3fc',
                   cursor: 'pointer',
-                  fontSize: '9px',
+                  fontSize: 'var(--font-size-2xs)',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '3px',
@@ -2434,7 +2434,7 @@ export const WhiteboardCanvas: React.FC = () => {
             flexShrink: 0,
           }}
         >
-          <span style={{ fontSize: '8.5px', color: 'var(--text-muted)', fontWeight: 600 }}>Arch:</span>
+          <span style={{ fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)', fontWeight: 600 }}>Arch:</span>
           {[
             { id: 'db_cylinder', icon: Database, label: 'SQL DB', color: '#10b981' },
             { id: 'db_nosql', icon: Database, label: 'NoSQL DB', color: '#34d399' },
@@ -2472,7 +2472,7 @@ export const WhiteboardCanvas: React.FC = () => {
                   background: isActive ? `${toolColor}33` : 'transparent',
                   color: isActive ? '#ffffff' : 'var(--text-muted)',
                   cursor: 'pointer',
-                  fontSize: '9px',
+                  fontSize: 'var(--font-size-2xs)',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '3px',
@@ -2506,7 +2506,7 @@ export const WhiteboardCanvas: React.FC = () => {
         >
           {/* Active Tool Ink Color Selector */}
           <div style={{ display: 'flex', gap: '3px', alignItems: 'center' }}>
-            <span style={{ fontSize: '8.5px', color: '#c7d2fe', fontWeight: 600 }}>
+            <span style={{ fontSize: 'var(--font-size-2xs)', color: '#c7d2fe', fontWeight: 600 }}>
               Color for <span style={{ color: 'var(--primary)', textTransform: 'capitalize' }}>{activeTool.replace('_', ' ')}</span>:
             </span>
             {PEN_COLORS.map((c) => (
@@ -2529,7 +2529,7 @@ export const WhiteboardCanvas: React.FC = () => {
 
           {/* Active Tool Stroke Width Selector */}
           <div style={{ display: 'flex', gap: '2px', alignItems: 'center' }}>
-            <span style={{ fontSize: '8.5px', color: 'var(--text-muted)' }}>Width:</span>
+            <span style={{ fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)' }}>Width:</span>
             {PEN_SIZES.map((sz) => (
               <button
                 key={sz.label}
@@ -2537,7 +2537,7 @@ export const WhiteboardCanvas: React.FC = () => {
                 onClick={() => updateActiveToolWidth(sz.size)}
                 style={{
                   padding: '1px 5px',
-                  fontSize: '8.5px',
+                  fontSize: 'var(--font-size-2xs)',
                   fontWeight: 600,
                   borderRadius: '3px',
                   border: activeWidth === sz.size ? '1px solid var(--primary)' : '1px solid transparent',
@@ -2553,7 +2553,7 @@ export const WhiteboardCanvas: React.FC = () => {
 
           {/* Background Textures */}
           <div style={{ display: 'flex', gap: '3px', alignItems: 'center' }}>
-            <span style={{ fontSize: '8.5px', color: 'var(--text-muted)' }}>Texture:</span>
+            <span style={{ fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)' }}>Texture:</span>
             {[
               { id: 'grid', label: 'Grid' },
               { id: 'isometric', label: '3D Iso' },
@@ -2569,7 +2569,7 @@ export const WhiteboardCanvas: React.FC = () => {
                 onClick={() => handleSelectBackground(bg.id as any)}
                 style={{
                   padding: '1px 5px',
-                  fontSize: '8.5px',
+                  fontSize: 'var(--font-size-2xs)',
                   borderRadius: '3px',
                   border: backgroundType === bg.id ? '1px solid var(--primary)' : '1px solid transparent',
                   background: backgroundType === bg.id ? 'rgba(99, 102, 241, 0.25)' : 'transparent',
@@ -2584,7 +2584,7 @@ export const WhiteboardCanvas: React.FC = () => {
 
           {/* Background Color Swatches */}
           <div style={{ display: 'flex', gap: '3px', alignItems: 'center' }}>
-            <span style={{ fontSize: '8.5px', color: 'var(--text-muted)' }}>BG:</span>
+            <span style={{ fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)' }}>BG:</span>
             {BG_COLORS.map((bg) => (
               <span
                 key={bg.color}
@@ -2622,7 +2622,7 @@ export const WhiteboardCanvas: React.FC = () => {
             alignItems: 'center',
             gap: '10px',
             boxShadow: '0 10px 30px rgba(0,0,0,0.8)',
-            fontSize: '11px',
+            fontSize: 'var(--font-size-sm)',
             color: '#ffffff',
           }}
         >
@@ -2634,14 +2634,14 @@ export const WhiteboardCanvas: React.FC = () => {
               setUndoToast(null);
             }}
             className="btn btn-primary btn-sm"
-            style={{ fontSize: '10px', padding: '2px 8px' }}
+            style={{ fontSize: 'var(--font-size-xs)', padding: '2px 8px' }}
           >
             ↩️ Undo
           </button>
           <button
             type="button"
             onClick={() => setUndoToast(null)}
-            style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '12px' }}
+            style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 'var(--font-size-md)' }}
           >
             ×
           </button>
@@ -2675,7 +2675,7 @@ export const WhiteboardCanvas: React.FC = () => {
                 backdropFilter: 'blur(8px)',
               }}
             >
-              <span style={{ fontSize: '9px', fontWeight: 700, color: 'var(--primary)', paddingRight: '2px' }}>
+              <span style={{ fontSize: 'var(--font-size-2xs)', fontWeight: 700, color: 'var(--primary)', paddingRight: '2px' }}>
                 {selectedStrokeIds.length} sel
               </span>
               <button
@@ -2687,7 +2687,7 @@ export const WhiteboardCanvas: React.FC = () => {
                   border: '1px solid var(--border-subtle)',
                   borderRadius: '4px',
                   color: 'var(--text-primary)',
-                  fontSize: '9.5px',
+                  fontSize: 'var(--font-size-xs)',
                   padding: '2px 6px',
                   cursor: 'pointer',
                   display: 'flex',
@@ -2707,7 +2707,7 @@ export const WhiteboardCanvas: React.FC = () => {
                   border: '1px solid var(--border-subtle)',
                   borderRadius: '4px',
                   color: 'var(--text-primary)',
-                  fontSize: '9.5px',
+                  fontSize: 'var(--font-size-xs)',
                   padding: '2px 6px',
                   cursor: 'pointer',
                   display: 'flex',
@@ -2728,7 +2728,7 @@ export const WhiteboardCanvas: React.FC = () => {
                     border: '1px solid var(--border-subtle)',
                     borderRadius: '4px',
                     color: 'var(--text-primary)',
-                    fontSize: '9.5px',
+                    fontSize: 'var(--font-size-xs)',
                     padding: '2px 6px',
                     cursor: 'pointer',
                     display: 'flex',
@@ -2749,7 +2749,7 @@ export const WhiteboardCanvas: React.FC = () => {
                   border: '1px solid rgba(244, 63, 94, 0.35)',
                   borderRadius: '4px',
                   color: '#f43f5e',
-                  fontSize: '9.5px',
+                  fontSize: 'var(--font-size-xs)',
                   padding: '2px 6px',
                   cursor: 'pointer',
                   display: 'flex',
@@ -2819,7 +2819,7 @@ export const WhiteboardCanvas: React.FC = () => {
           >
             <ZoomIn size={12} />
           </button>
-          <span style={{ fontSize: '9px', fontWeight: 700, color: '#ffffff', minWidth: '28px', textAlign: 'center' }}>
+          <span style={{ fontSize: 'var(--font-size-2xs)', fontWeight: 700, color: '#ffffff', minWidth: '28px', textAlign: 'center' }}>
             {Math.round(zoom * 100)}%
           </span>
           <button
@@ -2875,7 +2875,7 @@ export const WhiteboardCanvas: React.FC = () => {
                 border: '1px solid var(--border-subtle)',
                 borderRadius: '4px',
                 color: activeColor,
-                fontSize: '11px',
+                fontSize: 'var(--font-size-sm)',
                 fontWeight: 600,
                 padding: '2px 6px',
                 width: '140px',
@@ -2886,7 +2886,7 @@ export const WhiteboardCanvas: React.FC = () => {
               type="button"
               className="btn btn-primary btn-sm"
               onClick={handleConfirmText}
-              style={{ fontSize: '9px', padding: '2px 6px' }}
+              style={{ fontSize: 'var(--font-size-2xs)', padding: '2px 6px' }}
             >
               Add
             </button>

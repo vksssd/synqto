@@ -336,7 +336,7 @@ const handleSend = () => {
             border: '1px solid rgba(99, 102, 241, 0.3)',
             borderRadius: 'var(--radius-sm)',
             padding: '4px 8px',
-            fontSize: '11px',
+            fontSize: 'var(--font-size-sm)',
             color: 'var(--text-secondary)',
           }}
         >
@@ -454,14 +454,14 @@ const handleSend = () => {
             placeholder="Add image caption..."
             value={stagedCaption}
             onChange={(e) => setStagedCaption(e.target.value)}
-            style={{ flex: 1, fontSize: '11px' }}
+            style={{ flex: 1, fontSize: 'var(--font-size-sm)' }}
             autoFocus
            aria-label="Add image caption"/>
           <button
             type="button"
             className="btn btn-primary btn-sm"
             onClick={handleSend}
-            style={{ fontSize: '11px', padding: '4px 8px' }}
+            style={{ fontSize: 'var(--font-size-sm)', padding: '4px 8px' }}
           >
             Send
           </button>
@@ -508,7 +508,7 @@ const handleSend = () => {
               borderRadius: '4px',
               background: 'rgba(245, 158, 11, 0.15)',
               cursor: 'pointer',
-              fontSize: '11px',
+              fontSize: 'var(--font-size-sm)',
               fontWeight: 700,
               color: '#fbbf24',
             }}
@@ -528,7 +528,7 @@ const handleSend = () => {
                 padding: '4px 8px',
                 borderRadius: '4px',
                 cursor: 'pointer',
-                fontSize: '11px',
+                fontSize: 'var(--font-size-sm)',
                 color: 'var(--text-primary)',
               }}
               onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-hover)')}
@@ -567,7 +567,7 @@ const handleSend = () => {
               setShowAttachMenu(false);
               onCaptureScreenshot();
             }}
-            style={{ justifyContent: 'flex-start', fontSize: '11px', gap: '6px' }}
+            style={{ justifyContent: 'flex-start', fontSize: 'var(--font-size-sm)', gap: '6px' }}
           >
             <Camera size={13} color="var(--primary)" />
             <span>Capture Tab Screenshot</span>
@@ -580,7 +580,7 @@ const handleSend = () => {
               setShowAttachMenu(false);
               fileInputRef.current?.click();
             }}
-            style={{ justifyContent: 'flex-start', fontSize: '11px', gap: '6px' }}
+            style={{ justifyContent: 'flex-start', fontSize: 'var(--font-size-sm)', gap: '6px' }}
           >
             <ImageIcon size={13} color="#06b6d4" />
             <span>Upload Image</span>
@@ -593,7 +593,7 @@ const handleSend = () => {
               setShowAttachMenu(false);
               onOpenCodeModal();
             }}
-            style={{ justifyContent: 'flex-start', fontSize: '11px', gap: '6px' }}
+            style={{ justifyContent: 'flex-start', fontSize: 'var(--font-size-sm)', gap: '6px' }}
           >
             <Code size={13} color="#10b981" />
             <span>Code Snippet</span>
@@ -606,7 +606,7 @@ const handleSend = () => {
               setShowAttachMenu(false);
               onOpenPollModal();
             }}
-            style={{ justifyContent: 'flex-start', fontSize: '11px', gap: '6px' }}
+            style={{ justifyContent: 'flex-start', fontSize: 'var(--font-size-sm)', gap: '6px' }}
           >
             <BarChart2 size={13} color="#8b5cf6" />
             <span>Create Poll</span>
@@ -619,7 +619,7 @@ const handleSend = () => {
               setShowAttachMenu(false);
               onOpenQuizModal();
             }}
-            style={{ justifyContent: 'flex-start', fontSize: '11px', gap: '6px' }}
+            style={{ justifyContent: 'flex-start', fontSize: 'var(--font-size-sm)', gap: '6px' }}
           >
             <HelpCircle size={13} color="#f59e0b" />
             <span>DSA Quiz Question</span>
@@ -632,7 +632,7 @@ const handleSend = () => {
               setShowAttachMenu(false);
               docInputRef.current?.click();
             }}
-            style={{ justifyContent: 'flex-start', fontSize: '11px', gap: '6px' }}
+            style={{ justifyContent: 'flex-start', fontSize: 'var(--font-size-sm)', gap: '6px' }}
           >
             <Paperclip size={13} color="#ec4899" />
             <span>Attach Document</span>
@@ -650,7 +650,7 @@ const handleSend = () => {
               }}
               style={{
                 justifyContent: 'flex-start',
-                fontSize: '11px',
+                fontSize: 'var(--font-size-sm)',
                 gap: '6px',
                 color: isLive ? '#f87171' : '#c7d2fe',
                 fontWeight: 600,
@@ -671,7 +671,7 @@ const handleSend = () => {
               }}
               style={{
                 justifyContent: 'flex-start',
-                fontSize: '11px',
+                fontSize: 'var(--font-size-sm)',
                 gap: '6px',
                 color: isInVoice ? '#34d399' : 'var(--text-primary)',
                 fontWeight: 600,
@@ -718,7 +718,7 @@ const handleSend = () => {
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
-          style={{ flex: 1, fontSize: '11.5px' }}
+          style={{ flex: 1, fontSize: 'var(--font-size-sm)' }}
          aria-label="Message or type @ to mention, paste image"/>
 
         {/* Send Button */}

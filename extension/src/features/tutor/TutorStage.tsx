@@ -308,7 +308,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-              <div style={{ fontWeight: 700, fontSize: '14px', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <div style={{ fontWeight: 700, fontSize: 'var(--font-size-lg)', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <Radio size={16} color="#ef4444" />
                 <span>Start Live {selectedBroadcastType === 'screen' ? 'Screen Walkthrough' : 'Camera Stream'}</span>
               </div>
@@ -324,7 +324,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {/* Media Source Selection */}
               <div>
-                <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>
+                <label style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>
                   Choose Broadcast Source
                 </label>
                 <div style={{ display: 'flex', gap: '8px' }}>
@@ -339,7 +339,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                       border: selectedBroadcastType === 'screen' ? '1px solid #3b82f6' : '1px solid rgba(255,255,255,0.1)',
                       background: selectedBroadcastType === 'screen' ? 'rgba(59,130,246,0.15)' : 'rgba(255,255,255,0.03)',
                       cursor: 'pointer',
-                      fontSize: '11px',
+                      fontSize: 'var(--font-size-sm)',
                     }}
                   >
                     <input
@@ -366,7 +366,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                       border: selectedBroadcastType === 'camera' ? '1px solid #10b981' : '1px solid rgba(255,255,255,0.1)',
                       background: selectedBroadcastType === 'camera' ? 'rgba(16,185,129,0.15)' : 'rgba(255,255,255,0.03)',
                       cursor: 'pointer',
-                      fontSize: '11px',
+                      fontSize: 'var(--font-size-sm)',
                     }}
                   >
                     <input
@@ -395,7 +395,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                   background: 'rgba(255,255,255,0.03)',
                   border: '1px solid rgba(255,255,255,0.08)',
                   cursor: 'pointer',
-                  fontSize: '11px',
+                  fontSize: 'var(--font-size-sm)',
                   color: '#e2e8f0',
                 }}
               >
@@ -410,7 +410,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
               </label>
 
               <div>
-                <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
+                <label style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
                   Walkthrough / Stream Title (Optional)
                 </label>
                 <input
@@ -420,11 +420,11 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                   value={streamTitleInput}
                   onChange={(e) => setStreamTitleInput(e.target.value)}
                   autoFocus
-                  style={{ width: '100%', fontSize: '12px' }}
+                  style={{ width: '100%', fontSize: 'var(--font-size-md)' }}
                  aria-label="Session topic"/>
               </div>
 
-              <div style={{ fontSize: '10px', color: 'var(--text-muted)', lineHeight: 1.4 }}>
+              <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', lineHeight: 1.4 }}>
                 💡 Peers in the room will see your live stream with zero latency and full-resolution code sharing.
               </div>
 
@@ -480,7 +480,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                   flexShrink: 0,
                 }}
               />
-              <span style={{ fontSize: '11.5px', fontWeight: 700, color: '#fca5a5', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              <span style={{ fontSize: 'var(--font-size-sm)', fontWeight: 700, color: '#fca5a5', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {currentStreamInfo ? currentStreamInfo.title : 'Live Walkthrough Stream'}
               </span>
             </div>
@@ -502,7 +502,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                     type="button"
                     className="btn btn-secondary btn-sm"
                     onClick={handleStopStage}
-                    style={{ fontSize: '9.5px', padding: '2px 7px', color: '#fca5a5' }}
+                    style={{ fontSize: 'var(--font-size-xs)', padding: '2px 7px', color: '#fca5a5' }}
                   >
                     End Stream
                   </button>
@@ -514,7 +514,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                       type="button"
                       className="btn btn-primary btn-sm"
                       onClick={() => handleOpenStartModal('screen')}
-                      style={{ fontSize: '9.5px', padding: '2px 6px', background: 'rgba(99, 102, 241, 0.3)' }}
+                      style={{ fontSize: 'var(--font-size-xs)', padding: '2px 6px', background: 'rgba(99, 102, 241, 0.3)' }}
                       title="Share your own screen as co-presenter"
                     >
                       <Plus size={10} />
@@ -530,7 +530,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                       type="button"
                       className="btn btn-primary btn-sm"
                       onClick={() => { setHasLeftStream(false); setIsWatchingStream(true); }}
-                      style={{ fontSize: '9.5px', padding: '2px 8px' }}
+                      style={{ fontSize: 'var(--font-size-xs)', padding: '2px 8px' }}
                       aria-label="Join the live stream as audience"
                     >
                       Join Stream 📺
@@ -540,7 +540,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                       type="button"
                       className="btn btn-ghost btn-sm"
                       onClick={() => { setHasLeftStream(true); setIsWatchingStream(false); }}
-                      style={{ fontSize: '9.5px', padding: '2px 6px', color: '#fca5a5' }}
+                      style={{ fontSize: 'var(--font-size-xs)', padding: '2px 6px', color: '#fca5a5' }}
                       aria-label="Leave the live stream"
                     >
                       Leave Stream
@@ -554,7 +554,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
           {/* List of Multiple Active Streams to Choose From */}
           {activeStreams.length > 1 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-              <div style={{ fontSize: '8.5px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+              <div style={{ fontSize: 'var(--font-size-2xs)', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
                 Active Broadcasters ({activeStreams.length}):
               </div>
               <div style={{ display: 'flex', gap: '4px', overflowX: 'auto', paddingBottom: '2px' }}>
@@ -576,14 +576,14 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                         color: isSelected ? '#ffffff' : 'var(--text-secondary)',
                         cursor: 'pointer',
                         whiteSpace: 'nowrap',
-                        fontSize: '9.5px',
+                        fontSize: 'var(--font-size-xs)',
                       }}
                     >
                       <span>{s.broadcasterIdentity?.avatar || '👤'}</span>
                       <span style={{ fontWeight: 600, color: isSelected ? '#fff' : 'var(--text-primary)' }}>
                         {s.broadcasterIdentity?.nickname}
                       </span>
-                      {isSelected && <span style={{ color: '#38bdf8', fontSize: '9px' }}>👁️</span>}
+                      {isSelected && <span style={{ color: '#38bdf8', fontSize: 'var(--font-size-2xs)' }}>👁️</span>}
                     </button>
                   );
                 })}
@@ -633,7 +633,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                       type="button"
                       onClick={() => handleSwitchSource(stageState.broadcastType === 'screen' ? 'camera' : 'screen')}
                       className="btn btn-ghost btn-sm"
-                      style={{ fontSize: '9px', padding: '2px 6px', background: 'rgba(255,255,255,0.06)' }}
+                      style={{ fontSize: 'var(--font-size-2xs)', padding: '2px 6px', background: 'rgba(255,255,255,0.06)' }}
                       title="Switch Video Input Source"
                     >
                       {stageState.broadcastType === 'screen' ? <Camera size={10} color="#60a5fa" /> : <Monitor size={10} color="#34d399" />}
@@ -644,7 +644,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                       type="button"
                       onClick={toggleMute}
                       className="btn btn-ghost btn-sm"
-                      style={{ fontSize: '9px', padding: '2px 6px', background: isMuted ? 'rgba(239, 68, 68, 0.2)' : 'rgba(16, 185, 129, 0.2)', color: isMuted ? '#fca5a5' : '#6ee7b7' }}
+                      style={{ fontSize: 'var(--font-size-2xs)', padding: '2px 6px', background: isMuted ? 'rgba(239, 68, 68, 0.2)' : 'rgba(16, 185, 129, 0.2)', color: isMuted ? '#fca5a5' : '#6ee7b7' }}
                       title={isMuted ? 'Unmute microphone' : 'Mute microphone'}
                     >
                       {isMuted ? <MicOff size={10} /> : <Mic size={10} />}
@@ -657,7 +657,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                       type="button"
                       onClick={() => setShowCodeTogether(!showCodeTogether)}
                       className="btn btn-ghost btn-sm"
-                      style={{ fontSize: '9px', padding: '2px 6px', background: showCodeTogether ? 'rgba(99, 102, 241, 0.3)' : 'rgba(255,255,255,0.06)', color: showCodeTogether ? '#c7d2fe' : '#ffffff' }}
+                      style={{ fontSize: 'var(--font-size-2xs)', padding: '2px 6px', background: showCodeTogether ? 'rgba(99, 102, 241, 0.3)' : 'rgba(255,255,255,0.06)', color: showCodeTogether ? '#c7d2fe' : '#ffffff' }}
                       title="Toggle collaborative code editor"
                     >
                       <Code2 size={10} />
@@ -668,7 +668,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                       type="button"
                       onClick={handleStopStage}
                       className="btn btn-danger btn-sm"
-                      style={{ fontSize: '9px', padding: '2px 6px', background: '#ef4444' }}
+                      style={{ fontSize: 'var(--font-size-2xs)', padding: '2px 6px', background: '#ef4444' }}
                     >
                       End Stream
                     </button>
@@ -688,7 +688,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                   alignItems: 'center',
                   background: 'linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.85) 100%)',
                   padding: '14px 8px 6px',
-                  fontSize: '9.5px',
+                  fontSize: 'var(--font-size-xs)',
                   color: '#f8fafc',
                   zIndex: 20,
                 }}
@@ -700,7 +700,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                       : `${currentStreamInfo?.broadcasterIdentity?.nickname || 'Peer'}`}
                   </span>
                   {zoomLevel > 1 && (
-                    <span style={{ fontSize: '8.5px', padding: '1px 4px', borderRadius: '3px', background: 'rgba(99, 102, 241, 0.4)', color: '#c7d2fe' }}>
+                    <span style={{ fontSize: 'var(--font-size-2xs)', padding: '1px 4px', borderRadius: '3px', background: 'rgba(99, 102, 241, 0.4)', color: '#c7d2fe' }}>
                       {zoomLevel}x
                     </span>
                   )}
@@ -796,7 +796,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
 
               {/* Quick 1-Click Aspect Ratio & Fit Switcher Pills */}
               <div style={{ display: 'flex', gap: '3px', overflowX: 'auto', padding: '3px 6px', alignItems: 'center', background: 'rgba(0,0,0,0.5)' }}>
-                <span style={{ fontSize: '8px', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>Fit:</span>
+                <span style={{ fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>Fit:</span>
                 {[
                   { id: 'auto', label: '⚡ Auto' },
                   { id: '16:9', label: '📺 16:9' },
@@ -810,7 +810,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                     type="button"
                     onClick={() => handleAspectRatioChange(opt.id as AspectRatioOption)}
                     style={{
-                      fontSize: '8.5px',
+                      fontSize: 'var(--font-size-2xs)',
                       fontWeight: 600,
                       padding: '1px 5px',
                       borderRadius: '3px',
@@ -846,7 +846,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <span style={{ fontSize: 'var(--font-size-xs)', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
                       <Settings2 size={11} color="var(--primary)" />
                       <span>Aspect Ratio &amp; Viewport Options</span>
                     </span>
@@ -862,7 +862,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
 
                   {/* Aspect Ratio Mode Pills */}
                   <div>
-                    <div style={{ fontSize: '8.5px', color: 'var(--text-muted)', marginBottom: '3px', textTransform: 'uppercase', fontWeight: 600 }}>
+                    <div style={{ fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)', marginBottom: '3px', textTransform: 'uppercase', fontWeight: 600 }}>
                       Aspect Ratio &amp; Scaling:
                     </div>
                     <div style={{ display: 'flex', gap: '3px', flexWrap: 'wrap' }}>
@@ -879,7 +879,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                           type="button"
                           onClick={() => handleAspectRatioChange(opt.id as AspectRatioOption)}
                           style={{
-                            fontSize: '9px',
+                            fontSize: 'var(--font-size-2xs)',
                             fontWeight: 600,
                             padding: '3px 6px',
                             borderRadius: '4px',
@@ -897,7 +897,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
 
                   {/* Viewport Height / Layout Mode */}
                   <div>
-                    <div style={{ fontSize: '8.5px', color: 'var(--text-muted)', marginBottom: '3px', textTransform: 'uppercase', fontWeight: 600 }}>
+                    <div style={{ fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)', marginBottom: '3px', textTransform: 'uppercase', fontWeight: 600 }}>
                       Viewport Height:
                     </div>
                     <div style={{ display: 'flex', gap: '3px', flexWrap: 'wrap' }}>
@@ -912,7 +912,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                           type="button"
                           onClick={() => handleViewSizeChange(sz.id as ViewSizeMode)}
                           style={{
-                            fontSize: '9px',
+                            fontSize: 'var(--font-size-2xs)',
                             fontWeight: 600,
                             padding: '3px 6px',
                             borderRadius: '4px',
@@ -930,7 +930,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
 
                   {/* Zoom Controls Row */}
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '2px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-                    <span style={{ fontSize: '9px', color: 'var(--text-secondary)' }}>
+                    <span style={{ fontSize: 'var(--font-size-2xs)', color: 'var(--text-secondary)' }}>
                       Magnify Code Text: <strong style={{ color: '#fff' }}>{zoomLevel}x</strong>
                     </span>
                     <div style={{ display: 'flex', gap: '3px', alignItems: 'center' }}>
@@ -938,7 +938,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                         type="button"
                         onClick={handleZoomOut}
                         disabled={zoomLevel <= 1}
-                        style={{ padding: '2px 6px', fontSize: '9px', borderRadius: '3px', background: 'rgba(255,255,255,0.08)', border: 'none', color: '#fff', cursor: 'pointer' }}
+                        style={{ padding: '2px 6px', fontSize: 'var(--font-size-2xs)', borderRadius: '3px', background: 'rgba(255,255,255,0.08)', border: 'none', color: '#fff', cursor: 'pointer' }}
                         title="Zoom out"
                       >
                         -
@@ -946,7 +946,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                       <button
                         type="button"
                         onClick={handleResetZoom}
-                        style={{ padding: '2px 6px', fontSize: '9px', borderRadius: '3px', background: 'rgba(255,255,255,0.08)', border: 'none', color: '#fff', cursor: 'pointer' }}
+                        style={{ padding: '2px 6px', fontSize: 'var(--font-size-2xs)', borderRadius: '3px', background: 'rgba(255,255,255,0.08)', border: 'none', color: '#fff', cursor: 'pointer' }}
                         title="Reset 1x"
                       >
                         1x
@@ -955,7 +955,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                         type="button"
                         onClick={handleZoomIn}
                         disabled={zoomLevel >= 2.5}
-                        style={{ padding: '2px 6px', fontSize: '9px', borderRadius: '3px', background: 'rgba(255,255,255,0.08)', border: 'none', color: '#fff', cursor: 'pointer' }}
+                        style={{ padding: '2px 6px', fontSize: 'var(--font-size-2xs)', borderRadius: '3px', background: 'rgba(255,255,255,0.08)', border: 'none', color: '#fff', cursor: 'pointer' }}
                         title="Zoom in"
                       >
                         +
@@ -970,7 +970,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
           {/* Audience Interactive Stage Controls */}
           {!isTutor && (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '1px' }}>
-              <div style={{ fontSize: '9.5px', color: 'var(--text-secondary)' }}>
+              <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-secondary)' }}>
                 {isSpeaker ? '🎤 You are speaking on stage' : 'Audience View (Full Width)'}
               </div>
 
@@ -983,7 +983,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                   type="button"
                   className={`btn ${stageState.isVideoLive ? 'btn-secondary' : 'btn-ghost'} btn-sm`}
                   style={{
-                    fontSize: '9.5px',
+                    fontSize: 'var(--font-size-xs)',
                     padding: '2px 7px',
                     color: stageState.isVideoLive ? '#10b981' : 'var(--text-secondary)',
                   }}
@@ -1001,7 +1001,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                   type="button"
                   className={`btn ${stageState.isMyHandRaised ? 'btn-secondary' : 'btn-ghost'} btn-sm`}
                   style={{
-                    fontSize: '9.5px',
+                    fontSize: 'var(--font-size-xs)',
                     padding: '2px 7px',
                     color: stageState.isMyHandRaised ? '#f59e0b' : 'var(--text-secondary)',
                   }}
@@ -1026,7 +1026,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                 background: 'rgba(244, 63, 94, 0.14)',
                 border: '1px solid rgba(244, 63, 94, 0.3)',
                 color: '#fca5a5',
-                fontSize: '9.5px',
+                fontSize: 'var(--font-size-xs)',
               }}
             >
               {stageState.lastMediaError}
@@ -1045,7 +1045,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                 gap: '3px',
               }}
             >
-              <div style={{ fontSize: '9px', fontWeight: 600, color: '#f59e0b' }}>
+              <div style={{ fontSize: 'var(--font-size-2xs)', fontWeight: 600, color: '#f59e0b' }}>
                 Hand Raise Queue ({stageState.handRaises.length}) — stage {stageState.guestSpeakers.length}/2 full:
               </div>
               {stageState.handRaises.map((req) => (
@@ -1060,13 +1060,13 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                     background: 'rgba(255, 255, 255, 0.05)',
                   }}
                 >
-                  <span style={{ fontSize: '9.5px', color: 'var(--text-primary)' }}>
+                  <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-primary)' }}>
                     {req.avatar} {req.nickname}
                   </span>
                   <button
                     type="button"
                     className="btn btn-primary btn-sm"
-                    style={{ fontSize: '8.5px', padding: '1px 5px' }}
+                    style={{ fontSize: 'var(--font-size-2xs)', padding: '1px 5px' }}
                     onClick={() => handleAcceptSpeaker(req)}
                   >
                     Accept
@@ -1091,7 +1091,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <Radio size={12} color="var(--primary)" />
-            <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>
+            <span style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--text-secondary)' }}>
               Live Walkthrough &amp; Stream
             </span>
           </div>
@@ -1100,7 +1100,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
             <button
               type="button"
               className="btn btn-secondary btn-sm"
-              style={{ fontSize: '9.5px', padding: '2px 7px' }}
+              style={{ fontSize: 'var(--font-size-xs)', padding: '2px 7px' }}
               onClick={() => handleOpenStartModal('screen')}
               disabled={isStarting}
               title="Share Screen with Peers"
@@ -1112,7 +1112,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
             <button
               type="button"
               className="btn btn-ghost btn-sm"
-              style={{ fontSize: '9.5px', padding: '2px 5px' }}
+              style={{ fontSize: 'var(--font-size-xs)', padding: '2px 5px' }}
               onClick={() => handleOpenStartModal('camera')}
               disabled={isStarting}
               title="Share Camera Video"

@@ -1260,7 +1260,7 @@ export const DiaryWhiteboardCanvas: React.FC<{
               setShowBgDrawer(false);
             }}
             style={{
-              fontSize: '10px',
+              fontSize: 'var(--font-size-xs)',
               padding: '2px 6px',
               borderRadius: '4px',
               border: '1px solid var(--border-subtle)',
@@ -1281,7 +1281,7 @@ export const DiaryWhiteboardCanvas: React.FC<{
               setShowBgDrawer(false);
             }}
             style={{
-              fontSize: '10px',
+              fontSize: 'var(--font-size-xs)',
               padding: '2px 6px',
               borderRadius: '4px',
               border: '1px solid rgba(56, 189, 248, 0.35)',
@@ -1302,7 +1302,7 @@ export const DiaryWhiteboardCanvas: React.FC<{
               setShowBgDrawer(false);
             }}
             style={{
-              fontSize: '10px',
+              fontSize: 'var(--font-size-xs)',
               padding: '2px 6px',
               borderRadius: '4px',
               border: '1px solid var(--border-subtle)',
@@ -1323,7 +1323,7 @@ export const DiaryWhiteboardCanvas: React.FC<{
               setShowArchDrawer(false);
             }}
             style={{
-              fontSize: '10px',
+              fontSize: 'var(--font-size-xs)',
               padding: '2px 6px',
               borderRadius: '4px',
               border: '1px solid var(--border-subtle)',
@@ -1409,7 +1409,7 @@ export const DiaryWhiteboardCanvas: React.FC<{
               type="button"
               onClick={() => setActiveTool(t.id)}
               style={{
-                fontSize: '9.5px',
+                fontSize: 'var(--font-size-xs)',
                 padding: '2px 6px',
                 borderRadius: '3px',
                 border: activeTool === t.id ? '1px solid var(--primary)' : '1px solid transparent',
@@ -1443,7 +1443,7 @@ export const DiaryWhiteboardCanvas: React.FC<{
               type="button"
               onClick={() => setActiveTool(t.id)}
               style={{
-                fontSize: '9.5px',
+                fontSize: 'var(--font-size-xs)',
                 padding: '2px 6px',
                 borderRadius: '3px',
                 border: activeTool === t.id ? '1px solid #38bdf8' : '1px solid transparent',
@@ -1480,7 +1480,7 @@ export const DiaryWhiteboardCanvas: React.FC<{
               type="button"
               onClick={() => setActiveTool(t.id)}
               style={{
-                fontSize: '9.5px',
+                fontSize: 'var(--font-size-xs)',
                 padding: '2px 6px',
                 borderRadius: '3px',
                 border: activeTool === t.id ? '1px solid var(--primary)' : '1px solid transparent',
@@ -1511,7 +1511,7 @@ export const DiaryWhiteboardCanvas: React.FC<{
                 onChange({ strokes, bgColor: bp.color, bgPattern: bp.pattern });
               }}
               style={{
-                fontSize: '9px',
+                fontSize: 'var(--font-size-2xs)',
                 padding: '2px 6px',
                 borderRadius: '3px',
                 border: bgColor === bp.color && bgPattern === bp.pattern ? '1px solid var(--primary)' : '1px solid var(--border-subtle)',
@@ -1554,7 +1554,7 @@ export const DiaryWhiteboardCanvas: React.FC<{
                 backdropFilter: 'blur(8px)',
               }}
             >
-              <span style={{ fontSize: '9px', fontWeight: 700, color: 'var(--primary)', paddingRight: '2px' }}>
+              <span style={{ fontSize: 'var(--font-size-2xs)', fontWeight: 700, color: 'var(--primary)', paddingRight: '2px' }}>
                 {selectedStrokeIds.length} sel
               </span>
               <button
@@ -1566,7 +1566,7 @@ export const DiaryWhiteboardCanvas: React.FC<{
                   border: '1px solid var(--border-subtle)',
                   borderRadius: '4px',
                   color: 'var(--text-primary)',
-                  fontSize: '9.5px',
+                  fontSize: 'var(--font-size-xs)',
                   padding: '2px 6px',
                   cursor: 'pointer',
                   display: 'flex',
@@ -1586,7 +1586,7 @@ export const DiaryWhiteboardCanvas: React.FC<{
                   border: '1px solid var(--border-subtle)',
                   borderRadius: '4px',
                   color: 'var(--text-primary)',
-                  fontSize: '9.5px',
+                  fontSize: 'var(--font-size-xs)',
                   padding: '2px 6px',
                   cursor: 'pointer',
                   display: 'flex',
@@ -1607,7 +1607,7 @@ export const DiaryWhiteboardCanvas: React.FC<{
                     border: '1px solid var(--border-subtle)',
                     borderRadius: '4px',
                     color: 'var(--text-primary)',
-                    fontSize: '9.5px',
+                    fontSize: 'var(--font-size-xs)',
                     padding: '2px 6px',
                     cursor: 'pointer',
                     display: 'flex',
@@ -1628,7 +1628,7 @@ export const DiaryWhiteboardCanvas: React.FC<{
                   border: '1px solid rgba(244, 63, 94, 0.35)',
                   borderRadius: '4px',
                   color: '#f43f5e',
-                  fontSize: '9.5px',
+                  fontSize: 'var(--font-size-xs)',
                   padding: '2px 6px',
                   cursor: 'pointer',
                   display: 'flex',
@@ -1699,7 +1699,7 @@ export const DiaryWhiteboardCanvas: React.FC<{
                 border: '1px solid var(--border-subtle)',
                 borderRadius: '4px',
                 color: activeColor,
-                fontSize: '11px',
+                fontSize: 'var(--font-size-sm)',
                 fontWeight: 600,
                 padding: '2px 6px',
                 width: '120px',
@@ -1710,7 +1710,7 @@ export const DiaryWhiteboardCanvas: React.FC<{
               type="button"
               className="btn btn-primary btn-sm"
               onClick={handleConfirmText}
-              style={{ fontSize: '9px', padding: '2px 6px' }}
+              style={{ fontSize: 'var(--font-size-2xs)', padding: '2px 6px' }}
             >
               Add
             </button>

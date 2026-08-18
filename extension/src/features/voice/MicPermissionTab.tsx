@@ -94,7 +94,7 @@ export const MicPermissionTab: React.FC = () => {
               : 'Allow Microphone for Voice Rooms'}
         </h2>
 
-        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.5, margin: '0 0 24px' }}>
+        <p style={{ fontSize: 'var(--font-size-md)', color: 'var(--text-secondary)', lineHeight: 1.5, margin: '0 0 24px' }}>
           {status === 'granted'
             ? 'Permission successfully granted for Synqto! This tab will close automatically and return to your study room.'
             : status === 'denied'
@@ -110,7 +110,7 @@ export const MicPermissionTab: React.FC = () => {
               background: 'rgba(16, 185, 129, 0.15)',
               border: '1px solid rgba(16, 185, 129, 0.3)',
               color: '#34d399',
-              fontSize: '13px',
+              fontSize: 'var(--font-size-md)',
               fontWeight: 600,
               display: 'flex',
               alignItems: 'center',
@@ -131,7 +131,7 @@ export const MicPermissionTab: React.FC = () => {
               borderRadius: '10px',
               background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
               color: '#ffffff',
-              fontSize: '14px',
+              fontSize: 'var(--font-size-lg)',
               fontWeight: 600,
               border: 'none',
               cursor: 'pointer',
@@ -152,7 +152,7 @@ export const MicPermissionTab: React.FC = () => {
           <div
             style={{
               marginTop: '16px',
-              fontSize: '12px',
+              fontSize: 'var(--font-size-md)',
               color: '#fca5a5',
               background: 'rgba(244, 63, 94, 0.1)',
               padding: '8px 12px',

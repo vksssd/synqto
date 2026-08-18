@@ -163,7 +163,7 @@ export const JoinInviteModal: React.FC<JoinInviteModalProps> = ({
           </button>
         </div>
 
-        <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+        <p style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>
           Type a squad <strong>name</strong> to find it, or paste an <code>NBGRP:…</code> invite token.
         </p>
 
@@ -176,7 +176,7 @@ export const JoinInviteModal: React.FC<JoinInviteModalProps> = ({
               background: 'rgba(244, 63, 94, 0.15)',
               border: '1px solid rgba(244, 63, 94, 0.3)',
               color: '#fca5a5',
-              fontSize: '11px',
+              fontSize: 'var(--font-size-sm)',
             }}
           >
             {errorMsg}
@@ -187,7 +187,7 @@ export const JoinInviteModal: React.FC<JoinInviteModalProps> = ({
           <div>
             <label
               htmlFor="join-squad-input"
-              style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}
+              style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}
             >
               Squad name or invite token
             </label>
@@ -209,7 +209,7 @@ export const JoinInviteModal: React.FC<JoinInviteModalProps> = ({
                 two people can confirm they are typing the same thing before joining. */}
             <div id="join-squad-hint" aria-live="polite" style={{ marginTop: '5px', minHeight: '14px' }}>
               {handlePreview && (
-                <span style={{ fontSize: '10.5px', color: canJoinByHandle ? 'var(--accent-cyan)' : 'var(--text-muted)' }}>
+                <span style={{ fontSize: 'var(--font-size-xs)', color: canJoinByHandle ? 'var(--accent-cyan)' : 'var(--text-muted)' }}>
                   {canJoinByHandle ? (
                     <>Joins public squad <strong>@{handlePreview}</strong></>
                   ) : (
@@ -218,7 +218,7 @@ export const JoinInviteModal: React.FC<JoinInviteModalProps> = ({
                 </span>
               )}
               {looksLikeToken && !parsedPayload && !errorMsg && (
-                <span style={{ fontSize: '10.5px', color: 'var(--text-muted)' }}>Reading invite token…</span>
+                <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)' }}>Reading invite token…</span>
               )}
             </div>
           </div>
@@ -240,10 +240,10 @@ export const JoinInviteModal: React.FC<JoinInviteModalProps> = ({
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <div style={{ fontSize: '24px' }}>{parsedPayload.avatar}</div>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 600, color: '#f8fafc', fontSize: '13px' }}>
+                  <div style={{ fontWeight: 600, color: '#f8fafc', fontSize: 'var(--font-size-md)' }}>
                     {parsedPayload.name}
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-muted)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>
                     <span>{parsedPayload.topicTag || 'General'}</span>
                     <span>•</span>
                     <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
@@ -264,7 +264,7 @@ export const JoinInviteModal: React.FC<JoinInviteModalProps> = ({
               </div>
 
               {parsedPayload.description && (
-                <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-secondary)' }}>
                   {parsedPayload.description}
                 </div>
               )}
@@ -272,7 +272,7 @@ export const JoinInviteModal: React.FC<JoinInviteModalProps> = ({
               {/* Password Input for Private Groups */}
               {parsedPayload.isPrivate && (
                 <div style={{ marginTop: '4px' }}>
-                  <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
+                  <label style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
                     Squad Password
                   </label>
                   <div style={{ position: 'relative' }}>

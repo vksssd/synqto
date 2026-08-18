@@ -61,8 +61,8 @@ export const ShareGroupModal: React.FC<ShareGroupModalProps> = ({
         >
           <div style={{ fontSize: '24px' }}>{group.avatar}</div>
           <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 600, color: '#f8fafc', fontSize: '13px' }}>{group.name}</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-muted)' }}>
+            <div style={{ fontWeight: 600, color: '#f8fafc', fontSize: 'var(--font-size-md)' }}>{group.name}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>
               <span>{group.topicTag}</span>
               <span>•</span>
               <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
@@ -93,7 +93,7 @@ export const ShareGroupModal: React.FC<ShareGroupModalProps> = ({
               display: 'flex',
               alignItems: 'center',
               gap: '8px',
-              fontSize: '11px',
+              fontSize: 'var(--font-size-sm)',
               color: '#e2e8f0',
             }}
           >
@@ -111,7 +111,7 @@ export const ShareGroupModal: React.FC<ShareGroupModalProps> = ({
           <div>
             <label
               htmlFor="squad-handle"
-              style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}
+              style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}
             >
               Squad Handle — share this, no token needed
             </label>
@@ -139,7 +139,7 @@ export const ShareGroupModal: React.FC<ShareGroupModalProps> = ({
                   border: 'none',
                   color: '#a5b4fc',
                   fontFamily: 'var(--font-mono)',
-                  fontSize: '12px',
+                  fontSize: 'var(--font-size-md)',
                   fontWeight: 600,
                   outline: 'none',
                 }}
@@ -163,7 +163,7 @@ export const ShareGroupModal: React.FC<ShareGroupModalProps> = ({
 
         {/* Invite Code Box */}
         <div>
-          <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
+          <label style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
             {group.isPrivate ? 'Squad Invite Token (includes access)' : 'Squad Invite Token (alternative)'}
           </label>
           <div
@@ -187,7 +187,7 @@ export const ShareGroupModal: React.FC<ShareGroupModalProps> = ({
                 border: 'none',
                 color: 'var(--accent-cyan)',
                 fontFamily: 'var(--font-mono)',
-                fontSize: '11px',
+                fontSize: 'var(--font-size-sm)',
                 outline: 'none',
                 textOverflow: 'ellipsis',
               }}
@@ -213,7 +213,7 @@ export const ShareGroupModal: React.FC<ShareGroupModalProps> = ({
           </div>
         </div>
 
-        <p style={{ fontSize: '10px', color: 'var(--text-muted)', lineHeight: 1.4 }}>
+        <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', lineHeight: 1.4 }}>
           Send this code to friends. They can click <strong>&quot;Join via Code&quot;</strong> in Synqto to instantly link into your P2P mesh room.
         </p>
 

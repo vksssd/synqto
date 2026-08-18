@@ -71,7 +71,7 @@ export const StreakHeatmap: React.FC<StreakHeatmapProps> = ({ stats }) => {
               display: 'flex',
               alignItems: 'center',
               gap: '4px',
-              fontSize: '11px',
+              fontSize: 'var(--font-size-sm)',
               color: stats.currentStreak > 0 ? 'var(--accent-amber, #f59e0b)' : 'var(--text-muted)',
               fontWeight: 600,
             }}
@@ -114,10 +114,10 @@ export const StreakHeatmap: React.FC<StreakHeatmapProps> = ({ stats }) => {
             textAlign: 'center',
           }}
         >
-          <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--accent-amber, #f59e0b)' }}>
+          <div style={{ fontSize: 'var(--font-size-lg)', fontWeight: 700, color: 'var(--accent-amber, #f59e0b)' }}>
             {stats.currentStreak}d
           </div>
-          <div style={{ fontSize: '9px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+          <div style={{ fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
             Current
           </div>
         </div>
@@ -131,10 +131,10 @@ export const StreakHeatmap: React.FC<StreakHeatmapProps> = ({ stats }) => {
             textAlign: 'center',
           }}
         >
-          <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--primary)' }}>
+          <div style={{ fontSize: 'var(--font-size-lg)', fontWeight: 700, color: 'var(--primary)' }}>
             {stats.longestStreak}d
           </div>
-          <div style={{ fontSize: '9px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+          <div style={{ fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
             Best Streak
           </div>
         </div>
@@ -148,10 +148,10 @@ export const StreakHeatmap: React.FC<StreakHeatmapProps> = ({ stats }) => {
             textAlign: 'center',
           }}
         >
-          <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--primary)' }}>
+          <div style={{ fontSize: 'var(--font-size-lg)', fontWeight: 700, color: 'var(--primary)' }}>
             {stats.totalProblemsSolved}
           </div>
-          <div style={{ fontSize: '9px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+          <div style={{ fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
             Problems
           </div>
         </div>
@@ -165,10 +165,10 @@ export const StreakHeatmap: React.FC<StreakHeatmapProps> = ({ stats }) => {
             textAlign: 'center',
           }}
         >
-          <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--accent-emerald, #10b981)' }}>
+          <div style={{ fontSize: 'var(--font-size-lg)', fontWeight: 700, color: 'var(--accent-emerald, #10b981)' }}>
             {hours > 0 ? `${hours}h` : `${minutes}m`}
           </div>
-          <div style={{ fontSize: '9px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+          <div style={{ fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
             Focus Time
           </div>
         </div>
@@ -177,10 +177,10 @@ export const StreakHeatmap: React.FC<StreakHeatmapProps> = ({ stats }) => {
       {/* GitHub-style Heatmap Grid */}
       <div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-          <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 500 }}>
+          <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', fontWeight: 500 }}>
             Activity (Last 60 Days)
           </span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '3px', fontSize: '9px', color: 'var(--text-dim)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '3px', fontSize: 'var(--font-size-2xs)', color: 'var(--text-dim)' }}>
             <span>Less</span>
             <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: 'var(--border-subtle, rgba(255, 255, 255, 0.04))' }} />
             <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: 'rgba(99, 102, 241, 0.35)' }} />

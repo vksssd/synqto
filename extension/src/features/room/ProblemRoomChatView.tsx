@@ -107,10 +107,10 @@ export const ProblemRoomChatView: React.FC<ProblemRoomChatViewProps> = ({
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
             <span style={{ fontSize: '18px' }}>🌐</span>
             <div>
-              <div style={{ fontWeight: 600, fontSize: '13px', color: '#f8fafc' }}>
+              <div style={{ fontWeight: 600, fontSize: 'var(--font-size-md)', color: '#f8fafc' }}>
                 Global Study Lobby
               </div>
-              <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+              <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)' }}>
                 Navigate to a LeetCode / Codeforces problem to auto-join its room.
               </div>
             </div>
@@ -124,13 +124,13 @@ export const ProblemRoomChatView: React.FC<ProblemRoomChatViewProps> = ({
               placeholder="Or join custom room (e.g. system-design)"
               value={customRoomInput}
               onChange={(e) => setCustomRoomInput(e.target.value)}
-              style={{ fontSize: '11px', padding: '6px 10px' }}
+              style={{ fontSize: 'var(--font-size-sm)', padding: '6px 10px' }}
              aria-label="Or join custom room (e.g. system-design)"/>
             <button
               type="submit"
               className="btn btn-primary btn-sm"
               disabled={!customRoomInput.trim()}
-              style={{ fontSize: '11px', padding: '6px 10px' }}
+              style={{ fontSize: 'var(--font-size-sm)', padding: '6px 10px' }}
             >
               <ArrowRight size={12} />
             </button>
@@ -166,16 +166,16 @@ export const ProblemRoomChatView: React.FC<ProblemRoomChatViewProps> = ({
             />
             <div style={{ overflow: 'hidden' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span style={{ fontWeight: 800, fontSize: '11px', color: '#fca5a5', textTransform: 'uppercase' }}>
+                <span style={{ fontWeight: 800, fontSize: 'var(--font-size-sm)', color: '#fca5a5', textTransform: 'uppercase' }}>
                   LIVE STREAM ({activeStreamCount})
                 </span>
                 {stageState.myRole === 'tutor' && (
-                  <span style={{ fontSize: '9px', background: 'rgba(239,68,68,0.3)', padding: '1px 4px', borderRadius: '3px', color: '#fff' }}>
+                  <span style={{ fontSize: 'var(--font-size-2xs)', background: 'rgba(239,68,68,0.3)', padding: '1px 4px', borderRadius: '3px', color: '#fff' }}>
                     You are Streaming
                   </span>
                 )}
               </div>
-              <div style={{ fontSize: '11px', color: '#f8fafc', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              <div style={{ fontSize: 'var(--font-size-sm)', color: '#f8fafc', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {firstStream ? `${firstStream.broadcasterIdentity?.nickname || 'Peer'}: ${firstStream.title}` : 'Active Screen Share'}
               </div>
             </div>
@@ -186,7 +186,7 @@ export const ProblemRoomChatView: React.FC<ProblemRoomChatViewProps> = ({
             className="btn btn-primary btn-sm"
             onClick={() => setShowTutorStage(!showTutorStage)}
             style={{
-              fontSize: '11px',
+              fontSize: 'var(--font-size-sm)',
               padding: '4px 10px',
               background: '#ef4444',
               borderColor: '#ef4444',
@@ -233,11 +233,11 @@ export const ProblemRoomChatView: React.FC<ProblemRoomChatViewProps> = ({
             />
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span style={{ fontWeight: 800, fontSize: '11px', color: '#6ee7b7', textTransform: 'uppercase' }}>
+                <span style={{ fontWeight: 800, fontSize: 'var(--font-size-sm)', color: '#6ee7b7', textTransform: 'uppercase' }}>
                   VOICE LOUNGE ACTIVE
                 </span>
               </div>
-              <div style={{ fontSize: '11px', color: '#f8fafc', fontWeight: 600 }}>
+              <div style={{ fontSize: 'var(--font-size-sm)', color: '#f8fafc', fontWeight: 600 }}>
                 {isMuted ? 'Microphone Muted 🔇' : 'Speaking Live 🎙️'}
               </div>
             </div>
@@ -248,7 +248,7 @@ export const ProblemRoomChatView: React.FC<ProblemRoomChatViewProps> = ({
               type="button"
               className="btn btn-secondary btn-sm"
               onClick={() => voiceService.toggleMute()}
-              style={{ fontSize: '10px', padding: '3px 8px', gap: '3px' }}
+              style={{ fontSize: 'var(--font-size-xs)', padding: '3px 8px', gap: '3px' }}
               title={isMuted ? 'Unmute Mic' : 'Mute Mic'}
             >
               {isMuted ? <MicOff size={12} color="#ef4444" /> : <Mic size={12} color="#10b981" />}
@@ -258,7 +258,7 @@ export const ProblemRoomChatView: React.FC<ProblemRoomChatViewProps> = ({
               type="button"
               className="btn btn-secondary btn-sm"
               onClick={() => setShowVoiceRoom(!showVoiceRoom)}
-              style={{ fontSize: '10px', padding: '3px 8px' }}
+              style={{ fontSize: 'var(--font-size-xs)', padding: '3px 8px' }}
             >
               {showVoiceRoom ? 'Hide Controls' : 'Lounge 🎧'}
             </button>

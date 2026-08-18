@@ -161,13 +161,13 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({
             gap: '8px',
           }}
         >
-          <span style={{ fontSize: '10.5px', color: '#fcd34d' }}>
+          <span style={{ fontSize: 'var(--font-size-xs)', color: '#fcd34d' }}>
             ⚠️ Chrome mic permission needed
           </span>
           <button
             type="button"
             className="btn btn-primary btn-sm"
-            style={{ fontSize: '10px', padding: '2px 7px' }}
+            style={{ fontSize: 'var(--font-size-xs)', padding: '2px 7px' }}
             onClick={handleGrantMicPermission}
           >
             Allow Mic 🎙️

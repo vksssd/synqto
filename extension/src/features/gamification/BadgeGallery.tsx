@@ -38,7 +38,7 @@ export const BadgeGallery: React.FC<BadgeGalleryProps> = ({ badges }) => {
           <span
             className="badge"
             style={{
-              fontSize: '10px',
+              fontSize: 'var(--font-size-xs)',
               background: 'rgba(99, 102, 241, 0.15)',
               borderColor: 'var(--border-focus)',
               color: 'var(--primary)',
@@ -75,7 +75,7 @@ export const BadgeGallery: React.FC<BadgeGalleryProps> = ({ badges }) => {
             onClick={() => setSelectedCategory(cat)}
             style={{
               textTransform: 'capitalize',
-              fontSize: '10px',
+              fontSize: 'var(--font-size-xs)',
               padding: '2px 8px',
               background: selectedCategory === cat ? 'rgba(99, 102, 241, 0.22)' : undefined,
               borderColor: selectedCategory === cat ? 'var(--primary)' : undefined,
@@ -124,10 +124,10 @@ export const BadgeGallery: React.FC<BadgeGalleryProps> = ({ badges }) => {
               </div>
 
               <div>
-                <div style={{ fontSize: '11px', fontWeight: 600, color: isUnlocked ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                <div style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, color: isUnlocked ? 'var(--text-primary)' : 'var(--text-muted)' }}>
                   {badge.title}
                 </div>
-                <div style={{ fontSize: '10px', color: 'var(--text-dim)', lineHeight: 1.3, marginTop: '2px' }}>
+                <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-dim)', lineHeight: 1.3, marginTop: '2px' }}>
                   {badge.description}
                 </div>
               </div>
@@ -153,7 +153,7 @@ export const BadgeGallery: React.FC<BadgeGalleryProps> = ({ badges }) => {
                       }}
                     />
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '8px', color: 'var(--text-dim)', marginTop: '2px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--font-size-2xs)', color: 'var(--text-dim)', marginTop: '2px' }}>
                     <span>Progress</span>
                     <span>{badge.progress.current}/{badge.progress.max}</span>
                   </div>

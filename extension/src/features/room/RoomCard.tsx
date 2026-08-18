@@ -35,10 +35,10 @@ export const RoomCard: React.FC<RoomCardProps> = ({
     return (
       <div className="glass-card" style={{ textAlign: 'center', padding: '20px 16px' }}>
         <Radio size={28} color="var(--primary)" style={{ margin: '0 auto 8px', display: 'block' }} />
-        <div style={{ fontWeight: 600, fontSize: '13px', color: 'var(--text-primary)' }}>
+        <div style={{ fontWeight: 600, fontSize: 'var(--font-size-md)', color: 'var(--text-primary)' }}>
           No Active Problem Room
         </div>
-        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+        <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)', marginTop: '4px' }}>
           Open any LeetCode, Codeforces, NeetCode problem, or join a Study Squad!
         </div>
       </div>
@@ -110,7 +110,7 @@ export const RoomCard: React.FC<RoomCardProps> = ({
       <div style={{ margin: '6px 0 10px' }}>
         <div
           style={{
-            fontSize: '14px',
+            fontSize: 'var(--font-size-lg)',
             fontWeight: 700,
             color: '#f8fafc',
             display: 'flex',
@@ -136,12 +136,12 @@ export const RoomCard: React.FC<RoomCardProps> = ({
         </div>
 
         {room.isGroup && room.groupDetails?.description && (
-          <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+          <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-secondary)', marginTop: '2px' }}>
             {room.groupDetails.description}
           </div>
         )}
 
-        <div style={{ fontSize: '10px', color: 'var(--text-dim)', marginTop: '2px' }}>
+        <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-dim)', marginTop: '2px' }}>
           Room: {room.roomId}
         </div>
       </div>
@@ -167,7 +167,7 @@ export const RoomCard: React.FC<RoomCardProps> = ({
           style={{
             width: 'auto',
             padding: '3px 8px',
-            fontSize: '11px',
+            fontSize: 'var(--font-size-sm)',
             cursor: 'pointer',
           }}
           value={currentStatus}

@@ -99,7 +99,7 @@ export const FocusTimerBar: React.FC = () => {
             >
               {formatTime(state.timeLeftSec)}
             </div>
-            <div style={{ fontSize: '10px', color: currentColor, fontWeight: 600, textTransform: 'capitalize' }}>
+            <div style={{ fontSize: 'var(--font-size-xs)', color: currentColor, fontWeight: 600, textTransform: 'capitalize' }}>
               {state.mode === 'pomodoro'
                 ? '🍅 Focus Session'
                 : state.mode === 'short_break'
@@ -115,7 +115,7 @@ export const FocusTimerBar: React.FC = () => {
           {state.sessionsCompleted > 0 && (
             <span
               style={{
-                fontSize: '10px',
+                fontSize: 'var(--font-size-xs)',
                 padding: '2px 6px',
                 borderRadius: '10px',
                 background: 'rgba(244, 63, 94, 0.15)',
@@ -133,7 +133,7 @@ export const FocusTimerBar: React.FC = () => {
             className="btn btn-ghost btn-sm"
             onClick={() => timerService.addTime(60)}
             title="Add 1 minute"
-            style={{ padding: '4px 6px', fontSize: '11px' }}
+            style={{ padding: '4px 6px', fontSize: 'var(--font-size-sm)' }}
           >
             +1m
           </button>
@@ -151,7 +151,7 @@ export const FocusTimerBar: React.FC = () => {
             className="btn btn-ghost btn-sm"
             onClick={() => setIsExpanded(!isExpanded)}
             title="Toggle timer modes"
-            style={{ padding: '4px 6px', fontSize: '10px', color: 'var(--text-muted)' }}
+            style={{ padding: '4px 6px', fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)' }}
           >
             {isExpanded ? '▲' : '▼'}
           </button>
@@ -196,7 +196,7 @@ export const FocusTimerBar: React.FC = () => {
           </div>
 
           {/* Launch & Destination Badges + Moving Rocket Icon */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px', fontSize: '9px', color: 'var(--text-muted)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px', fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)' }}>
             <span>🛫 Launchpad</span>
             <span style={{ fontWeight: 700, color: currentColor }}>{Math.round(getProgressPct())}% Completed</span>
             <span>🏁 Goal</span>
@@ -217,7 +217,7 @@ export const FocusTimerBar: React.FC = () => {
           >
             <span
               style={{
-                fontSize: '14px',
+                fontSize: 'var(--font-size-lg)',
                 display: 'inline-block',
                 transform: 'rotate(45deg)',
                 animation: state.isRunning ? 'rocketThrust 0.8s ease-in-out infinite alternate' : 'none',
@@ -228,7 +228,7 @@ export const FocusTimerBar: React.FC = () => {
             {state.isRunning && (
               <span
                 style={{
-                  fontSize: '10px',
+                  fontSize: 'var(--font-size-xs)',
                   marginLeft: '-4px',
                   animation: 'flameFlicker 0.3s ease-in-out infinite alternate',
                 }}
@@ -257,7 +257,7 @@ export const FocusTimerBar: React.FC = () => {
             style={{
               flex: 1,
               padding: '4px 6px',
-              fontSize: '10px',
+              fontSize: 'var(--font-size-xs)',
               borderRadius: '6px',
               background: state.mode === 'pomodoro' ? 'rgba(244, 63, 94, 0.2)' : 'rgba(255, 255, 255, 0.04)',
               border: `1px solid ${state.mode === 'pomodoro' ? '#f43f5e' : 'transparent'}`,
@@ -274,7 +274,7 @@ export const FocusTimerBar: React.FC = () => {
             style={{
               flex: 1,
               padding: '4px 6px',
-              fontSize: '10px',
+              fontSize: 'var(--font-size-xs)',
               borderRadius: '6px',
               background: state.mode === 'short_break' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255, 255, 255, 0.04)',
               border: `1px solid ${state.mode === 'short_break' ? '#10b981' : 'transparent'}`,
@@ -291,7 +291,7 @@ export const FocusTimerBar: React.FC = () => {
             style={{
               flex: 1,
               padding: '4px 6px',
-              fontSize: '10px',
+              fontSize: 'var(--font-size-xs)',
               borderRadius: '6px',
               background: state.mode === 'long_break' ? 'rgba(6, 182, 212, 0.2)' : 'rgba(255, 255, 255, 0.04)',
               border: `1px solid ${state.mode === 'long_break' ? '#06b6d4' : 'transparent'}`,
@@ -308,7 +308,7 @@ export const FocusTimerBar: React.FC = () => {
             style={{
               flex: 1,
               padding: '4px 6px',
-              fontSize: '10px',
+              fontSize: 'var(--font-size-xs)',
               borderRadius: '6px',
               background: state.mode === 'stopwatch' ? 'rgba(139, 92, 246, 0.2)' : 'rgba(255, 255, 255, 0.04)',
               border: `1px solid ${state.mode === 'stopwatch' ? '#8b5cf6' : 'transparent'}`,

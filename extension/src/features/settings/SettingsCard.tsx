@@ -406,7 +406,7 @@ export const SettingsCard: React.FC = () => {
               width: '100%',
               paddingLeft: '32px',
               paddingRight: searchQuery ? '28px' : '10px',
-              fontSize: '11.5px',
+              fontSize: 'var(--font-size-sm)',
               height: '32px',
               background: 'rgba(0, 0, 0, 0.35)',
               borderRadius: '8px',
@@ -449,7 +449,7 @@ export const SettingsCard: React.FC = () => {
                 type="button"
                 onClick={() => setActiveCategory(cat.id)}
                 style={{
-                  fontSize: '9.5px',
+                  fontSize: 'var(--font-size-xs)',
                   fontWeight: isSelected ? 700 : 500,
                   padding: '3px 8px',
                   borderRadius: '6px',
@@ -469,7 +469,7 @@ export const SettingsCard: React.FC = () => {
             type="button"
             onClick={handleToggleAll}
             style={{
-              fontSize: '9.5px',
+              fontSize: 'var(--font-size-xs)',
               fontWeight: 600,
               padding: '3px 8px',
               borderRadius: '6px',
@@ -506,10 +506,10 @@ export const SettingsCard: React.FC = () => {
           }}
         >
           <Search size={28} color="var(--text-muted)" />
-          <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>
+          <div style={{ fontSize: 'var(--font-size-md)', fontWeight: 600, color: 'var(--text-primary)' }}>
             No settings found
           </div>
-          <div style={{ fontSize: '11px', color: 'var(--text-muted)', maxWidth: '260px' }}>
+          <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)', maxWidth: '260px' }}>
             No settings matched &quot;<strong>{searchQuery}</strong>&quot;. Try searching for &quot;theme&quot;, &quot;timer&quot;, &quot;server&quot;, or &quot;widget&quot;.
           </div>
           <button
@@ -519,7 +519,7 @@ export const SettingsCard: React.FC = () => {
               setSearchQuery('');
               setActiveCategory('all');
             }}
-            style={{ marginTop: '8px', fontSize: '11px' }}
+            style={{ marginTop: '8px', fontSize: 'var(--font-size-sm)' }}
           >
             Clear Search Filter
           </button>
@@ -548,7 +548,7 @@ export const SettingsCard: React.FC = () => {
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <span
                 style={{
-                  fontSize: '10.5px',
+                  fontSize: 'var(--font-size-xs)',
                   fontWeight: 600,
                   padding: '2px 8px',
                   borderRadius: '12px',
@@ -578,14 +578,14 @@ export const SettingsCard: React.FC = () => {
 
           {isThemeExpanded && (
             <>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+              <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>
                 Fully customize background themes, high-contrast text palettes, brand accents, font scaling, and UI layout density.
               </div>
 
               {/* ─── 1A. Curated 5-Color Complete Palettes (Standard & LeetCode) ─── */}
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                  <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <div style={{ fontSize: 'var(--font-size-sm)', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
                     <Sparkles size={13} color="var(--primary)" />
                     <span>🎯 Curated 5-Color Complete Palettes ({FIVE_COLOR_PALETTES.length} Presets):</span>
                   </div>
@@ -603,7 +603,7 @@ export const SettingsCard: React.FC = () => {
                     type="button"
                     onClick={() => setPaletteTab(tab.id)}
                     style={{
-                      fontSize: '9px',
+                      fontSize: 'var(--font-size-2xs)',
                       padding: '2px 5px',
                       borderRadius: '4px',
                       border: 'none',
@@ -650,17 +650,17 @@ export const SettingsCard: React.FC = () => {
                     >
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                          <span style={{ fontSize: '13px' }}>{pal.emoji}</span>
-                          <span style={{ fontSize: '10.5px', fontWeight: isSelected ? 700 : 600, color: 'var(--text-primary)' }}>
+                          <span style={{ fontSize: 'var(--font-size-md)' }}>{pal.emoji}</span>
+                          <span style={{ fontSize: 'var(--font-size-xs)', fontWeight: isSelected ? 700 : 600, color: 'var(--text-primary)' }}>
                             {pal.name}
                           </span>
                         </div>
                         {isSelected ? (
-                          <span style={{ fontSize: '9px', fontWeight: 700, color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '2px' }}>
+                          <span style={{ fontSize: 'var(--font-size-2xs)', fontWeight: 700, color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '2px' }}>
                             <Check size={11} /> Active
                           </span>
                         ) : (
-                          <span style={{ fontSize: '8px', padding: '1px 4px', borderRadius: '3px', background: 'rgba(255,255,255,0.06)', color: 'var(--text-dim)', textTransform: 'uppercase' }}>
+                          <span style={{ fontSize: 'var(--font-size-2xs)', padding: '1px 4px', borderRadius: '3px', background: 'rgba(255,255,255,0.06)', color: 'var(--text-dim)', textTransform: 'uppercase' }}>
                             {pal.category}
                           </span>
                         )}
@@ -685,7 +685,7 @@ export const SettingsCard: React.FC = () => {
                         <div style={{ flex: 1, background: pal.colors.textSecondary }} title="Muted Text" />
                       </div>
 
-                      <div style={{ fontSize: '9px', color: 'var(--text-muted)', lineHeight: 1.3 }}>
+                      <div style={{ fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)', lineHeight: 1.3 }}>
                         {pal.desc}
                       </div>
                     </button>
@@ -709,11 +709,11 @@ export const SettingsCard: React.FC = () => {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <SlidersHorizontal size={14} color="var(--primary)" />
-                <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                <span style={{ fontSize: 'var(--font-size-sm)', fontWeight: 700, color: 'var(--text-primary)' }}>
                   🛠️ Custom 5-Color Studio (DIY Creator)
                 </span>
               </div>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer', fontSize: '10px', color: 'var(--text-secondary)' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer', fontSize: 'var(--font-size-xs)', color: 'var(--text-secondary)' }}>
                 <input
                   type="checkbox"
                   checked={customTheme.customPaletteEnabled}
@@ -725,7 +725,7 @@ export const SettingsCard: React.FC = () => {
               </label>
             </div>
 
-            <div style={{ fontSize: '9.5px', color: 'var(--text-muted)' }}>
+            <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)' }}>
               Independently calibrate each of the 5 core project layers with live hex codes &amp; native color pickers:
             </div>
 
@@ -751,7 +751,7 @@ export const SettingsCard: React.FC = () => {
                     border: '1px solid var(--border-subtle)',
                   }}
                 >
-                  <span style={{ fontSize: '9px', fontWeight: 600, color: 'var(--text-secondary)', textAlign: 'center' }}>
+                  <span style={{ fontSize: 'var(--font-size-2xs)', fontWeight: 600, color: 'var(--text-secondary)', textAlign: 'center' }}>
                     {item.label}
                   </span>
                   <label
@@ -781,7 +781,7 @@ export const SettingsCard: React.FC = () => {
                     style={{
                       width: '100%',
                       maxWidth: '52px',
-                      fontSize: '8.5px',
+                      fontSize: 'var(--font-size-2xs)',
                       fontFamily: 'var(--font-mono)',
                       textAlign: 'center',
                       padding: '2px',
@@ -801,7 +801,7 @@ export const SettingsCard: React.FC = () => {
                 type="button"
                 className="btn btn-secondary btn-sm"
                 onClick={handleRandomizePalette}
-                style={{ flex: 1, fontSize: '10px', padding: '4px 6px' }}
+                style={{ flex: 1, fontSize: 'var(--font-size-xs)', padding: '4px 6px' }}
               >
                 ✨ Randomize Palette
               </button>
@@ -809,7 +809,7 @@ export const SettingsCard: React.FC = () => {
                 type="button"
                 className="btn btn-ghost btn-sm"
                 onClick={() => handleToggleCustomOverride(false)}
-                style={{ fontSize: '10px', padding: '4px 6px' }}
+                style={{ fontSize: 'var(--font-size-xs)', padding: '4px 6px' }}
               >
                 🔄 Reset to Presets
               </button>
@@ -819,7 +819,7 @@ export const SettingsCard: React.FC = () => {
           {/* ─── 1C. Prebuilt Theme Modes (14 Audited Themes) ─── */}
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-              <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <div style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
                 <Sun size={13} color="var(--primary)" />
                 <span>🌓 Individual Background Themes ({Object.keys(THEME_MODE_DETAILS).length} Options):</span>
               </div>
@@ -836,7 +836,7 @@ export const SettingsCard: React.FC = () => {
                     type="button"
                     onClick={() => setThemeFilterTab(tab.id)}
                     style={{
-                      fontSize: '9.5px',
+                      fontSize: 'var(--font-size-xs)',
                       padding: '2px 6px',
                       borderRadius: '4px',
                       border: 'none',
@@ -885,15 +885,15 @@ export const SettingsCard: React.FC = () => {
                     >
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                          <span style={{ fontSize: '14px' }}>{item.icon}</span>
-                          <span style={{ fontSize: '10.5px', fontWeight: isSelected ? 700 : 600, color: 'var(--text-primary)' }}>
+                          <span style={{ fontSize: 'var(--font-size-lg)' }}>{item.icon}</span>
+                          <span style={{ fontSize: 'var(--font-size-xs)', fontWeight: isSelected ? 700 : 600, color: 'var(--text-primary)' }}>
                             {item.name}
                           </span>
                         </div>
                         {isSelected && <Check size={12} color="var(--primary)" />}
                       </div>
 
-                      <div style={{ fontSize: '9px', color: 'var(--text-muted)', lineHeight: 1.3 }}>
+                      <div style={{ fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)', lineHeight: 1.3 }}>
                         {item.desc}
                       </div>
 
@@ -912,10 +912,10 @@ export const SettingsCard: React.FC = () => {
                           marginTop: '2px',
                         }}
                       >
-                        <span style={{ fontSize: '8.5px', color: item.sampleText, fontWeight: 700, letterSpacing: '0.5px' }}>
+                        <span style={{ fontSize: 'var(--font-size-2xs)', color: item.sampleText, fontWeight: 700, letterSpacing: '0.5px' }}>
                           Aa 123
                         </span>
-                        <span style={{ fontSize: '7.5px', color: item.sampleText, opacity: 0.75 }}>
+                        <span style={{ fontSize: 'var(--font-size-2xs)', color: item.sampleText, opacity: 0.75 }}>
                           {item.type.toUpperCase()}
                         </span>
                       </div>
@@ -927,7 +927,7 @@ export const SettingsCard: React.FC = () => {
 
           {/* ─── 1D. Brand Accent Colors & Custom Color Picker ─── */}
           <div>
-            <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <div style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
               <Sparkles size={13} color="var(--primary)" />
               <span>🎨 Brand Accent &amp; Custom Hex Picker:</span>
             </div>
@@ -966,7 +966,7 @@ export const SettingsCard: React.FC = () => {
                           boxShadow: isSelected ? `0 0 8px ${pal.primaryGlow}` : 'none',
                         }}
                       />
-                      <span style={{ fontSize: '9px', fontWeight: isSelected ? 700 : 500, color: isSelected ? '#ffffff' : 'var(--text-muted)' }}>
+                      <span style={{ fontSize: 'var(--font-size-2xs)', fontWeight: isSelected ? 700 : 500, color: isSelected ? '#ffffff' : 'var(--text-muted)' }}>
                         {pal.name.split(' ')[1] || pal.name}
                       </span>
                     </button>
@@ -993,7 +993,7 @@ export const SettingsCard: React.FC = () => {
                   alignItems: 'center',
                   gap: '5px',
                   cursor: 'pointer',
-                  fontSize: '10.5px',
+                  fontSize: 'var(--font-size-xs)',
                   color: 'var(--text-primary)',
                   fontWeight: 600,
                 }}
@@ -1023,7 +1023,7 @@ export const SettingsCard: React.FC = () => {
                 placeholder="#6366f1"
                 style={{
                   flex: 1,
-                  fontSize: '11px',
+                  fontSize: 'var(--font-size-sm)',
                   padding: '3px 8px',
                   height: '26px',
                   fontFamily: 'var(--font-mono)',
@@ -1033,7 +1033,7 @@ export const SettingsCard: React.FC = () => {
               <button
                 type="submit"
                 className="btn btn-primary btn-sm"
-                style={{ padding: '3px 10px', fontSize: '10.5px' }}
+                style={{ padding: '3px 10px', fontSize: 'var(--font-size-xs)' }}
               >
                 Apply
               </button>
@@ -1043,11 +1043,11 @@ export const SettingsCard: React.FC = () => {
           {/* ─── 1C. Side-by-Side Typography & Font Sizing Studio ─── */}
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-              <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <div style={{ fontSize: 'var(--font-size-sm)', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
                 <Type size={14} color="var(--primary)" />
                 <span>🔤 Typography &amp; Font Sizing Studio:</span>
               </div>
-              <span style={{ fontSize: '10.5px', fontWeight: 700, color: 'var(--primary)', padding: '2px 6px', borderRadius: '4px', background: 'rgba(45, 212, 191, 0.15)', border: '1px solid var(--border-focus)' }}>
+              <span style={{ fontSize: 'var(--font-size-xs)', fontWeight: 700, color: 'var(--primary)', padding: '2px 6px', borderRadius: '4px', background: 'rgba(45, 212, 191, 0.15)', border: '1px solid var(--border-focus)' }}>
                 {customTheme.fontSize}px • {Math.round((customTheme.fontSize / 13) * 100)}%
               </span>
             </div>
@@ -1066,10 +1066,10 @@ export const SettingsCard: React.FC = () => {
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                  <span style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--text-secondary)' }}>
                     🔠 Font Family:
                   </span>
-                  <span style={{ fontSize: '8.5px', padding: '1px 4px', borderRadius: '3px', background: 'rgba(255,255,255,0.06)', color: 'var(--text-muted)' }}>
+                  <span style={{ fontSize: 'var(--font-size-2xs)', padding: '1px 4px', borderRadius: '3px', background: 'rgba(255,255,255,0.06)', color: 'var(--text-muted)' }}>
                     {FONT_FAMILY_DETAILS[customTheme.fontFamily]?.category || 'Sans-Serif'}
                   </span>
                 </div>
@@ -1081,7 +1081,7 @@ export const SettingsCard: React.FC = () => {
                   style={{
                     width: '100%',
                     padding: '4px 6px',
-                    fontSize: '11px',
+                    fontSize: 'var(--font-size-sm)',
                     cursor: 'pointer',
                     fontFamily: FONT_FAMILY_DETAILS[customTheme.fontFamily]?.fontFamily || 'inherit',
                   }}
@@ -1139,7 +1139,7 @@ export const SettingsCard: React.FC = () => {
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                  <span style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--text-secondary)' }}>
                     📏 Font Size:
                   </span>
                   <div style={{ display: 'flex', gap: '3px' }}>
@@ -1147,7 +1147,7 @@ export const SettingsCard: React.FC = () => {
                       type="button"
                       className="btn btn-ghost btn-sm"
                       onClick={() => handleFontSizeSlider(Math.max(10, customTheme.fontSize - 1))}
-                      style={{ padding: '1px 5px', fontSize: '10px', height: '18px' }}
+                      style={{ padding: '1px 5px', fontSize: 'var(--font-size-xs)', height: '18px' }}
                       title="Decrease 1px"
                     >
                       -
@@ -1156,7 +1156,7 @@ export const SettingsCard: React.FC = () => {
                       type="button"
                       className="btn btn-ghost btn-sm"
                       onClick={() => handleFontSizeSlider(Math.min(22, customTheme.fontSize + 1))}
-                      style={{ padding: '1px 5px', fontSize: '10px', height: '18px' }}
+                      style={{ padding: '1px 5px', fontSize: 'var(--font-size-xs)', height: '18px' }}
                       title="Increase 1px"
                     >
                       +
@@ -1172,7 +1172,7 @@ export const SettingsCard: React.FC = () => {
                   style={{
                     width: '100%',
                     padding: '4px 6px',
-                    fontSize: '11px',
+                    fontSize: 'var(--font-size-sm)',
                     cursor: 'pointer',
                   }}
                 >
@@ -1186,7 +1186,7 @@ export const SettingsCard: React.FC = () => {
 
                 {/* Smooth Continuous Slider */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px' }}>
-                  <span style={{ fontSize: '9px', color: 'var(--text-muted)' }}>10px</span>
+                  <span style={{ fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)' }}>10px</span>
                   <input
                     type="range"
                     min="10"
@@ -1196,10 +1196,10 @@ export const SettingsCard: React.FC = () => {
                     onChange={(e) => handleFontSizeSlider(parseFloat(e.target.value))}
                     style={{ flex: 1, accentColor: 'var(--primary)', cursor: 'pointer', height: '14px' }}
                   />
-                  <span style={{ fontSize: '9px', color: 'var(--text-muted)' }}>22px</span>
+                  <span style={{ fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)' }}>22px</span>
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '8.5px', color: 'var(--text-muted)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)' }}>
                   <span>Smaller</span>
                   <span>Base: {customTheme.fontSize}px</span>
                   <span>Larger</span>
@@ -1210,7 +1210,7 @@ export const SettingsCard: React.FC = () => {
 
           {/* ─── 1D. UI Layout Density & Corner Rounding ─── */}
           <div>
-            <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <div style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
               <Layout size={13} color="var(--primary)" />
               <span>📐 Layout Density &amp; Corner Rounding:</span>
             </div>
@@ -1218,7 +1218,7 @@ export const SettingsCard: React.FC = () => {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '8px' }}>
               {/* Density Options */}
               <div>
-                <div style={{ fontSize: '9.5px', color: 'var(--text-muted)', marginBottom: '3px' }}>UI Density:</div>
+                <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', marginBottom: '3px' }}>UI Density:</div>
                 <div style={{ display: 'flex', gap: '3px' }}>
                   {[
                     { id: 'compact' as const, label: '⚡ Tight' },
@@ -1233,7 +1233,7 @@ export const SettingsCard: React.FC = () => {
                         onClick={() => themeService.setDensity(d.id)}
                         style={{
                           flex: 1,
-                          fontSize: '9px',
+                          fontSize: 'var(--font-size-2xs)',
                           padding: '4px 2px',
                           borderRadius: '5px',
                           border: isSelected ? '1px solid var(--primary)' : '1px solid var(--border-subtle)',
@@ -1251,7 +1251,7 @@ export const SettingsCard: React.FC = () => {
 
               {/* Corner Rounding Options */}
               <div>
-                <div style={{ fontSize: '9.5px', color: 'var(--text-muted)', marginBottom: '3px' }}>Corner Radius:</div>
+                <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', marginBottom: '3px' }}>Corner Radius:</div>
                 <div style={{ display: 'flex', gap: '3px' }}>
                   {[
                     { id: 'sharp' as const, label: '2px' },
@@ -1268,7 +1268,7 @@ export const SettingsCard: React.FC = () => {
                         onClick={() => themeService.setBorderRadius(r.id)}
                         style={{
                           flex: 1,
-                          fontSize: '9px',
+                          fontSize: 'var(--font-size-2xs)',
                           padding: '4px 2px',
                           borderRadius: '5px',
                           border: isSelected ? '1px solid var(--primary)' : '1px solid var(--border-subtle)',
@@ -1290,10 +1290,10 @@ export const SettingsCard: React.FC = () => {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', background: 'rgba(0, 0, 0, 0.2)', padding: '8px 10px', borderRadius: '8px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
-                <div style={{ fontSize: '10.5px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--text-primary)' }}>
                   👓 High Contrast Mode (Accessible)
                 </div>
-                <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>
+                <div style={{ fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)' }}>
                   Thickens card outlines and boosts text contrast for crystal-clear readability
                 </div>
               </div>
@@ -1306,7 +1306,7 @@ export const SettingsCard: React.FC = () => {
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
-              <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>
+              <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-secondary)' }}>
                 ✨ Card Glass Blur: {customTheme.glassOpacity}%
               </span>
               <input
@@ -1333,7 +1333,7 @@ export const SettingsCard: React.FC = () => {
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <span style={{ fontSize: 'var(--font-size-xs)', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
                 <Eye size={12} color="var(--primary)" />
                 <span>Live UI Preview:</span>
               </span>
@@ -1341,7 +1341,7 @@ export const SettingsCard: React.FC = () => {
                 type="button"
                 className="btn btn-secondary btn-sm"
                 onClick={() => themeService.resetToDefaults()}
-                style={{ fontSize: '9px', padding: '2px 6px' }}
+                style={{ fontSize: 'var(--font-size-2xs)', padding: '2px 6px' }}
                 title="Reset all colors and typography to default"
               >
                 <RotateCcw size={9} style={{ marginRight: '3px' }} />
@@ -1351,14 +1351,14 @@ export const SettingsCard: React.FC = () => {
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <span className="badge badge-platform">LeetCode #42</span>
-              <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-primary)' }}>
+              <span style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--text-primary)' }}>
                 Trapping Rain Water
               </span>
             </div>
 
             <div
               style={{
-                fontSize: '10.5px',
+                fontSize: 'var(--font-size-xs)',
                 color: 'var(--text-secondary)',
                 background: 'var(--bg-glass-input)',
                 padding: '6px 8px',
@@ -1405,7 +1405,7 @@ export const SettingsCard: React.FC = () => {
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <span
                 style={{
-                  fontSize: '10px',
+                  fontSize: 'var(--font-size-xs)',
                   padding: '2px 7px',
                   borderRadius: '10px',
                   background: 'rgba(45, 212, 191, 0.12)',
@@ -1435,13 +1435,13 @@ export const SettingsCard: React.FC = () => {
 
           {isWidgetExpanded && (
             <>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '10px' }}>
+              <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)', marginBottom: '10px' }}>
                 Customize the quick-access floating button on coding and problem pages.
               </div>
 
         {/* In-Page Popup Content Mode */}
         <div style={{ marginBottom: '12px' }}>
-          <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '6px' }}>
+          <div style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '6px' }}>
             🎯 Popup Content Mode:
           </div>
 
@@ -1493,8 +1493,8 @@ export const SettingsCard: React.FC = () => {
                     style={{ marginTop: '2px', accentColor: 'var(--primary)' }}
                   />
                   <div>
-                    <div style={{ fontSize: '10.5px', fontWeight: 600, color: 'var(--text-primary)' }}>{item.label}</div>
-                    <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>{item.desc}</div>
+                    <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--text-primary)' }}>{item.label}</div>
+                    <div style={{ fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)' }}>{item.desc}</div>
                   </div>
                 </label>
               );
@@ -1504,7 +1504,7 @@ export const SettingsCard: React.FC = () => {
 
         {/* Display Whitelist Mode Selection */}
         <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '10px', marginBottom: '10px' }}>
-          <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '6px' }}>
+          <div style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '6px' }}>
             🌐 Display Locations:
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
@@ -1535,8 +1535,8 @@ export const SettingsCard: React.FC = () => {
                   style={{ marginTop: '2px', accentColor: 'var(--primary)' }}
                 />
                 <div>
-                  <div style={{ fontSize: '10.5px', fontWeight: 600, color: 'var(--text-primary)' }}>{opt.label}</div>
-                  <div style={{ fontSize: '8.5px', color: 'var(--text-muted)' }}>{opt.desc}</div>
+                  <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--text-primary)' }}>{opt.label}</div>
+                  <div style={{ fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)' }}>{opt.desc}</div>
                 </div>
               </label>
             ))}
@@ -1553,7 +1553,7 @@ export const SettingsCard: React.FC = () => {
                 placeholder="e.g. github.com, leetcode.com"
                 value={newDomainInput}
                 onChange={(e) => setNewDomainInput(e.target.value)}
-                style={{ fontSize: '11px', padding: '4px 8px', flex: 1 }}
+                style={{ fontSize: 'var(--font-size-sm)', padding: '4px 8px', flex: 1 }}
                aria-label="Blocked site domain"/>
               <button type="submit" className="btn btn-primary btn-sm" disabled={!newDomainInput.trim()}>
                 <Plus size={12} />
@@ -1566,7 +1566,7 @@ export const SettingsCard: React.FC = () => {
                   key={dom}
                   className="badge"
                   style={{
-                    fontSize: '9.5px',
+                    fontSize: 'var(--font-size-xs)',
                     display: 'inline-flex',
                     alignItems: 'center',
                     gap: '4px',
@@ -1592,7 +1592,7 @@ export const SettingsCard: React.FC = () => {
 
         {/* Independent FAB Visibility Controls */}
         <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '10px', marginBottom: '10px' }}>
-          <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '6px' }}>
+          <div style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '6px' }}>
             🎛️ Independent FAB Toggles:
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -1609,10 +1609,10 @@ export const SettingsCard: React.FC = () => {
               }}
             >
               <div>
-                <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                <div style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--text-primary)' }}>
                   ⚡ Main Synqto FAB (Chat &amp; Whiteboard)
                 </div>
-                <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>
+                <div style={{ fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)' }}>
                   Toggle the main floating button on web pages
                 </div>
               </div>
@@ -1641,10 +1641,10 @@ export const SettingsCard: React.FC = () => {
               }}
             >
               <div>
-                <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                <div style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--text-primary)' }}>
                   🚀 Focus Timer FAB (Rocket Racing &amp; Pomodoro)
                 </div>
-                <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>
+                <div style={{ fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)' }}>
                   Toggle the standalone floating timer pill
                 </div>
               </div>
@@ -1673,10 +1673,10 @@ export const SettingsCard: React.FC = () => {
               }}
             >
               <div>
-                <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                <div style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--text-primary)' }}>
                   👥 Code Together In-Page Dock (Draggable Sync Badge)
                 </div>
-                <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>
+                <div style={{ fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)' }}>
                   Show floating collaborative editor sync dock on LeetCode/coding tabs (Off by default)
                 </div>
               </div>
@@ -1700,7 +1700,7 @@ export const SettingsCard: React.FC = () => {
         {/* Draggable Position Mode */}
         <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '10px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px', flexWrap: 'wrap', gap: '4px' }}>
-            <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-primary)' }}>
+            <div style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--text-primary)' }}>
               📍 Independent Position Persistence:
             </div>
             <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
@@ -1716,7 +1716,7 @@ export const SettingsCard: React.FC = () => {
                   setFabSettings(updated);
                   saveFabSettings(updated);
                 }}
-                style={{ fontSize: '9px', padding: '2px 5px', color: 'var(--primary)' }}
+                style={{ fontSize: 'var(--font-size-2xs)', padding: '2px 5px', color: 'var(--primary)' }}
                 title="Reset Main FAB position to bottom right"
               >
                 Reset Main Pos
@@ -1732,7 +1732,7 @@ export const SettingsCard: React.FC = () => {
                   setFabSettings(updated);
                   saveFabSettings(updated);
                 }}
-                style={{ fontSize: '9px', padding: '2px 5px', color: '#f43f5e' }}
+                style={{ fontSize: 'var(--font-size-2xs)', padding: '2px 5px', color: '#f43f5e' }}
                 title="Reset Focus Timer FAB position"
               >
                 Reset Timer Pos
@@ -1748,7 +1748,7 @@ export const SettingsCard: React.FC = () => {
                   setFabSettings(updated);
                   saveFabSettings(updated);
                 }}
-                style={{ fontSize: '9px', padding: '2px 5px', color: '#818cf8' }}
+                style={{ fontSize: 'var(--font-size-2xs)', padding: '2px 5px', color: '#818cf8' }}
                 title="Reset Code Together Dock position to top right"
               >
                 Reset Dock Pos
@@ -1781,8 +1781,8 @@ export const SettingsCard: React.FC = () => {
                 style={{ marginTop: '2px', accentColor: 'var(--primary)' }}
               />
               <div>
-                <div style={{ fontSize: '10.5px', fontWeight: 600, color: 'var(--text-primary)' }}>📌 Permanent</div>
-                <div style={{ fontSize: '8.5px', color: 'var(--text-muted)' }}>Remember dragged locations independently</div>
+                <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--text-primary)' }}>📌 Permanent</div>
+                <div style={{ fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)' }}>Remember dragged locations independently</div>
               </div>
             </label>
 
@@ -1810,8 +1810,8 @@ export const SettingsCard: React.FC = () => {
                 style={{ marginTop: '2px', accentColor: 'var(--primary)' }}
               />
               <div>
-                <div style={{ fontSize: '10.5px', fontWeight: 600, color: 'var(--text-primary)' }}>⏱️ Temporary</div>
-                <div style={{ fontSize: '8.5px', color: 'var(--text-muted)' }}>Reset positions on reload</div>
+                <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--text-primary)' }}>⏱️ Temporary</div>
+                <div style={{ fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)' }}>Reset positions on reload</div>
               </div>
             </label>
           </div>
@@ -1843,7 +1843,7 @@ export const SettingsCard: React.FC = () => {
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <span
                 style={{
-                  fontSize: '10px',
+                  fontSize: 'var(--font-size-xs)',
                   padding: '2px 7px',
                   borderRadius: '10px',
                   background: timerConfig.enabled ? 'rgba(16, 185, 129, 0.15)' : 'rgba(255, 255, 255, 0.05)',
@@ -1873,7 +1873,7 @@ export const SettingsCard: React.FC = () => {
 
           {isTimerExpanded && (
             <>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '12px' }}>
+              <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)', marginBottom: '12px' }}>
                 Enable a dedicated Pomodoro countdown, intervals (25m/5m/15m), and stopwatch for deep problem solving.
               </div>
 
@@ -1890,10 +1890,10 @@ export const SettingsCard: React.FC = () => {
                 }}
               >
                 <div>
-                  <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                  <div style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--text-primary)' }}>
                     Enable Pomodoro &amp; Timer Bar
                   </div>
-                  <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>
+                  <div style={{ fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)' }}>
                     Show floating timer buttons and controls across the app
                   </div>
                 </div>
@@ -1937,37 +1937,37 @@ export const SettingsCard: React.FC = () => {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
                     <div>
-                      <label style={{ fontSize: '9px', color: 'var(--text-muted)', display: 'block', marginBottom: '2px' }}>🍅 Work (min)</label>
+                      <label style={{ fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)', display: 'block', marginBottom: '2px' }}>🍅 Work (min)</label>
                       <input
                         type="number"
                         min="1"
                         max="120"
                         className="input-glass"
-                        style={{ width: '100%', fontSize: '11px', padding: '4px 6px' }}
+                        style={{ width: '100%', fontSize: 'var(--font-size-sm)', padding: '4px 6px' }}
                         value={timerConfig.workDurationMin}
                         onChange={(e) => timerService.updateConfig({ workDurationMin: Math.max(1, parseInt(e.target.value) || 25) })}
                       />
                     </div>
                     <div>
-                      <label style={{ fontSize: '9px', color: 'var(--text-muted)', display: 'block', marginBottom: '2px' }}>☕ Break (min)</label>
+                      <label style={{ fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)', display: 'block', marginBottom: '2px' }}>☕ Break (min)</label>
                       <input
                         type="number"
                         min="1"
                         max="60"
                         className="input-glass"
-                        style={{ width: '100%', fontSize: '11px', padding: '4px 6px' }}
+                        style={{ width: '100%', fontSize: 'var(--font-size-sm)', padding: '4px 6px' }}
                         value={timerConfig.shortBreakMin}
                         onChange={(e) => timerService.updateConfig({ shortBreakMin: Math.max(1, parseInt(e.target.value) || 5) })}
                       />
                     </div>
                     <div>
-                      <label style={{ fontSize: '9px', color: 'var(--text-muted)', display: 'block', marginBottom: '2px' }}>🌴 Long Break</label>
+                      <label style={{ fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)', display: 'block', marginBottom: '2px' }}>🌴 Long Break</label>
                       <input
                         type="number"
                         min="1"
                         max="60"
                         className="input-glass"
-                        style={{ width: '100%', fontSize: '11px', padding: '4px 6px' }}
+                        style={{ width: '100%', fontSize: 'var(--font-size-sm)', padding: '4px 6px' }}
                         value={timerConfig.longBreakMin}
                         onChange={(e) => timerService.updateConfig({ longBreakMin: Math.max(1, parseInt(e.target.value) || 15) })}
                       />
@@ -1975,7 +1975,7 @@ export const SettingsCard: React.FC = () => {
                   </div>
 
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
-                    <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>🔔 Audio chime on session complete</span>
+                    <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-secondary)' }}>🔔 Audio chime on session complete</span>
                     <input
                       type="checkbox"
                       checked={timerConfig.soundAlerts}
@@ -2017,7 +2017,7 @@ export const SettingsCard: React.FC = () => {
                   gap: '5px',
                   padding: '2px 8px',
                   borderRadius: '12px',
-                  fontSize: '10px',
+                  fontSize: 'var(--font-size-xs)',
                   fontWeight: 700,
                   background: isServerConnected ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.18)',
                   border: isServerConnected ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid rgba(239, 68, 68, 0.35)',
@@ -2054,7 +2054,7 @@ export const SettingsCard: React.FC = () => {
 
           {isServerExpanded && (
             <>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '10px', lineHeight: 1.5 }}>
+              <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)', marginBottom: '10px', lineHeight: 1.5 }}>
                 WebSocket signaling endpoint used to establish WebRTC peer meshes, negotiate SDP offers/answers, and coordinate cluster leaders.
               </div>
 
@@ -2066,7 +2066,7 @@ export const SettingsCard: React.FC = () => {
                     value={serverUrl}
                     onChange={(e) => setServerUrl(e.target.value)}
                     placeholder="wss://synqto-server.onrender.com/ws/"
-                    style={{ flex: 1, fontSize: '11px', padding: '6px 10px' }}
+                    style={{ flex: 1, fontSize: 'var(--font-size-sm)', padding: '6px 10px' }}
                    aria-label="wss://synqto-server.onrender.com/ws/"/>
                   <button className="btn btn-primary btn-sm" onClick={handleSaveAndReconnect} title="Save URL &amp; Connect">
                     {savedUrl ? <Check size={13} /> : 'Save &amp; Connect'}
@@ -2078,7 +2078,7 @@ export const SettingsCard: React.FC = () => {
                     type="button"
                     className="btn btn-secondary btn-sm"
                     onClick={handleResetDefaultUrl}
-                    style={{ fontSize: '10px', padding: '4px 8px', color: 'var(--text-muted)' }}
+                    style={{ fontSize: 'var(--font-size-xs)', padding: '4px 8px', color: 'var(--text-muted)' }}
                     title="Reset URL to default hosted server"
                   >
                     <RotateCcw size={10} style={{ marginRight: '4px' }} />
@@ -2091,7 +2091,7 @@ export const SettingsCard: React.FC = () => {
                     onClick={handleRetryServerConnection}
                     disabled={isRetryingServer}
                     style={{
-                      fontSize: '11px',
+                      fontSize: 'var(--font-size-sm)',
                       padding: '4px 12px',
                       display: 'flex',
                       alignItems: 'center',
@@ -2116,7 +2116,7 @@ export const SettingsCard: React.FC = () => {
                       display: 'flex',
                       alignItems: 'center',
                       gap: '6px',
-                      fontSize: '10.5px',
+                      fontSize: 'var(--font-size-xs)',
                       padding: '6px 10px',
                       borderRadius: '6px',
                       background: serverToast.type === 'success' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
@@ -2155,7 +2155,7 @@ export const SettingsCard: React.FC = () => {
               <span>Privacy &amp; Data Storage</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ fontSize: '9.5px', color: 'var(--text-muted)', background: 'rgba(255,255,255,0.05)', padding: '2px 6px', borderRadius: '4px' }}>
+              <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', background: 'rgba(255,255,255,0.05)', padding: '2px 6px', borderRadius: '4px' }}>
                 Local P2P
               </span>
               <div
@@ -2177,21 +2177,21 @@ export const SettingsCard: React.FC = () => {
 
           {isPrivacyExpanded && (
             <>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '10px' }}>
+              <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)', marginBottom: '10px' }}>
                 Synqto operates 100% peer-to-peer. Messages, streaks, and personal diaries are stored locally in your browser.
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-secondary)' }}>
                   Reset local identity, streaks, and cached history
                 </div>
-                <button className="btn btn-danger btn-sm" onClick={handleClearData} style={{ fontSize: '11px' }}>
+                <button className="btn btn-danger btn-sm" onClick={handleClearData} style={{ fontSize: 'var(--font-size-sm)' }}>
                   <Trash2 size={12} />
                   <span>Clear Local Data</span>
                 </button>
               </div>
               {clearedData && (
-                <div style={{ fontSize: '10px', color: 'var(--accent-emerald)', marginTop: '4px' }}>
+                <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--accent-emerald)', marginTop: '4px' }}>
                   ✓ Local data cleared. Reloading...
                 </div>
               )}
@@ -2215,12 +2215,12 @@ export const SettingsCard: React.FC = () => {
               marginBottom: isAboutExpanded ? '4px' : 0,
             }}
           >
-            <div className="glass-card-title" style={{ fontSize: '12px' }}>
+            <div className="glass-card-title" style={{ fontSize: 'var(--font-size-md)' }}>
               <Info size={13} color="var(--text-muted)" />
               <span>About Synqto</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ fontSize: '9.5px', color: 'var(--text-muted)', background: 'rgba(255,255,255,0.05)', padding: '1px 6px', borderRadius: '4px' }}>
+              <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', background: 'rgba(255,255,255,0.05)', padding: '1px 6px', borderRadius: '4px' }}>
                 v0.2.0
               </span>
               <div
@@ -2241,7 +2241,7 @@ export const SettingsCard: React.FC = () => {
           </div>
 
           {isAboutExpanded && (
-            <div style={{ fontSize: '10.5px', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+            <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
               Version: <strong>{typeof chrome !== 'undefined' && chrome.runtime?.getManifest ? chrome.runtime.getManifest().version : '0.2.0'} (The Trinity Architecture)</strong><br />
               Network Protocol: <strong>Dual-Leader P2P Mesh with WebRTC DataChannels</strong><br />
               Signaling: <strong>Go / Gorilla WebSocket Broker</strong>

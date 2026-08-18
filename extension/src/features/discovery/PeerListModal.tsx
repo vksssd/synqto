@@ -36,7 +36,7 @@ export const PeerListModal: React.FC<PeerListModalProps> = ({
       <div className="modal-content" onClick={(e) => e.stopPropagation()} {...dialogProps} aria-labelledby="peer-list-title">
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ fontWeight: 600, fontSize: '14px', color: 'var(--text-primary)' }}>
+          <div style={{ fontWeight: 600, fontSize: 'var(--font-size-lg)', color: 'var(--text-primary)' }}>
             Room Members ({peers.length + 1})
           </div>
           <button className="btn btn-ghost btn-icon" onClick={onClose}>
@@ -96,7 +96,7 @@ export const PeerListModal: React.FC<PeerListModalProps> = ({
 
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span style={{ fontWeight: 700, fontSize: '12px', color: 'var(--text-primary)' }}>
+                  <span style={{ fontWeight: 700, fontSize: 'var(--font-size-md)', color: 'var(--text-primary)' }}>
                     {myIdentity?.nickname || 'You'}
                   </span>
                   <span
@@ -104,7 +104,7 @@ export const PeerListModal: React.FC<PeerListModalProps> = ({
                       background: 'rgba(16, 185, 129, 0.2)',
                       border: '1px solid rgba(16, 185, 129, 0.4)',
                       color: 'var(--accent-emerald, #10b981)',
-                      fontSize: '9px',
+                      fontSize: 'var(--font-size-2xs)',
                       fontWeight: 700,
                       padding: '1px 5px',
                       borderRadius: '4px',
@@ -118,13 +118,13 @@ export const PeerListModal: React.FC<PeerListModalProps> = ({
                     </span>
                   )}
                 </div>
-                <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', marginTop: '2px' }}>
                   Status: Active • You
                 </div>
               </div>
             </div>
 
-            <span style={{ fontSize: '11px', color: 'var(--primary)', fontWeight: 600 }}>
+            <span style={{ fontSize: 'var(--font-size-sm)', color: 'var(--primary)', fontWeight: 600 }}>
               (Self)
             </span>
           </div>
@@ -163,7 +163,7 @@ export const PeerListModal: React.FC<PeerListModalProps> = ({
 
                     <div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <span style={{ fontWeight: 600, fontSize: '12px', color: 'var(--text-primary)' }}>
+                        <span style={{ fontWeight: 600, fontSize: 'var(--font-size-md)', color: 'var(--text-primary)' }}>
                           {peer.identity.nickname}
                         </span>
                         {isPeerLeader && (

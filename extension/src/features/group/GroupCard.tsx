@@ -92,13 +92,13 @@ export const GroupCard: React.FC<GroupCardProps> = ({
 
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ fontWeight: 600, color: '#f8fafc', fontSize: '13px' }}>
+              <span style={{ fontWeight: 600, color: '#f8fafc', fontSize: 'var(--font-size-md)' }}>
                 {group.name}
               </span>
               {isActive && (
                 <span
                   style={{
-                    fontSize: '9px',
+                    fontSize: 'var(--font-size-2xs)',
                     fontWeight: 700,
                     textTransform: 'uppercase',
                     color: '#a7f3d0',
@@ -114,7 +114,7 @@ export const GroupCard: React.FC<GroupCardProps> = ({
               {!isActive && (group.isMember || group.isCreator) && (
                 <span
                   style={{
-                    fontSize: '9px',
+                    fontSize: 'var(--font-size-2xs)',
                     fontWeight: 600,
                     color: '#34d399',
                     background: 'rgba(16, 185, 129, 0.12)',
@@ -134,7 +134,7 @@ export const GroupCard: React.FC<GroupCardProps> = ({
                 <span
                   className="badge"
                   style={{
-                    fontSize: '10px',
+                    fontSize: 'var(--font-size-xs)',
                     padding: '1px 6px',
                     backgroundColor: `${platformColor}20`,
                     borderColor: `${platformColor}50`,
@@ -144,7 +144,7 @@ export const GroupCard: React.FC<GroupCardProps> = ({
                   {group.topicTag} Problem
                 </span>
               ) : (
-                <span className="badge" style={{ fontSize: '10px', padding: '1px 6px' }}>
+                <span className="badge" style={{ fontSize: 'var(--font-size-xs)', padding: '1px 6px' }}>
                   {group.topicTag}
                 </span>
               )}
@@ -152,7 +152,7 @@ export const GroupCard: React.FC<GroupCardProps> = ({
               <span
                 className="badge"
                 style={{
-                  fontSize: '10px',
+                  fontSize: 'var(--font-size-xs)',
                   padding: '1px 6px',
                   background: group.isPrivate ? 'rgba(139, 92, 246, 0.12)' : 'rgba(255, 255, 255, 0.04)',
                   borderColor: group.isPrivate ? 'rgba(139, 92, 246, 0.3)' : undefined,
@@ -211,7 +211,7 @@ export const GroupCard: React.FC<GroupCardProps> = ({
             }
             style={
               confirmingDelete
-                ? { background: 'rgba(244, 63, 94, 0.9)', color: '#fff', fontSize: '10px', gap: '4px' }
+                ? { background: 'rgba(244, 63, 94, 0.9)', color: '#fff', fontSize: 'var(--font-size-xs)', gap: '4px' }
                 : { color: 'var(--text-dim)' }
             }
           >
@@ -223,7 +223,7 @@ export const GroupCard: React.FC<GroupCardProps> = ({
 
       {/* Description if present */}
       {group.description && (
-        <p style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: 1.4, margin: 0 }}>
+        <p style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-secondary)', lineHeight: 1.4, margin: 0 }}>
           {group.description}
         </p>
       )}
@@ -234,7 +234,7 @@ export const GroupCard: React.FC<GroupCardProps> = ({
           <button
             className="btn btn-secondary btn-sm"
             onClick={onLeave}
-            style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px' }}
+            style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: 'var(--font-size-sm)' }}
           >
             <LogOut size={12} />
             <span>Leave Room</span>
@@ -243,7 +243,7 @@ export const GroupCard: React.FC<GroupCardProps> = ({
           <button
             className="btn btn-primary btn-sm"
             onClick={() => onJoin(group)}
-            style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px' }}
+            style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: 'var(--font-size-sm)' }}
           >
             <span>{group.isProblemGroup ? 'Join Problem Room' : (group.isMember || group.isCreator) ? 'Enter Squad' : 'Join Squad'}</span>
             <ArrowRight size={12} />

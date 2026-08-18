@@ -55,7 +55,7 @@ export const IdentityCard: React.FC<IdentityCardProps> = ({ identity, isLeader =
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              fontSize: '15px',
+              fontSize: 'var(--font-size-lg)',
               boxShadow: `0 0 8px ${identity.color || '#2dd4bf'}40`,
             }}
           >
@@ -63,14 +63,14 @@ export const IdentityCard: React.FC<IdentityCardProps> = ({ identity, isLeader =
           </div>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ fontWeight: 700, fontSize: '12px', color: 'var(--text-primary)' }}>
+              <span style={{ fontWeight: 700, fontSize: 'var(--font-size-md)', color: 'var(--text-primary)' }}>
                 {identity.nickname}
               </span>
-              <span className={`badge ${isLeader ? 'badge-leader' : 'badge-peer'}`} style={{ fontSize: '9px', padding: '1px 5px' }}>
+              <span className={`badge ${isLeader ? 'badge-leader' : 'badge-peer'}`} style={{ fontSize: 'var(--font-size-2xs)', padding: '1px 5px' }}>
                 {isLeader ? '👑 Leader' : '⚡ Peer'}
               </span>
             </div>
-            <span style={{ fontSize: '9.5px', color: 'var(--text-muted)' }}>
+            <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)' }}>
               Ephemeral Mesh Identity
             </span>
           </div>
@@ -107,7 +107,7 @@ export const IdentityCard: React.FC<IdentityCardProps> = ({ identity, isLeader =
       {isExpanded && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '4px', borderTop: '1px solid var(--border-subtle)' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '4px' }}>
-            <div style={{ fontSize: '10.5px', color: 'var(--text-secondary)' }}>
+            <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-secondary)' }}>
               Display Nickname:
             </div>
             {isEditing ? (
@@ -115,7 +115,7 @@ export const IdentityCard: React.FC<IdentityCardProps> = ({ identity, isLeader =
                 <input
                   type="text"
                   className="input-glass"
-                  style={{ padding: '2px 6px', width: '130px', fontSize: '11px' }}
+                  style={{ padding: '2px 6px', width: '130px', fontSize: 'var(--font-size-sm)' }}
                   value={customName}
                   onChange={(e) => setCustomName(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleSaveName()}
@@ -127,7 +127,7 @@ export const IdentityCard: React.FC<IdentityCardProps> = ({ identity, isLeader =
               </div>
             ) : (
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span style={{ fontWeight: 600, fontSize: '11.5px', color: 'var(--text-primary)' }}>
+                <span style={{ fontWeight: 600, fontSize: 'var(--font-size-sm)', color: 'var(--text-primary)' }}>
                   {identity.nickname}
                 </span>
                 <button
@@ -146,12 +146,12 @@ export const IdentityCard: React.FC<IdentityCardProps> = ({ identity, isLeader =
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: '10.5px', color: 'var(--text-secondary)' }}>
+            <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-secondary)' }}>
               Network Node ID:
             </span>
             <span
               style={{
-                fontSize: '10px',
+                fontSize: 'var(--font-size-xs)',
                 fontFamily: 'var(--font-mono)',
                 color: 'var(--text-muted)',
                 background: 'rgba(0, 0, 0, 0.3)',
@@ -165,12 +165,12 @@ export const IdentityCard: React.FC<IdentityCardProps> = ({ identity, isLeader =
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: '10.5px', color: 'var(--text-secondary)' }}>
+            <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-secondary)' }}>
               Session Role:
             </span>
             <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
               <ShieldCheck size={12} color={isLeader ? 'var(--accent-amber)' : 'var(--primary)'} />
-              <span style={{ fontSize: '10.5px', fontWeight: 600, color: 'var(--text-primary)' }}>
+              <span style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--text-primary)' }}>
                 {isLeader ? 'Room Host (Leader)' : 'Synchronized Peer'}
               </span>
             </div>

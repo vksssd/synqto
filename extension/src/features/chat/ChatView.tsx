@@ -221,10 +221,10 @@ export const ChatView: React.FC<ChatViewProps> = ({ myIdentity, roomId }) => {
             }}
           >
             <MessageSquare size={32} color="var(--text-dim)" />
-            <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)' }}>
+            <div style={{ fontSize: 'var(--font-size-md)', fontWeight: 600, color: 'var(--text-secondary)' }}>
               No messages yet
             </div>
-            <div style={{ fontSize: '11px', maxWidth: '220px' }}>
+            <div style={{ fontSize: 'var(--font-size-sm)', maxWidth: '220px' }}>
               Say hello, share a screenshot, or type @ to mention room peers!
             </div>
           </div>
@@ -292,7 +292,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ myIdentity, roomId }) => {
               }}
             />
             {lightboxImage.caption && (
-              <div style={{ color: '#fff', fontSize: '12px', background: 'rgba(0,0,0,0.6)', padding: '4px 12px', borderRadius: '4px' }}>
+              <div style={{ color: '#fff', fontSize: 'var(--font-size-md)', background: 'rgba(0,0,0,0.6)', padding: '4px 12px', borderRadius: '4px' }}>
                 {lightboxImage.caption}
               </div>
             )}
@@ -301,7 +301,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ myIdentity, roomId }) => {
                 href={lightboxImage.url}
                 download="synqto-screenshot.png"
                 className="btn btn-primary btn-sm"
-                style={{ fontSize: '11px', gap: '4px' }}
+                style={{ fontSize: 'var(--font-size-sm)', gap: '4px' }}
               >
                 <Download size={12} />
                 <span>Download</span>
@@ -310,7 +310,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ myIdentity, roomId }) => {
                 type="button"
                 className="btn btn-secondary btn-sm"
                 onClick={() => setLightboxImage(null)}
-                style={{ fontSize: '11px' }}
+                style={{ fontSize: 'var(--font-size-sm)' }}
               >
                 Close
               </button>
@@ -324,7 +324,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ myIdentity, roomId }) => {
         <div className="modal-overlay" onClick={() => setShowCodeModal(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: 'var(--font-size-md)', fontWeight: 700, color: 'var(--text-primary)' }}>
                 <Code size={15} color="var(--primary)" />
                 <span>Share Code Snippet</span>
               </div>
@@ -341,7 +341,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ myIdentity, roomId }) => {
                   placeholder="Snippet Title (optional)..."
                   value={codeTitle}
                   onChange={(e) => setCodeTitle(e.target.value)}
-                  style={{ flex: 1, fontSize: '11px' }}
+                  style={{ flex: 1, fontSize: 'var(--font-size-sm)' }}
                  aria-label="Snippet Title (optional)"/>
                 <select
                   value={codeLanguage}
@@ -352,7 +352,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ myIdentity, roomId }) => {
                     border: '1px solid var(--border-subtle)',
                     borderRadius: '4px',
                     padding: '4px 6px',
-                    fontSize: '11px',
+                    fontSize: 'var(--font-size-sm)',
                   }}
                 >
                   <option value="python">Python</option>
@@ -371,15 +371,15 @@ export const ChatView: React.FC<ChatViewProps> = ({ myIdentity, roomId }) => {
                 value={codeText}
                 onChange={(e) => setCodeText(e.target.value)}
                 rows={6}
-                style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', resize: 'vertical' }}
+                style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--font-size-sm)', resize: 'vertical' }}
                 autoFocus
               />
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '6px' }}>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowCodeModal(false)} style={{ fontSize: '11px' }}>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowCodeModal(false)} style={{ fontSize: 'var(--font-size-sm)' }}>
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary btn-sm" disabled={!codeText.trim()} style={{ fontSize: '11px' }}>
+                <button type="submit" className="btn btn-primary btn-sm" disabled={!codeText.trim()} style={{ fontSize: 'var(--font-size-sm)' }}>
                   Share Code
                 </button>
               </div>
@@ -393,7 +393,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ myIdentity, roomId }) => {
         <div className="modal-overlay" onClick={() => setShowPollModal(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: 'var(--font-size-md)', fontWeight: 700, color: 'var(--text-primary)' }}>
                 <BarChart2 size={15} color="var(--primary)" />
                 <span>Create Live Poll</span>
               </div>
@@ -409,7 +409,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ myIdentity, roomId }) => {
                 placeholder="Ask a question (e.g. Which approach is faster?)..."
                 value={pollQuestion}
                 onChange={(e) => setPollQuestion(e.target.value)}
-                style={{ fontSize: '11px' }}
+                style={{ fontSize: 'var(--font-size-sm)' }}
                 autoFocus
                aria-label="Ask a question (e.g. Which approach is faster?)"/>
 
@@ -426,7 +426,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ myIdentity, roomId }) => {
                         updated[idx] = e.target.value;
                         setPollOptions(updated);
                       }}
-                      style={{ flex: 1, fontSize: '11px' }}
+                      style={{ flex: 1, fontSize: 'var(--font-size-sm)' }}
                      aria-label="Option"/>
                     {pollOptions.length > 2 && (
                       <button
@@ -447,13 +447,13 @@ export const ChatView: React.FC<ChatViewProps> = ({ myIdentity, roomId }) => {
                   type="button"
                   className="btn btn-ghost btn-sm"
                   onClick={() => setPollOptions([...pollOptions, `Option ${pollOptions.length + 1}`])}
-                  style={{ alignSelf: 'flex-start', fontSize: '10.5px', color: 'var(--primary)' }}
+                  style={{ alignSelf: 'flex-start', fontSize: 'var(--font-size-xs)', color: 'var(--primary)' }}
                 >
                   + Add Option
                 </button>
               )}
 
-              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-secondary)' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: 'var(--font-size-sm)', color: 'var(--text-secondary)' }}>
                 <input
                   type="checkbox"
                   checked={pollMultiChoice}
@@ -463,10 +463,10 @@ export const ChatView: React.FC<ChatViewProps> = ({ myIdentity, roomId }) => {
               </label>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '6px', marginTop: '4px' }}>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowPollModal(false)} style={{ fontSize: '11px' }}>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowPollModal(false)} style={{ fontSize: 'var(--font-size-sm)' }}>
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary btn-sm" disabled={!pollQuestion.trim()} style={{ fontSize: '11px' }}>
+                <button type="submit" className="btn btn-primary btn-sm" disabled={!pollQuestion.trim()} style={{ fontSize: 'var(--font-size-sm)' }}>
                   Launch Poll
                 </button>
               </div>
@@ -480,7 +480,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ myIdentity, roomId }) => {
         <div className="modal-overlay" onClick={() => setShowQuizModal(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: 700, color: '#fbbf24' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: 'var(--font-size-md)', fontWeight: 700, color: '#fbbf24' }}>
                 <HelpCircle size={15} color="#f59e0b" />
                 <span>Create DSA Quiz Challenge</span>
               </div>
@@ -496,11 +496,11 @@ export const ChatView: React.FC<ChatViewProps> = ({ myIdentity, roomId }) => {
                 placeholder="Question (e.g. Time complexity of Heapify?)..."
                 value={quizQuestion}
                 onChange={(e) => setQuizQuestion(e.target.value)}
-                style={{ fontSize: '11px' }}
+                style={{ fontSize: 'var(--font-size-sm)' }}
                 autoFocus
                aria-label="Question (e.g. Time complexity of Heapify?)"/>
 
-              <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+              <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)' }}>
                 Select the radio button next to the <strong>correct answer</strong>:
               </div>
 
@@ -524,7 +524,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ myIdentity, roomId }) => {
                         updated[idx] = e.target.value;
                         setQuizOptions(updated);
                       }}
-                      style={{ flex: 1, fontSize: '11px' }}
+                      style={{ flex: 1, fontSize: 'var(--font-size-sm)' }}
                      aria-label="Choice"/>
                   </div>
                 ))}
@@ -536,14 +536,14 @@ export const ChatView: React.FC<ChatViewProps> = ({ myIdentity, roomId }) => {
                 value={quizExplanation}
                 onChange={(e) => setQuizExplanation(e.target.value)}
                 rows={2}
-                style={{ fontSize: '10.5px' }}
+                style={{ fontSize: 'var(--font-size-xs)' }}
               />
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '6px', marginTop: '4px' }}>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowQuizModal(false)} style={{ fontSize: '11px' }}>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowQuizModal(false)} style={{ fontSize: 'var(--font-size-sm)' }}>
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary btn-sm" disabled={!quizQuestion.trim()} style={{ fontSize: '11px' }}>
+                <button type="submit" className="btn btn-primary btn-sm" disabled={!quizQuestion.trim()} style={{ fontSize: 'var(--font-size-sm)' }}>
                   Post Challenge
                 </button>
               </div>

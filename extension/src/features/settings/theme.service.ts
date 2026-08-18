@@ -953,8 +953,13 @@ export class ThemeService {
     const base = cfg.fontSize || 13;
     root.setAttribute('data-font-size', cfg.fontSizeOption);
     root.style.setProperty('--font-size-base', `${base}px`);
-    root.style.setProperty('--font-size-xs', `${Math.max(8.5, base - 2.5)}px`);
-    root.style.setProperty('--font-size-sm', `${Math.max(9.5, base - 1.5)}px`);
+    // Readability floors raised from 8.5/9.5. Text below ~10px is genuinely hard to read in
+    // a narrow side panel, and the old floors meant that even at the LARGEST font setting
+    // some labels stayed tiny. A dedicated 2xs step exists for true micro-labels (badge
+    // counts, timestamps) so ordinary body copy is never pushed down to that size.
+    root.style.setProperty('--font-size-2xs', `${Math.max(9.5, base - 3.5)}px`);
+    root.style.setProperty('--font-size-xs', `${Math.max(10.5, base - 2.5)}px`);
+    root.style.setProperty('--font-size-sm', `${Math.max(11.5, base - 1.5)}px`);
     root.style.setProperty('--font-size-md', `${base}px`);
     root.style.setProperty('--font-size-lg', `${base + 2}px`);
     root.style.setProperty('--font-size-xl', `${base + 5}px`);

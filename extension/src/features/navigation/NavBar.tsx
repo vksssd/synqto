@@ -100,7 +100,7 @@ export const NavBar: React.FC<NavBarProps> = ({
             {showWhiteboardHint && (
               <span
                 className="nav-subtag"
-                style={{ fontSize: '9px', color: 'var(--accent-cyan)', display: 'block', lineHeight: 1 }}
+                style={{ fontSize: 'var(--font-size-2xs)', color: 'var(--accent-cyan)', display: 'block', lineHeight: 1 }}
               >
                 Board
               </span>

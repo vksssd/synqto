@@ -550,7 +550,7 @@ export class FloatingWidget {
           border: 1px solid rgba(255, 255, 255, 0.2);
           box-shadow: 0 10px 25px -5px rgba(99, 102, 241, 0.5), 0 0 15px rgba(124, 58, 237, 0.3);
           color: #ffffff;
-          font-size: 12px;
+          font-size: var(--font-size-md);
           font-weight: 700;
           cursor: grab;
           transition: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.15s;
@@ -568,7 +568,7 @@ export class FloatingWidget {
 
         .drag-grip {
           opacity: 0.5;
-          font-size: 11px;
+          font-size: var(--font-size-sm);
           cursor: grab;
         }
 
@@ -622,7 +622,7 @@ export class FloatingWidget {
           border: 1px solid rgba(244, 63, 94, 0.55);
           box-shadow: 0 10px 25px -5px rgba(244, 63, 94, 0.45), 0 0 18px rgba(99, 102, 241, 0.3);
           color: #ffffff;
-          font-size: 12px;
+          font-size: var(--font-size-md);
           font-weight: 700;
           cursor: pointer;
           transition: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s, border-color 0.2s;
@@ -653,7 +653,7 @@ export class FloatingWidget {
         }
 
         .timer-fab-rocket {
-          font-size: 13px;
+          font-size: var(--font-size-md);
           display: inline-block;
           filter: drop-shadow(0 0 6px rgba(244, 63, 94, 0.9));
         }
@@ -664,7 +664,7 @@ export class FloatingWidget {
           right: -4px;
           background: #f59e0b;
           color: #ffffff;
-          font-size: 10px;
+          font-size: var(--font-size-xs);
           font-weight: 700;
           padding: 2px 6px;
           border-radius: 9999px;
@@ -749,7 +749,7 @@ export class FloatingWidget {
         }
 
         .problem-title {
-          font-size: 13px;
+          font-size: var(--font-size-md);
           font-weight: 700;
           color: var(--text-primary);
           white-space: nowrap;
@@ -766,7 +766,7 @@ export class FloatingWidget {
         }
 
         .platform-pill {
-          font-size: 9px;
+          font-size: var(--font-size-2xs);
           font-weight: 700;
           padding: 1px 6px;
           border-radius: 4px;
@@ -777,7 +777,7 @@ export class FloatingWidget {
         }
 
         .peer-count-pill {
-          font-size: 10px;
+          font-size: var(--font-size-xs);
           color: var(--text-secondary);
           display: flex;
           align-items: center;
@@ -824,7 +824,7 @@ export class FloatingWidget {
           justify-content: center;
           gap: 6px;
           padding: 5px 8px;
-          font-size: 11px;
+          font-size: var(--font-size-sm);
           font-weight: 600;
           border-radius: 6px;
           border: none;
@@ -856,7 +856,7 @@ export class FloatingWidget {
           min-width: 80px;
           padding: 6px 9px 4px 10px;
           border-radius: 9px;
-          font-size: 12px;
+          font-size: var(--font-size-md);
           position: relative;
           word-break: break-word;
           line-height: 1.42;
@@ -885,7 +885,7 @@ export class FloatingWidget {
           border-radius: 4px;
           padding: 3px 6px;
           margin-bottom: 4px;
-          font-size: 10px;
+          font-size: var(--font-size-xs);
         }
 
         .chat-header {
@@ -894,7 +894,7 @@ export class FloatingWidget {
           justify-content: space-between;
           gap: 6px;
           margin-bottom: 2px;
-          font-size: 10.5px;
+          font-size: var(--font-size-xs);
         }
 
         .chat-author {
@@ -911,7 +911,7 @@ export class FloatingWidget {
           float: right;
           margin-left: 8px;
           margin-top: 3px;
-          font-size: 9.5px;
+          font-size: var(--font-size-xs);
           color: var(--text-dim, #94a3b8);
           user-select: none;
         }
@@ -955,7 +955,7 @@ export class FloatingWidget {
           background: transparent;
           color: var(--text-muted);
           cursor: pointer;
-          font-size: 11px;
+          font-size: var(--font-size-sm);
           display: flex;
           align-items: center;
           justify-content: center;
@@ -990,7 +990,7 @@ export class FloatingWidget {
         }
 
         .size-pill {
-          font-size: 9px;
+          font-size: var(--font-size-2xs);
           font-weight: 700;
           padding: 1px 4px;
           border-radius: 3px;
@@ -1031,7 +1031,7 @@ export class FloatingWidget {
           border-radius: 8px;
           padding: 7px 10px;
           color: #ffffff;
-          font-size: 11px;
+          font-size: var(--font-size-sm);
           outline: none;
         }
 
@@ -1064,7 +1064,7 @@ export class FloatingWidget {
           background: rgba(255, 255, 255, 0.06);
           border: 1px solid var(--border-subtle);
           color: var(--text-secondary);
-          font-size: 9px;
+          font-size: var(--font-size-2xs);
           font-weight: 600;
           padding: 2px 6px;
           border-radius: 4px;
@@ -1101,10 +1101,10 @@ export class FloatingWidget {
           <div class="header-actions">
             <!-- Popup Size Mode Switcher Pills -->
             <div class="popup-size-group" style="display:flex;gap:2px;align-items:center;background:rgba(0,0,0,0.35);padding:2px;border-radius:6px;border:1px solid rgba(255,255,255,0.08);margin-right:2px;">
-              <button class="size-mode-pill ${this.popupSize === 'compact' ? 'active' : ''}" data-popsize="compact" title="Compact Size (420x540)" style="font-size:9px;font-weight:700;padding:2px 5px;border-radius:4px;border:none;cursor:pointer;background:${this.popupSize === 'compact' ? 'var(--primary)' : 'transparent'};color:${this.popupSize === 'compact' ? '#fff' : 'var(--text-muted)'};">📱 S</button>
-              <button class="size-mode-pill ${this.popupSize === 'medium' ? 'active' : ''}" data-popsize="medium" title="Medium Split Size (620x640)" style="font-size:9px;font-weight:700;padding:2px 5px;border-radius:4px;border:none;cursor:pointer;background:${this.popupSize === 'medium' ? 'var(--primary)' : 'transparent'};color:${this.popupSize === 'medium' ? '#fff' : 'var(--text-muted)'};">🌗 M</button>
-              <button class="size-mode-pill ${this.popupSize === 'large' ? 'active' : ''}" data-popsize="large" title="Large Widescreen (860x740)" style="font-size:9px;font-weight:700;padding:2px 5px;border-radius:4px;border:none;cursor:pointer;background:${this.popupSize === 'large' ? 'var(--primary)' : 'transparent'};color:${this.popupSize === 'large' ? '#fff' : 'var(--text-muted)'};">🖥️ L</button>
-              <button class="size-mode-pill ${this.popupSize === 'fullscreen' ? 'active' : ''}" data-popsize="fullscreen" title="Full Screen View (1180x880)" style="font-size:9px;font-weight:700;padding:2px 5px;border-radius:4px;border:none;cursor:pointer;background:${this.popupSize === 'fullscreen' ? 'var(--primary)' : 'transparent'};color:${this.popupSize === 'fullscreen' ? '#fff' : 'var(--text-muted)'};">📺 XL</button>
+              <button class="size-mode-pill ${this.popupSize === 'compact' ? 'active' : ''}" data-popsize="compact" title="Compact Size (420x540)" style="font-size: var(--font-size-2xs);font-weight:700;padding:2px 5px;border-radius:4px;border:none;cursor:pointer;background:${this.popupSize === 'compact' ? 'var(--primary)' : 'transparent'};color:${this.popupSize === 'compact' ? '#fff' : 'var(--text-muted)'};">📱 S</button>
+              <button class="size-mode-pill ${this.popupSize === 'medium' ? 'active' : ''}" data-popsize="medium" title="Medium Split Size (620x640)" style="font-size: var(--font-size-2xs);font-weight:700;padding:2px 5px;border-radius:4px;border:none;cursor:pointer;background:${this.popupSize === 'medium' ? 'var(--primary)' : 'transparent'};color:${this.popupSize === 'medium' ? '#fff' : 'var(--text-muted)'};">🌗 M</button>
+              <button class="size-mode-pill ${this.popupSize === 'large' ? 'active' : ''}" data-popsize="large" title="Large Widescreen (860x740)" style="font-size: var(--font-size-2xs);font-weight:700;padding:2px 5px;border-radius:4px;border:none;cursor:pointer;background:${this.popupSize === 'large' ? 'var(--primary)' : 'transparent'};color:${this.popupSize === 'large' ? '#fff' : 'var(--text-muted)'};">🖥️ L</button>
+              <button class="size-mode-pill ${this.popupSize === 'fullscreen' ? 'active' : ''}" data-popsize="fullscreen" title="Full Screen View (1180x880)" style="font-size: var(--font-size-2xs);font-weight:700;padding:2px 5px;border-radius:4px;border:none;cursor:pointer;background:${this.popupSize === 'fullscreen' ? 'var(--primary)' : 'transparent'};color:${this.popupSize === 'fullscreen' ? '#fff' : 'var(--text-muted)'};">📺 XL</button>
             </div>
 
             <button class="icon-btn" id="nb-open-sidepanel" title="Open complete extension in side panel">
@@ -1122,23 +1122,23 @@ export class FloatingWidget {
 
         <!-- Green Vanishing Toast on Server Connection Established -->
         ${this.serverToastMessage ? `
-          <div style="background:linear-gradient(135deg, rgba(16, 185, 129, 0.96), rgba(5, 150, 105, 0.96));color:#fff;padding:6px 10px;font-size:10.5px;font-weight:600;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,0.2);box-shadow:0 4px 12px rgba(16, 185, 129, 0.4);">
+          <div style="background:linear-gradient(135deg, rgba(16, 185, 129, 0.96), rgba(5, 150, 105, 0.96));color:#fff;padding:6px 10px;font-size: var(--font-size-xs);font-weight:600;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,0.2);box-shadow:0 4px 12px rgba(16, 185, 129, 0.4);">
             <div style="display:flex;align-items:center;gap:6px;">
               <span>⚡</span>
               <span>${this.escapeHtml(this.serverToastMessage)}</span>
             </div>
-            <span style="font-size:8.5px;background:rgba(0,0,0,0.25);padding:1px 5px;border-radius:3px;">P2P Active</span>
+            <span style="font-size: var(--font-size-2xs);background:rgba(0,0,0,0.25);padding:1px 5px;border-radius:3px;">P2P Active</span>
           </div>
         ` : ''}
 
         <!-- Red Offline Notice Banner when Server is Unreachable -->
         ${!this.isServerConnected ? `
-          <div style="background:linear-gradient(135deg, #ef4444, #dc2626);color:#fff;padding:5px 10px;font-size:10px;font-weight:600;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,0.2);">
+          <div style="background:linear-gradient(135deg, #ef4444, #dc2626);color:#fff;padding:5px 10px;font-size: var(--font-size-xs);font-weight:600;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,0.2);">
             <div style="display:flex;align-items:center;gap:5px;">
               <span>⚠️</span>
               <span>Server Offline (Local Mode)</span>
             </div>
-            <button id="nb-offline-sidepanel-reconnect" style="background:rgba(0,0,0,0.3);color:#fff;border:1px solid rgba(255,255,255,0.25);padding:2px 6px;border-radius:4px;font-size:9px;font-weight:700;cursor:pointer;">
+            <button id="nb-offline-sidepanel-reconnect" style="background:rgba(0,0,0,0.3);color:#fff;border:1px solid rgba(255,255,255,0.25);padding:2px 6px;border-radius:4px;font-size: var(--font-size-2xs);font-weight:700;cursor:pointer;">
               Reconnect in Side Panel ⚡
             </button>
           </div>
@@ -1146,11 +1146,11 @@ export class FloatingWidget {
 
         <!-- Segmented Switcher for Chat and Whiteboard -->
         <div class="tab-switcher" style="display:flex;border-bottom:1px solid var(--border-subtle);background:rgba(0,0,0,0.25);">
-          <button class="tab-btn ${this.activeTab === 'chat' ? 'active' : ''}" id="nb-tab-chat" style="flex:1;display:flex;align-items:center;justify-content:center;gap:5px;padding:8px 4px;font-size:11px;font-weight:600;background:transparent;border:none;border-bottom:2px solid ${this.activeTab === 'chat' ? 'var(--primary)' : 'transparent'};color:${this.activeTab === 'chat' ? '#fff' : 'var(--text-muted)'};cursor:pointer;">
+          <button class="tab-btn ${this.activeTab === 'chat' ? 'active' : ''}" id="nb-tab-chat" style="flex:1;display:flex;align-items:center;justify-content:center;gap:5px;padding:8px 4px;font-size: var(--font-size-sm);font-weight:600;background:transparent;border:none;border-bottom:2px solid ${this.activeTab === 'chat' ? 'var(--primary)' : 'transparent'};color:${this.activeTab === 'chat' ? '#fff' : 'var(--text-muted)'};cursor:pointer;">
             <span>💬 Live Chat</span>
           </button>
           ${this.settings.enableWhiteboard ? `
-            <button class="tab-btn ${this.activeTab === 'whiteboard' ? 'active' : ''}" id="nb-tab-whiteboard" style="flex:1;display:flex;align-items:center;justify-content:center;gap:5px;padding:8px 4px;font-size:11px;font-weight:600;background:transparent;border:none;border-bottom:2px solid ${this.activeTab === 'whiteboard' ? 'var(--primary)' : 'transparent'};color:${this.activeTab === 'whiteboard' ? '#fff' : 'var(--text-muted)'};cursor:pointer;">
+            <button class="tab-btn ${this.activeTab === 'whiteboard' ? 'active' : ''}" id="nb-tab-whiteboard" style="flex:1;display:flex;align-items:center;justify-content:center;gap:5px;padding:8px 4px;font-size: var(--font-size-sm);font-weight:600;background:transparent;border:none;border-bottom:2px solid ${this.activeTab === 'whiteboard' ? 'var(--primary)' : 'transparent'};color:${this.activeTab === 'whiteboard' ? '#fff' : 'var(--text-muted)'};cursor:pointer;">
               <span>🎨 Whiteboard</span>
             </button>
           ` : ''}
@@ -1159,12 +1159,12 @@ export class FloatingWidget {
         <!-- Multi-Broadcaster Live Streams List -->
         ${isLive ? `
           <div style="background:linear-gradient(135deg, rgba(239, 68, 68, 0.22), rgba(139, 92, 246, 0.18));border-bottom:1px solid rgba(239, 68, 68, 0.35);padding:6px 10px;display:flex;flex-direction:column;gap:5px;">
-            <div style="display:flex;align-items:center;justify-content:space-between;font-size:10px;color:#fca5a5;">
+            <div style="display:flex;align-items:center;justify-content:space-between;font-size: var(--font-size-xs);color:#fca5a5;">
               <div style="display:flex;align-items:center;gap:5px;font-weight:700;">
                 <span class="live-dot"></span>
                 <span>LIVE STREAMS (${(this.liveStage.activeStreams && this.liveStage.activeStreams.length) || 1}):</span>
               </div>
-              <button id="nb-live-tunein" style="background:#ef4444;color:#fff;border:none;padding:2px 8px;border-radius:4px;font-size:9px;font-weight:700;cursor:pointer;">
+              <button id="nb-live-tunein" style="background:#ef4444;color:#fff;border:none;padding:2px 8px;border-radius:4px;font-size: var(--font-size-2xs);font-weight:700;cursor:pointer;">
                 Open Side Panel 📺
               </button>
             </div>
@@ -1178,11 +1178,11 @@ export class FloatingWidget {
                     broadcastType: this.liveStage.broadcastType || 'screen',
                   }]
               ).map((s: any) => `
-                <div style="display:flex;align-items:center;gap:4px;padding:3px 6px;border-radius:4px;background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.1);font-size:10px;color:#f8fafc;white-space:nowrap;">
+                <div style="display:flex;align-items:center;gap:4px;padding:3px 6px;border-radius:4px;background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.1);font-size: var(--font-size-xs);color:#f8fafc;white-space:nowrap;">
                   <span>${s.broadcasterIdentity?.avatar || '👤'}</span>
                   <span style="font-weight:600;">${s.broadcasterIdentity?.nickname || 'Streamer'}:</span>
                   <span style="color:#c7d2fe;max-width:110px;overflow:hidden;text-overflow:ellipsis;">${this.escapeHtml(s.title || 'Live Stream')}</span>
-                  <span style="font-size:8px;padding:1px 4px;border-radius:3px;background:rgba(239,68,68,0.3);color:#fca5a5;text-transform:uppercase;">${s.broadcastType || 'live'}</span>
+                  <span style="font-size: var(--font-size-2xs);padding:1px 4px;border-radius:3px;background:rgba(239,68,68,0.3);color:#fca5a5;text-transform:uppercase;">${s.broadcastType || 'live'}</span>
                 </div>
               `).join('')}
             </div>
@@ -1209,19 +1209,19 @@ export class FloatingWidget {
                 <div style="width:1px;height:12px;background:var(--border-subtle);margin:0 1px;"></div>
 
                 <!-- Drawer Toggles -->
-                <button class="wb-drawer-toggle ${this.wbShowShapesDrawer ? 'active' : ''}" id="nb-wb-toggle-shapes" style="font-size:9px;padding:2px 4px;border-radius:4px;border:1px solid var(--border-subtle);background:${this.wbShowShapesDrawer ? 'rgba(99,102,241,0.25)' : 'transparent'};color:${this.wbShowShapesDrawer ? '#fff' : 'var(--text-muted)'};cursor:pointer;">
+                <button class="wb-drawer-toggle ${this.wbShowShapesDrawer ? 'active' : ''}" id="nb-wb-toggle-shapes" style="font-size: var(--font-size-2xs);padding:2px 4px;border-radius:4px;border:1px solid var(--border-subtle);background:${this.wbShowShapesDrawer ? 'rgba(99,102,241,0.25)' : 'transparent'};color:${this.wbShowShapesDrawer ? '#fff' : 'var(--text-muted)'};cursor:pointer;">
                   🔷 Shapes ${this.wbShowShapesDrawer ? '▲' : '▼'}
                 </button>
 
-                <button class="wb-drawer-toggle ${this.wbShowDsaDrawer ? 'active' : ''}" id="nb-wb-toggle-dsa" style="font-size:9px;padding:2px 4px;border-radius:4px;border:1px solid rgba(56,189,248,0.3);background:${this.wbShowDsaDrawer ? 'rgba(56,189,248,0.2)' : 'transparent'};color:${this.wbShowDsaDrawer ? '#38bdf8' : 'var(--text-muted)'};cursor:pointer;">
+                <button class="wb-drawer-toggle ${this.wbShowDsaDrawer ? 'active' : ''}" id="nb-wb-toggle-dsa" style="font-size: var(--font-size-2xs);padding:2px 4px;border-radius:4px;border:1px solid rgba(56,189,248,0.3);background:${this.wbShowDsaDrawer ? 'rgba(56,189,248,0.2)' : 'transparent'};color:${this.wbShowDsaDrawer ? '#38bdf8' : 'var(--text-muted)'};cursor:pointer;">
                   🔲 DSA ${this.wbShowDsaDrawer ? '▲' : '▼'}
                 </button>
 
-                <button class="wb-drawer-toggle ${this.wbShowArchDrawer ? 'active' : ''}" id="nb-wb-toggle-arch" style="font-size:9px;padding:2px 4px;border-radius:4px;border:1px solid var(--border-subtle);background:${this.wbShowArchDrawer ? 'rgba(99,102,241,0.25)' : 'transparent'};color:${this.wbShowArchDrawer ? '#fff' : 'var(--text-muted)'};cursor:pointer;">
+                <button class="wb-drawer-toggle ${this.wbShowArchDrawer ? 'active' : ''}" id="nb-wb-toggle-arch" style="font-size: var(--font-size-2xs);padding:2px 4px;border-radius:4px;border:1px solid var(--border-subtle);background:${this.wbShowArchDrawer ? 'rgba(99,102,241,0.25)' : 'transparent'};color:${this.wbShowArchDrawer ? '#fff' : 'var(--text-muted)'};cursor:pointer;">
                   🏛️ Arch ${this.wbShowArchDrawer ? '▲' : '▼'}
                 </button>
 
-                <button class="wb-drawer-toggle ${this.wbShowThemesDrawer ? 'active' : ''}" id="nb-wb-toggle-themes" style="font-size:9px;padding:2px 4px;border-radius:4px;border:1px solid var(--border-subtle);background:${this.wbShowThemesDrawer ? 'rgba(99,102,241,0.25)' : 'transparent'};color:${this.wbShowThemesDrawer ? '#fff' : 'var(--text-muted)'};cursor:pointer;">
+                <button class="wb-drawer-toggle ${this.wbShowThemesDrawer ? 'active' : ''}" id="nb-wb-toggle-themes" style="font-size: var(--font-size-2xs);padding:2px 4px;border-radius:4px;border:1px solid var(--border-subtle);background:${this.wbShowThemesDrawer ? 'rgba(99,102,241,0.25)' : 'transparent'};color:${this.wbShowThemesDrawer ? '#fff' : 'var(--text-muted)'};cursor:pointer;">
                   🎨 Style ${this.wbShowThemesDrawer ? '▲' : '▼'}
                 </button>
               </div>
@@ -1229,8 +1229,8 @@ export class FloatingWidget {
               <!-- Right Controls -->
               <div class="wb-tool-group">
                 <div style="display:flex;gap:2px;align-items:center;background:rgba(0,0,0,0.4);padding:2px 4px;border-radius:5px;border:1px solid var(--border-subtle);">
-                  <button class="wb-privacy-btn" data-wbprivacy="personal" style="font-size:9px;font-weight:700;padding:2px 5px;border-radius:3px;border:none;cursor:pointer;background:${this.wbPrivacyMode === 'personal' ? 'linear-gradient(135deg, #f59e0b, #f43f5e)' : 'transparent'};color:${this.wbPrivacyMode === 'personal' ? '#fff' : 'var(--text-muted)'};" title="🔒 Personal Private Scratchpad (Offline, Independent)">🔒 Private</button>
-                  <button class="wb-privacy-btn" data-wbprivacy="collaborative" style="font-size:9px;font-weight:700;padding:2px 5px;border-radius:3px;border:none;cursor:pointer;background:${this.wbPrivacyMode === 'collaborative' ? 'linear-gradient(135deg, #10b981, #06b6d4)' : 'transparent'};color:${this.wbPrivacyMode === 'collaborative' ? '#fff' : 'var(--text-muted)'};" title="👥 Collaborative Room Board (Synced across all peers)">👥 Collab</button>
+                  <button class="wb-privacy-btn" data-wbprivacy="personal" style="font-size: var(--font-size-2xs);font-weight:700;padding:2px 5px;border-radius:3px;border:none;cursor:pointer;background:${this.wbPrivacyMode === 'personal' ? 'linear-gradient(135deg, #f59e0b, #f43f5e)' : 'transparent'};color:${this.wbPrivacyMode === 'personal' ? '#fff' : 'var(--text-muted)'};" title="🔒 Personal Private Scratchpad (Offline, Independent)">🔒 Private</button>
+                  <button class="wb-privacy-btn" data-wbprivacy="collaborative" style="font-size: var(--font-size-2xs);font-weight:700;padding:2px 5px;border-radius:3px;border:none;cursor:pointer;background:${this.wbPrivacyMode === 'collaborative' ? 'linear-gradient(135deg, #10b981, #06b6d4)' : 'transparent'};color:${this.wbPrivacyMode === 'collaborative' ? '#fff' : 'var(--text-muted)'};" title="👥 Collaborative Room Board (Synced across all peers)">👥 Collab</button>
                 </div>
                 <button class="wb-tool-btn" id="nb-wb-undo" title="Undo">↩️</button>
                 <button class="wb-tool-btn" id="nb-wb-redo" title="Redo">↪️</button>
@@ -1241,18 +1241,18 @@ export class FloatingWidget {
             </div>
 
             <!-- Floating Selection Action Bar -->
-            <div id="nb-wb-selection-floating-bar" style="display:${this.wbSelectedStrokeIds.length > 0 ? 'flex' : 'none'};align-items:center;gap:4px;padding:3px 8px;background:rgba(15,23,42,0.95);border-bottom:1px solid #6366f1;box-shadow:0 4px 12px rgba(0,0,0,0.5);font-size:10px;">
+            <div id="nb-wb-selection-floating-bar" style="display:${this.wbSelectedStrokeIds.length > 0 ? 'flex' : 'none'};align-items:center;gap:4px;padding:3px 8px;background:rgba(15,23,42,0.95);border-bottom:1px solid #6366f1;box-shadow:0 4px 12px rgba(0,0,0,0.5);font-size: var(--font-size-xs);">
               <span style="color:#818cf8;font-weight:700;margin-right:2px;">Selected (${this.wbSelectedStrokeIds.length}):</span>
-              <button id="nb-wb-sel-copy" style="background:rgba(99,102,241,0.2);border:1px solid rgba(99,102,241,0.4);color:#fff;border-radius:3px;padding:2px 6px;cursor:pointer;font-size:9.5px;" title="Copy (Ctrl+C)">📋 Copy</button>
-              <button id="nb-wb-sel-dup" style="background:rgba(16,185,129,0.2);border:1px solid rgba(16,185,129,0.4);color:#fff;border-radius:3px;padding:2px 6px;cursor:pointer;font-size:9.5px;" title="Duplicate (Ctrl+D)">✨ Dup</button>
-              <button id="nb-wb-sel-paste" style="background:rgba(56,189,248,0.2);border:1px solid rgba(56,189,248,0.4);color:#fff;border-radius:3px;padding:2px 6px;cursor:pointer;font-size:9.5px;" title="Paste (Ctrl+V)">📥 Paste</button>
-              <button id="nb-wb-sel-del" style="background:rgba(239,68,68,0.2);border:1px solid rgba(239,68,68,0.4);color:#fca5a5;border-radius:3px;padding:2px 6px;cursor:pointer;font-size:9.5px;" title="Delete (Del)">🗑️ Delete</button>
-              <button id="nb-wb-sel-clear" style="background:transparent;border:1px solid var(--border-subtle);color:var(--text-muted);border-radius:3px;padding:2px 6px;cursor:pointer;font-size:9.5px;" title="Deselect (Esc)">✕</button>
+              <button id="nb-wb-sel-copy" style="background:rgba(99,102,241,0.2);border:1px solid rgba(99,102,241,0.4);color:#fff;border-radius:3px;padding:2px 6px;cursor:pointer;font-size: var(--font-size-xs);" title="Copy (Ctrl+C)">📋 Copy</button>
+              <button id="nb-wb-sel-dup" style="background:rgba(16,185,129,0.2);border:1px solid rgba(16,185,129,0.4);color:#fff;border-radius:3px;padding:2px 6px;cursor:pointer;font-size: var(--font-size-xs);" title="Duplicate (Ctrl+D)">✨ Dup</button>
+              <button id="nb-wb-sel-paste" style="background:rgba(56,189,248,0.2);border:1px solid rgba(56,189,248,0.4);color:#fff;border-radius:3px;padding:2px 6px;cursor:pointer;font-size: var(--font-size-xs);" title="Paste (Ctrl+V)">📥 Paste</button>
+              <button id="nb-wb-sel-del" style="background:rgba(239,68,68,0.2);border:1px solid rgba(239,68,68,0.4);color:#fca5a5;border-radius:3px;padding:2px 6px;cursor:pointer;font-size: var(--font-size-xs);" title="Delete (Del)">🗑️ Delete</button>
+              <button id="nb-wb-sel-clear" style="background:transparent;border:1px solid var(--border-subtle);color:var(--text-muted);border-radius:3px;padding:2px 6px;cursor:pointer;font-size: var(--font-size-xs);" title="Deselect (Esc)">✕</button>
             </div>
 
             <!-- Drawer: Shapes -->
             <div id="nb-wb-drawer-shapes" style="display:${this.wbShowShapesDrawer ? 'flex' : 'none'};align-items:center;gap:3px;padding:3px 6px;background:rgba(0,0,0,0.85);border-bottom:1px solid var(--border-subtle);overflow-x:auto;">
-              <span style="font-size:8.5px;color:var(--text-muted);font-weight:600;">Shapes:</span>
+              <span style="font-size: var(--font-size-2xs);color:var(--text-muted);font-weight:600;">Shapes:</span>
               ${[
                 { id: 'line', label: 'Line 📏' },
                 { id: 'arrow', label: 'Arrow ➡️' },
@@ -1266,13 +1266,13 @@ export class FloatingWidget {
                 { id: 'sticky_note', label: 'Sticky 📝' },
                 { id: 'code_box', label: 'Code &lt;/&gt;' },
               ].map((t) => `
-                <button class="wb-tool-btn ${this.wbTool === t.id ? 'active' : ''}" data-wbtool="${t.id}" style="font-size:9px;padding:2px 5px;white-space:nowrap;">${t.label}</button>
+                <button class="wb-tool-btn ${this.wbTool === t.id ? 'active' : ''}" data-wbtool="${t.id}" style="font-size: var(--font-size-2xs);padding:2px 5px;white-space:nowrap;">${t.label}</button>
               `).join('')}
             </div>
 
             <!-- Drawer: DSA Visualizers -->
             <div id="nb-wb-drawer-dsa" style="display:${this.wbShowDsaDrawer ? 'flex' : 'none'};align-items:center;gap:3px;padding:3px 6px;background:rgba(8,28,44,0.95);border-bottom:1px solid rgba(56,189,248,0.3);overflow-x:auto;">
-              <span style="font-size:8.5px;color:#7dd3fc;font-weight:700;">🔲 DSA:</span>
+              <span style="font-size: var(--font-size-2xs);color:#7dd3fc;font-weight:700;">🔲 DSA:</span>
               ${[
                 { id: 'array_cells', label: 'Array [0..N]' },
                 { id: 'two_pointers', label: 'Two Pointers (L/R)' },
@@ -1283,13 +1283,13 @@ export class FloatingWidget {
                 { id: 'decision_diamond', label: 'Branch Diamond' },
                 { id: 'code_box', label: 'Pseudocode Box' },
               ].map((t) => `
-                <button class="wb-tool-btn ${this.wbTool === t.id ? 'active' : ''}" data-wbtool="${t.id}" style="font-size:9px;padding:2px 5px;white-space:nowrap;color:#7dd3fc;">${t.label}</button>
+                <button class="wb-tool-btn ${this.wbTool === t.id ? 'active' : ''}" data-wbtool="${t.id}" style="font-size: var(--font-size-2xs);padding:2px 5px;white-space:nowrap;color:#7dd3fc;">${t.label}</button>
               `).join('')}
             </div>
 
             <!-- Drawer: Architecture Shapes -->
             <div id="nb-wb-drawer-arch" style="display:${this.wbShowArchDrawer ? 'flex' : 'none'};align-items:center;gap:3px;padding:3px 6px;background:rgba(0,0,0,0.9);border-bottom:1px solid var(--border-subtle);overflow-x:auto;">
-              <span style="font-size:8.5px;color:var(--text-muted);font-weight:600;">Arch:</span>
+              <span style="font-size: var(--font-size-2xs);color:var(--text-muted);font-weight:600;">Arch:</span>
               ${[
                 { id: 'db_cylinder', label: 'SQL DB' },
                 { id: 'db_nosql', label: 'NoSQL' },
@@ -1310,7 +1310,7 @@ export class FloatingWidget {
                 { id: 'async_arrow', label: 'Async ⇢' },
                 { id: 'tradeoff_note', label: '⚖️ CAP Card' },
               ].map((t) => `
-                <button class="wb-tool-btn ${this.wbTool === t.id ? 'active' : ''}" data-wbtool="${t.id}" style="font-size:9px;padding:2px 5px;white-space:nowrap;">${t.label}</button>
+                <button class="wb-tool-btn ${this.wbTool === t.id ? 'active' : ''}" data-wbtool="${t.id}" style="font-size: var(--font-size-2xs);padding:2px 5px;white-space:nowrap;">${t.label}</button>
               `).join('')}
             </div>
 
@@ -1355,8 +1355,8 @@ export class FloatingWidget {
             ${this.messages.length === 0 ? `
               <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--text-muted);gap:8px;padding:30px 10px;text-align:center;">
                 <div style="font-size:28px;">💬</div>
-                <div style="font-size:13px;font-weight:600;color:var(--text-secondary);">No messages yet</div>
-                <div style="font-size:11px;max-width:220px;">Say hello or ask for a hint! Messages are synchronized P2P across all peers.</div>
+                <div style="font-size: var(--font-size-md);font-weight:600;color:var(--text-secondary);">No messages yet</div>
+                <div style="font-size: var(--font-size-sm);max-width:220px;">Say hello or ask for a hint! Messages are synchronized P2P across all peers.</div>
               </div>
             ` : this.messages.map((m, idx) => `
               <div class="chat-bubble ${m.isSelf ? 'self' : 'other'}" id="nb-msg-${m.id}">
@@ -1433,8 +1433,8 @@ export class FloatingWidget {
           <div style="display:flex;align-items:center;gap:7px;">
             <span style="font-size:16px;">🍅</span>
             <div>
-              <div style="font-size:12px;font-weight:700;color:#ffffff;line-height:1.2;">Focus Timer & Pomodoro</div>
-              <div style="font-size:9.5px;color:#fca5a5;font-weight:600;text-transform:uppercase;">
+              <div style="font-size: var(--font-size-md);font-weight:700;color:#ffffff;line-height:1.2;">Focus Timer & Pomodoro</div>
+              <div style="font-size: var(--font-size-xs);color:#fca5a5;font-weight:600;text-transform:uppercase;">
                 ${this.timerState.mode === 'pomodoro' ? 'Deep Focus Session' : this.timerState.mode === 'short_break' ? 'Short Refresh Break' : this.timerState.mode === 'long_break' ? 'Extended Rest' : 'Open Stopwatch'}
               </div>
             </div>
@@ -1448,10 +1448,10 @@ export class FloatingWidget {
         <div style="padding:16px 14px;display:flex;flex-direction:column;gap:14px;align-items:center;">
           <!-- Mode Switcher Pills -->
           <div style="display:flex;gap:4px;background:rgba(0,0,0,0.4);padding:3px;border-radius:8px;border:1px solid rgba(255,255,255,0.08);width:100%;justify-content:space-between;">
-            <button class="timer-mode-btn ${this.timerState.mode === 'pomodoro' ? 'active' : ''}" data-tmode="pomodoro" style="flex:1;font-size:10px;font-weight:700;padding:6px 2px;border-radius:6px;border:none;cursor:pointer;background:${this.timerState.mode === 'pomodoro' ? '#f43f5e' : 'transparent'};color:${this.timerState.mode === 'pomodoro' ? '#fff' : 'var(--text-muted)'};">🍅 Focus</button>
-            <button class="timer-mode-btn ${this.timerState.mode === 'short_break' ? 'active' : ''}" data-tmode="short_break" style="flex:1;font-size:10px;font-weight:700;padding:6px 2px;border-radius:6px;border:none;cursor:pointer;background:${this.timerState.mode === 'short_break' ? '#10b981' : 'transparent'};color:${this.timerState.mode === 'short_break' ? '#fff' : 'var(--text-muted)'};">☕ Break</button>
-            <button class="timer-mode-btn ${this.timerState.mode === 'long_break' ? 'active' : ''}" data-tmode="long_break" style="flex:1;font-size:10px;font-weight:700;padding:6px 2px;border-radius:6px;border:none;cursor:pointer;background:${this.timerState.mode === 'long_break' ? '#06b6d4' : 'transparent'};color:${this.timerState.mode === 'long_break' ? '#fff' : 'var(--text-muted)'};">🌴 Long</button>
-            <button class="timer-mode-btn ${this.timerState.mode === 'stopwatch' ? 'active' : ''}" data-tmode="stopwatch" style="flex:1;font-size:10px;font-weight:700;padding:6px 2px;border-radius:6px;border:none;cursor:pointer;background:${this.timerState.mode === 'stopwatch' ? '#8b5cf6' : 'transparent'};color:${this.timerState.mode === 'stopwatch' ? '#fff' : 'var(--text-muted)'};">⏱️ Clock</button>
+            <button class="timer-mode-btn ${this.timerState.mode === 'pomodoro' ? 'active' : ''}" data-tmode="pomodoro" style="flex:1;font-size: var(--font-size-xs);font-weight:700;padding:6px 2px;border-radius:6px;border:none;cursor:pointer;background:${this.timerState.mode === 'pomodoro' ? '#f43f5e' : 'transparent'};color:${this.timerState.mode === 'pomodoro' ? '#fff' : 'var(--text-muted)'};">🍅 Focus</button>
+            <button class="timer-mode-btn ${this.timerState.mode === 'short_break' ? 'active' : ''}" data-tmode="short_break" style="flex:1;font-size: var(--font-size-xs);font-weight:700;padding:6px 2px;border-radius:6px;border:none;cursor:pointer;background:${this.timerState.mode === 'short_break' ? '#10b981' : 'transparent'};color:${this.timerState.mode === 'short_break' ? '#fff' : 'var(--text-muted)'};">☕ Break</button>
+            <button class="timer-mode-btn ${this.timerState.mode === 'long_break' ? 'active' : ''}" data-tmode="long_break" style="flex:1;font-size: var(--font-size-xs);font-weight:700;padding:6px 2px;border-radius:6px;border:none;cursor:pointer;background:${this.timerState.mode === 'long_break' ? '#06b6d4' : 'transparent'};color:${this.timerState.mode === 'long_break' ? '#fff' : 'var(--text-muted)'};">🌴 Long</button>
+            <button class="timer-mode-btn ${this.timerState.mode === 'stopwatch' ? 'active' : ''}" data-tmode="stopwatch" style="flex:1;font-size: var(--font-size-xs);font-weight:700;padding:6px 2px;border-radius:6px;border:none;cursor:pointer;background:${this.timerState.mode === 'stopwatch' ? '#8b5cf6' : 'transparent'};color:${this.timerState.mode === 'stopwatch' ? '#fff' : 'var(--text-muted)'};">⏱️ Clock</button>
           </div>
 
           <!-- Digital Clock Display & Rocket Racing Track -->
@@ -1460,7 +1460,7 @@ export class FloatingWidget {
             <!-- 🚀 Rocket Racing Progress Track -->
             <div style="width:100%;height:8px;background:rgba(255,255,255,0.08);position:relative;overflow:hidden;border-radius:4px;">
               <div id="nb-timer-progress-fill" style="height:100%;width:${this.getTimerProgressPct()}%;background:linear-gradient(90deg, #6366f1, ${this.timerState.mode === 'pomodoro' ? '#f43f5e' : this.timerState.mode === 'short_break' ? '#10b981' : this.timerState.mode === 'long_break' ? '#06b6d4' : '#8b5cf6'});transition:width 0.4s ease;box-shadow:${this.timerState.isRunning ? '0 0 10px rgba(244,63,94,0.8)' : 'none'};"></div>
-              <div style="position:absolute;top:-4px;left:calc(${Math.min(94, Math.max(2, this.getTimerProgressPct()))}% - 8px);font-size:11px;pointer-events:none;transition:left 0.4s ease;">
+              <div style="position:absolute;top:-4px;left:calc(${Math.min(94, Math.max(2, this.getTimerProgressPct()))}% - 8px);font-size: var(--font-size-sm);pointer-events:none;transition:left 0.4s ease;">
                 <span style="display:inline-block;animation:${this.timerState.isRunning ? 'rocketThrust 0.8s ease-in-out infinite alternate' : 'none'};">🚀</span>
               </div>
             </div>
@@ -1470,14 +1470,14 @@ export class FloatingWidget {
             </div>
 
             <!-- Racing Track Waypoints -->
-            <div style="display:flex;justify-content:space-between;width:100%;font-size:9px;color:var(--text-muted);margin-top:8px;padding:0 2px;">
+            <div style="display:flex;justify-content:space-between;width:100%;font-size: var(--font-size-2xs);color:var(--text-muted);margin-top:8px;padding:0 2px;">
               <span>🛫 Launchpad</span>
               <span style="font-weight:700;color:#fca5a5;">${Math.round(this.getTimerProgressPct())}% Completed</span>
               <span>🏁 Goal</span>
             </div>
 
             ${this.timerState.sessionsCompleted > 0 ? `
-              <div style="display:flex;align-items:center;gap:4px;margin-top:8px;font-size:10px;padding:2px 8px;border-radius:10px;background:rgba(244,63,94,0.15);color:#f43f5e;font-weight:600;">
+              <div style="display:flex;align-items:center;gap:4px;margin-top:8px;font-size: var(--font-size-xs);padding:2px 8px;border-radius:10px;background:rgba(244,63,94,0.15);color:#f43f5e;font-weight:600;">
                 <span>🎯</span>
                 <span>${this.timerState.sessionsCompleted} Sessions Done</span>
               </div>
@@ -1486,12 +1486,12 @@ export class FloatingWidget {
 
           <!-- Timer Action Buttons -->
           <div style="display:flex;align-items:center;gap:8px;width:100%;">
-            <button id="nb-timer-toggle" style="flex:2;display:flex;align-items:center;justify-content:center;gap:6px;padding:10px;border-radius:8px;border:none;background:${this.timerState.isRunning ? '#ef4444' : 'linear-gradient(135deg, #4f46e5, #7c3aed)'};color:#ffffff;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 4px 15px rgba(99,102,241,0.4);">
+            <button id="nb-timer-toggle" style="flex:2;display:flex;align-items:center;justify-content:center;gap:6px;padding:10px;border-radius:8px;border:none;background:${this.timerState.isRunning ? '#ef4444' : 'linear-gradient(135deg, #4f46e5, #7c3aed)'};color:#ffffff;font-size: var(--font-size-md);font-weight:700;cursor:pointer;box-shadow:0 4px 15px rgba(99,102,241,0.4);">
               <span>${this.timerState.isRunning ? '⏸ Pause' : '▶ Start Focus'}</span>
             </button>
-            <button id="nb-timer-add-1m" style="flex:1;padding:10px 4px;border-radius:8px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.06);color:#f8fafc;font-size:11px;font-weight:600;cursor:pointer;" title="Add 1 minute">+1m</button>
-            <button id="nb-timer-add-5m" style="flex:1;padding:10px 4px;border-radius:8px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.06);color:#f8fafc;font-size:11px;font-weight:600;cursor:pointer;" title="Add 5 minutes">+5m</button>
-            <button id="nb-timer-reset" style="padding:10px 12px;border-radius:8px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.06);color:#f8fafc;font-size:12px;font-weight:600;cursor:pointer;" title="Reset Timer">🔄</button>
+            <button id="nb-timer-add-1m" style="flex:1;padding:10px 4px;border-radius:8px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.06);color:#f8fafc;font-size: var(--font-size-sm);font-weight:600;cursor:pointer;" title="Add 1 minute">+1m</button>
+            <button id="nb-timer-add-5m" style="flex:1;padding:10px 4px;border-radius:8px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.06);color:#f8fafc;font-size: var(--font-size-sm);font-weight:600;cursor:pointer;" title="Add 5 minutes">+5m</button>
+            <button id="nb-timer-reset" style="padding:10px 12px;border-radius:8px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.06);color:#f8fafc;font-size: var(--font-size-md);font-weight:600;cursor:pointer;" title="Reset Timer">🔄</button>
           </div>
         </div>
       </div>
@@ -1501,16 +1501,16 @@ export class FloatingWidget {
         <!-- 1. Separate Standalone Rocket Racing Focus Timer FAB (Shown when timer is on/enabled) -->
         ${(this.timerConfig.enabled || this.timerState.isRunning) ? `
           <button class="timer-fab-button" id="nb-timer-fab-trigger" title="Focus Timer (Click to open, click play icon to toggle)">
-            <span style="font-size:13px;">${this.timerState.mode === 'pomodoro' ? '🍅' : this.timerState.mode === 'short_break' ? '☕' : this.timerState.mode === 'long_break' ? '🌴' : '⏱️'}</span>
+            <span style="font-size: var(--font-size-md);">${this.timerState.mode === 'pomodoro' ? '🍅' : this.timerState.mode === 'short_break' ? '☕' : this.timerState.mode === 'long_break' ? '🌴' : '⏱️'}</span>
             <span class="timer-fab-rocket" style="animation:${this.timerState.isRunning ? 'rocketThrust 0.8s ease-in-out infinite alternate' : 'none'};">🚀</span>
-            ${this.timerState.isRunning ? `<span style="font-size:10px;margin-left:-5px;animation:flameFlicker 0.3s ease-in-out infinite alternate;">🔥</span>` : ''}
+            ${this.timerState.isRunning ? `<span style="font-size: var(--font-size-xs);margin-left:-5px;animation:flameFlicker 0.3s ease-in-out infinite alternate;">🔥</span>` : ''}
             <div class="timer-fab-track">
               <div id="nb-timer-fab-fill" class="timer-fab-fill" style="width:${this.getTimerProgressPct()}%;"></div>
             </div>
-            <span id="nb-timer-fab-time" style="font-family:var(--font-mono);font-size:11px;font-weight:800;color:#ffffff;min-width:38px;">
+            <span id="nb-timer-fab-time" style="font-family:var(--font-mono);font-size: var(--font-size-sm);font-weight:800;color:#ffffff;min-width:38px;">
               ${this.formatTimerTime(this.timerState.timeLeftSec)}
             </span>
-            <span id="nb-timer-fab-toggle-btn" style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:${this.timerState.isRunning ? '#ef4444' : 'rgba(255,255,255,0.15)'};color:#ffffff;font-size:9px;margin-left:2px;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,0.3);" title="${this.timerState.isRunning ? 'Pause Timer' : 'Start Timer'}">
+            <span id="nb-timer-fab-toggle-btn" style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:${this.timerState.isRunning ? '#ef4444' : 'rgba(255,255,255,0.15)'};color:#ffffff;font-size: var(--font-size-2xs);margin-left:2px;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,0.3);" title="${this.timerState.isRunning ? 'Pause Timer' : 'Start Timer'}">
               ${this.timerState.isRunning ? '⏸' : '▶'}
             </span>
           </button>
@@ -3437,7 +3437,7 @@ export class FloatingWidget {
       if (line.startsWith('```') && line.endsWith('```') && line.length > 6) {
         const codeText = line.slice(3, -3);
         return `
-          <div style="background:rgba(0,0,0,0.45);padding:6px 8px;border-radius:6px;margin:4px 0;font-family:var(--font-mono);font-size:11px;position:relative;">
+          <div style="background:rgba(0,0,0,0.45);padding:6px 8px;border-radius:6px;margin:4px 0;font-family:var(--font-mono);font-size: var(--font-size-sm);position:relative;">
             <pre style="margin:0;white-space:pre-wrap;word-break:break-all;">${this.escapeHtml(codeText)}</pre>
           </div>
         `;
@@ -3471,8 +3471,8 @@ export class FloatingWidget {
 
   private renderMentionsHtml(escapedStr: string): string {
     if (!escapedStr.includes('@')) return escapedStr;
-    return escapedStr.replace(/(@everyone|@all)/g, '<span style="background:rgba(245,158,11,0.25);border:1px solid rgba(245,158,11,0.5);color:#fbbf24;padding:1px 4px;border-radius:3px;font-weight:700;font-size:10px;">📣 $1</span>')
-      .replace(/(@[a-zA-Z0-9_-]+)/g, '<span style="background:rgba(99,102,241,0.25);border:1px solid rgba(99,102,241,0.4);color:#c7d2fe;padding:1px 4px;border-radius:3px;font-weight:600;font-size:10px;">$1</span>');
+    return escapedStr.replace(/(@everyone|@all)/g, '<span style="background:rgba(245,158,11,0.25);border:1px solid rgba(245,158,11,0.5);color:#fbbf24;padding:1px 4px;border-radius:3px;font-weight:700;font-size: var(--font-size-xs);">📣 $1</span>')
+      .replace(/(@[a-zA-Z0-9_-]+)/g, '<span style="background:rgba(99,102,241,0.25);border:1px solid rgba(99,102,241,0.4);color:#c7d2fe;padding:1px 4px;border-radius:3px;font-weight:600;font-size: var(--font-size-xs);">$1</span>');
   }
 
   private deduplicateMessages(raw: any[]): ChatMessageData[] {
@@ -4040,6 +4040,21 @@ export class FloatingWidget {
       }
     }
 
+    // TYPE SCALE — must mirror ThemeService.applySettings exactly.
+    //
+    // The widget lives in the PAGE's document, not the side panel's, so it cannot inherit
+    // the :root custom properties ThemeService sets. Without emitting the scale here the
+    // widget's ~75 hardcoded font sizes ignored the user's font-size preference entirely:
+    // enlarging text in Settings changed the panel and left the popup card and FAB
+    // unchanged, which is the visible half of the "theme in one place" problem.
+    //
+    // Floors match theme.service (9.5 / 10.5 / 11.5) so text is never smaller in the popup
+    // than in the panel at the same setting.
+    const base = this.themeSettings?.fontSize || 13;
+    const f2xs = Math.max(9.5, base - 3.5);
+    const fxs = Math.max(10.5, base - 2.5);
+    const fsm = Math.max(11.5, base - 1.5);
+
     return `
       --primary: ${primary};
       --primary-hover: ${primaryHover};
@@ -4050,6 +4065,15 @@ export class FloatingWidget {
       --text-secondary: ${textSecondary};
       --text-muted: ${isLight ? '#6b7280' : '#8b949e'};
       --text-dim: ${isLight ? '#9ca3af' : '#6e7681'};
+      --font-size-2xs: ${f2xs}px;
+      --font-size-xs: ${fxs}px;
+      --font-size-sm: ${fsm}px;
+      --font-size-md: ${base}px;
+      --font-size-base: ${base}px;
+      --font-size-lg: ${base + 2}px;
+      --font-size-xl: ${base + 5}px;
+      --font-size-title: ${base + 8}px;
+      --font-scale: ${base / 13};
     `;
   }
 }

@@ -1,0 +1,6 @@
+# Normalize line endings so Windows editors don't rewrite whole files as CRLF,
+# which produced diffs where insertions exactly equalled deletions and no content changed.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.zip binary

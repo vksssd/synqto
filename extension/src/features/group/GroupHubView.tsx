@@ -120,11 +120,11 @@ export const GroupHubView: React.FC<GroupHubViewProps> = ({ currentRoom, onOpenC
       <div className="glass-card" style={{ padding: '12px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
           <div>
-            <div style={{ fontWeight: 700, fontSize: '14px', color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <div style={{ fontWeight: 700, fontSize: 'var(--font-size-lg)', color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '6px' }}>
               <Users size={16} color="var(--primary)" />
               <span>Study Squads &amp; Problem Groups</span>
             </div>
-            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+            <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>
               Serverless P2P study circles &amp; active problem rooms
             </div>
           </div>
@@ -173,12 +173,12 @@ export const GroupHubView: React.FC<GroupHubViewProps> = ({ currentRoom, onOpenC
             </div>
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span style={{ fontWeight: 600, color: '#f8fafc', fontSize: '13px' }}>
+                <span style={{ fontWeight: 600, color: '#f8fafc', fontSize: 'var(--font-size-md)' }}>
                   {currentRoom.title}
                 </span>
                 <span className="status-dot pulse" style={{ background: '#10b981' }} />
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-secondary)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: 'var(--font-size-sm)', color: 'var(--text-secondary)' }}>
                 <span>Currently Active</span>
                 <span>•</span>
                 <span style={{ color: '#a5b4fc' }}>{currentRoom.platform}</span>
@@ -215,7 +215,7 @@ export const GroupHubView: React.FC<GroupHubViewProps> = ({ currentRoom, onOpenC
             }}
           >
             <Sparkles size={24} color="var(--text-dim)" aria-hidden="true" />
-            <div style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-secondary)' }}>
+            <div style={{ fontSize: 'var(--font-size-md)', fontWeight: 500, color: 'var(--text-secondary)' }}>
               {searchQuery.trim() ? `No local squad matches “${searchQuery.trim()}”` : 'No study squads or problem groups found'}
             </div>
 
@@ -224,7 +224,7 @@ export const GroupHubView: React.FC<GroupHubViewProps> = ({ currentRoom, onOpenC
                 dead-ends and the squad is unreachable despite being perfectly valid. */}
             {canJoinSearchedHandle ? (
               <>
-                <div style={{ fontSize: '11px', maxWidth: '260px' }}>
+                <div style={{ fontSize: 'var(--font-size-sm)', maxWidth: '260px' }}>
                   Squads live on peers, not a server — so this one may exist even though you
                   haven't seen it. Join <strong>@{searchHandle}</strong> to find out.
                 </div>
@@ -238,7 +238,7 @@ export const GroupHubView: React.FC<GroupHubViewProps> = ({ currentRoom, onOpenC
                 </button>
               </>
             ) : (
-              <div style={{ fontSize: '11px', maxWidth: '240px' }}>
+              <div style={{ fontSize: 'var(--font-size-sm)', maxWidth: '240px' }}>
                 Create your own serverless squad with or without a password, or scan a problem on your current tab!
               </div>
             )}
@@ -257,9 +257,9 @@ export const GroupHubView: React.FC<GroupHubViewProps> = ({ currentRoom, onOpenC
             {/* 1. My Joined Squads Section */}
             {filteredGroups.some((g) => g.isMember || g.isCreator) && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#a5b4fc', letterSpacing: '0.04em', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <div style={{ fontSize: 'var(--font-size-sm)', fontWeight: 700, textTransform: 'uppercase', color: '#a5b4fc', letterSpacing: '0.04em', display: 'flex', alignItems: 'center', gap: '5px' }}>
                   <span>🌟 My Joined Squads</span>
-                  <span style={{ fontSize: '10px', background: 'rgba(99,102,241,0.2)', padding: '1px 6px', borderRadius: '10px', color: '#c7d2fe' }}>
+                  <span style={{ fontSize: 'var(--font-size-xs)', background: 'rgba(99,102,241,0.2)', padding: '1px 6px', borderRadius: '10px', color: '#c7d2fe' }}>
                     {filteredGroups.filter((g) => g.isMember || g.isCreator).length}
                   </span>
                 </div>
@@ -282,7 +282,7 @@ export const GroupHubView: React.FC<GroupHubViewProps> = ({ currentRoom, onOpenC
             {/* 2. Discover More Public Squads & Problems */}
             {filteredGroups.some((g) => !g.isMember && !g.isCreator) && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '6px' }}>
-                <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-secondary)', letterSpacing: '0.04em' }}>
+                <div style={{ fontSize: 'var(--font-size-sm)', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-secondary)', letterSpacing: '0.04em' }}>
                   🌐 Discover &amp; Join More Squads
                 </div>
                 {filteredGroups

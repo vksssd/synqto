@@ -248,7 +248,7 @@ export const DiaryView: React.FC = () => {
           >
             {isSidebarCollapsed ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />}
             {isSidebarCollapsed && (
-              <span style={{ fontSize: '10px', fontWeight: 600 }}>Pages ({activeDiary?.entries.length || 0})</span>
+              <span style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600 }}>Pages ({activeDiary?.entries.length || 0})</span>
             )}
           </button>
 
@@ -259,7 +259,7 @@ export const DiaryView: React.FC = () => {
               className="btn btn-secondary btn-sm"
               onClick={() => setIsDiaryDropdownOpen(!isDiaryDropdownOpen)}
               style={{
-                fontSize: '11px',
+                fontSize: 'var(--font-size-sm)',
                 fontWeight: 700,
                 padding: '3px 8px',
                 display: 'flex',
@@ -294,7 +294,7 @@ export const DiaryView: React.FC = () => {
                   backdropFilter: 'var(--glass-blur)',
                 }}
               >
-                <div style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text-muted)', padding: '4px 6px' }}>
+                <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--text-muted)', padding: '4px 6px' }}>
                   NOTEBOOKS ({diaries.length})
                 </div>
 
@@ -317,10 +317,10 @@ export const DiaryView: React.FC = () => {
                       }}
                     >
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden' }}>
-                        <span style={{ fontSize: '14px' }}>{d.icon}</span>
+                        <span style={{ fontSize: 'var(--font-size-lg)' }}>{d.icon}</span>
                         <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-primary)' }}>{d.title}</div>
-                          <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>{d.entries.length} pages</div>
+                          <div style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--text-primary)' }}>{d.title}</div>
+                          <div style={{ fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)' }}>{d.entries.length} pages</div>
                         </div>
                       </div>
 
@@ -348,7 +348,7 @@ export const DiaryView: React.FC = () => {
                     type="button"
                     className="btn btn-ghost btn-sm"
                     onClick={() => setIsCreatingDiary(true)}
-                    style={{ width: '100%', marginTop: '6px', fontSize: '10px', color: 'var(--primary)' }}
+                    style={{ width: '100%', marginTop: '6px', fontSize: 'var(--font-size-xs)', color: 'var(--primary)' }}
                   >
                     <Plus size={11} style={{ marginRight: '4px' }} />
                     <span>Create Notebook</span>
@@ -365,7 +365,7 @@ export const DiaryView: React.FC = () => {
                           border: '1px solid var(--border-subtle)',
                           borderRadius: '4px',
                           padding: '2px 4px',
-                          fontSize: '12px',
+                          fontSize: 'var(--font-size-md)',
                         }}
                       >
                         {['📓', '💡', '🧠', '🎯', '🚀', '⚡', '📊', '🔥'].map((ico) => (
@@ -379,14 +379,14 @@ export const DiaryView: React.FC = () => {
                         value={newDiaryTitle}
                         onChange={(e) => setNewDiaryTitle(e.target.value)}
                         autoFocus
-                        style={{ fontSize: '10px', padding: '4px 6px', flex: 1 }}
+                        style={{ fontSize: 'var(--font-size-xs)', padding: '4px 6px', flex: 1 }}
                        aria-label="Notebook name"/>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '4px' }}>
-                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => setIsCreatingDiary(false)} style={{ fontSize: '9px', padding: '2px 6px' }}>
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => setIsCreatingDiary(false)} style={{ fontSize: 'var(--font-size-2xs)', padding: '2px 6px' }}>
                         Cancel
                       </button>
-                      <button type="submit" className="btn btn-primary btn-sm" disabled={!newDiaryTitle.trim()} style={{ fontSize: '9px', padding: '2px 6px' }}>
+                      <button type="submit" className="btn btn-primary btn-sm" disabled={!newDiaryTitle.trim()} style={{ fontSize: 'var(--font-size-2xs)', padding: '2px 6px' }}>
                         Save
                       </button>
                     </div>
@@ -404,7 +404,7 @@ export const DiaryView: React.FC = () => {
             className="btn btn-primary btn-sm"
             onClick={handleCreateNewEntry}
             style={{
-              fontSize: '11px',
+              fontSize: 'var(--font-size-sm)',
               fontWeight: 700,
               padding: '3px 8px',
               display: 'flex',
@@ -424,7 +424,7 @@ export const DiaryView: React.FC = () => {
               onClick={() => setExportMenuOpen(!exportMenuOpen)}
               title="Export as PDF / Markdown"
               style={{
-                fontSize: '10.5px',
+                fontSize: 'var(--font-size-xs)',
                 padding: '3px 7px',
                 display: 'flex',
                 alignItems: 'center',
@@ -459,7 +459,7 @@ export const DiaryView: React.FC = () => {
                   type="button"
                   onClick={handleExportPdf}
                   className="btn btn-ghost btn-sm"
-                  style={{ width: '100%', justifyContent: 'flex-start', fontSize: '10px', gap: '6px', color: 'var(--accent-emerald)' }}
+                  style={{ width: '100%', justifyContent: 'flex-start', fontSize: 'var(--font-size-xs)', gap: '6px', color: 'var(--accent-emerald)' }}
                 >
                   <Printer size={12} />
                   <span>Save as PDF (.pdf)</span>
@@ -468,7 +468,7 @@ export const DiaryView: React.FC = () => {
                   type="button"
                   onClick={handleExportMarkdown}
                   className="btn btn-ghost btn-sm"
-                  style={{ width: '100%', justifyContent: 'flex-start', fontSize: '10px', gap: '6px', color: 'var(--primary)' }}
+                  style={{ width: '100%', justifyContent: 'flex-start', fontSize: 'var(--font-size-xs)', gap: '6px', color: 'var(--primary)' }}
                 >
                   <FileText size={12} />
                   <span>Download Markdown (.md)</span>
@@ -503,14 +503,14 @@ export const DiaryView: React.FC = () => {
                 placeholder="Search pages..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                style={{ fontSize: '10px', padding: '3px 6px 3px 22px', width: '100%' }}
+                style={{ fontSize: 'var(--font-size-xs)', padding: '3px 6px 3px 22px', width: '100%' }}
                aria-label="Search pages"/>
             </div>
 
             {/* List of Pages */}
             <div style={{ flex: 1, overflowY: 'auto' }}>
               {filteredEntries.length === 0 ? (
-                <div style={{ padding: '20px 10px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '10px' }}>
+                <div style={{ padding: '20px 10px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 'var(--font-size-xs)' }}>
                   No pages found.
                 </div>
               ) : (
@@ -533,12 +533,12 @@ export const DiaryView: React.FC = () => {
                       }}
                     >
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2px' }}>
-                        <span style={{ fontSize: '8.5px', color: 'var(--text-muted)' }}>{dateStr}</span>
-                        <span style={{ fontSize: '10px' }} title={moodObj.label}>{moodObj.icon}</span>
+                        <span style={{ fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)' }}>{dateStr}</span>
+                        <span style={{ fontSize: 'var(--font-size-xs)' }} title={moodObj.label}>{moodObj.icon}</span>
                       </div>
                       <div
                         style={{
-                          fontSize: '11px',
+                          fontSize: 'var(--font-size-sm)',
                           fontWeight: isSelected ? 700 : 500,
                           color: isSelected ? 'var(--text-primary)' : 'var(--text-secondary)',
                           overflow: 'hidden',
@@ -549,7 +549,7 @@ export const DiaryView: React.FC = () => {
                         {entry.title || 'Untitled Page'}
                       </div>
                       {entry.tags.length > 0 && (
-                        <div style={{ fontSize: '8.5px', color: 'var(--primary)', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <div style={{ fontSize: 'var(--font-size-2xs)', color: 'var(--primary)', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {entry.tags.map((t) => `#${t}`).join(' ')}
                         </div>
                       )}
@@ -585,7 +585,7 @@ export const DiaryView: React.FC = () => {
                 onBlur={handleBlur}
                 placeholder="Page Title (e.g. Binary Search Tree Inversion)..."
                 style={{
-                  fontSize: '13.5px',
+                  fontSize: 'var(--font-size-md)',
                   fontWeight: 700,
                   color: 'var(--text-primary)',
                   background: 'transparent',
@@ -624,7 +624,7 @@ export const DiaryView: React.FC = () => {
                         alignItems: 'center',
                         gap: '4px',
                         padding: '3px 7px',
-                        fontSize: '9.5px',
+                        fontSize: 'var(--font-size-xs)',
                         fontWeight: 600,
                         borderRadius: '4px',
                         border: 'none',
@@ -665,7 +665,7 @@ export const DiaryView: React.FC = () => {
                 borderBottom: '1px solid var(--border-subtle)',
                 background: 'var(--bg-surface)',
                 flexWrap: 'wrap',
-                fontSize: '10px',
+                fontSize: 'var(--font-size-xs)',
                 justifyContent: 'space-between',
               }}
             >
@@ -680,7 +680,7 @@ export const DiaryView: React.FC = () => {
                     border: '1px solid var(--border-subtle)',
                     borderRadius: '4px',
                     padding: '2px 4px',
-                    fontSize: '9.5px',
+                    fontSize: 'var(--font-size-xs)',
                   }}
                 >
                   {MOODS.map((m) => (
@@ -702,7 +702,7 @@ export const DiaryView: React.FC = () => {
                       gap: '3px',
                       color: 'var(--primary)',
                       textDecoration: 'none',
-                      fontSize: '9.5px',
+                      fontSize: 'var(--font-size-xs)',
                     }}
                   >
                     <ExternalLink size={10} />
@@ -721,7 +721,7 @@ export const DiaryView: React.FC = () => {
                         color: 'var(--primary)',
                         padding: '1px 4px',
                         borderRadius: '3px',
-                        fontSize: '8.5px',
+                        fontSize: 'var(--font-size-2xs)',
                         display: 'inline-flex',
                         alignItems: 'center',
                         gap: '2px',
@@ -750,7 +750,7 @@ export const DiaryView: React.FC = () => {
                       borderRadius: '3px',
                       color: 'var(--text-primary)',
                       padding: '1px 4px',
-                      fontSize: '8.5px',
+                      fontSize: 'var(--font-size-2xs)',
                       width: '45px',
                     }}
                    aria-label="+tag"/>
@@ -758,7 +758,7 @@ export const DiaryView: React.FC = () => {
               </div>
 
               {/* Status & Word Counters */}
-              <div style={{ fontSize: '9px', color: 'var(--text-muted)', display: 'flex', gap: '6px', alignItems: 'center' }}>
+              <div style={{ fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)', display: 'flex', gap: '6px', alignItems: 'center' }}>
                 <span>{wordCount} words</span>
                 <span>•</span>
                 <span>{charCount} chars</span>
@@ -797,7 +797,7 @@ export const DiaryView: React.FC = () => {
                       onClick={() => insertMarkdownSnippet('**', '**')}
                       title="Bold"
                       className="btn btn-ghost btn-sm"
-                      style={{ padding: '2px 5px', fontSize: '9.5px', fontWeight: 700 }}
+                      style={{ padding: '2px 5px', fontSize: 'var(--font-size-xs)', fontWeight: 700 }}
                     >
                       B
                     </button>
@@ -806,7 +806,7 @@ export const DiaryView: React.FC = () => {
                       onClick={() => insertMarkdownSnippet('*', '*')}
                       title="Italic"
                       className="btn btn-ghost btn-sm"
-                      style={{ padding: '2px 5px', fontSize: '9.5px', fontStyle: 'italic' }}
+                      style={{ padding: '2px 5px', fontSize: 'var(--font-size-xs)', fontStyle: 'italic' }}
                     >
                       I
                     </button>
@@ -815,7 +815,7 @@ export const DiaryView: React.FC = () => {
                       onClick={() => insertMarkdownSnippet('`', '`')}
                       title="Inline Code"
                       className="btn btn-ghost btn-sm"
-                      style={{ padding: '2px 5px', fontSize: '9.5px', fontFamily: 'monospace' }}
+                      style={{ padding: '2px 5px', fontSize: 'var(--font-size-xs)', fontFamily: 'monospace' }}
                     >
                       &lt;/&gt;
                     </button>
@@ -824,7 +824,7 @@ export const DiaryView: React.FC = () => {
                       onClick={() => insertMarkdownSnippet('```python\n', '\n```')}
                       title="Code Block"
                       className="btn btn-ghost btn-sm"
-                      style={{ padding: '2px 5px', fontSize: '9.5px' }}
+                      style={{ padding: '2px 5px', fontSize: 'var(--font-size-xs)' }}
                     >
                       <Code size={11} />
                     </button>
@@ -833,7 +833,7 @@ export const DiaryView: React.FC = () => {
                       onClick={() => insertMarkdownSnippet('- [ ] ')}
                       title="Checklist"
                       className="btn btn-ghost btn-sm"
-                      style={{ padding: '2px 5px', fontSize: '9.5px' }}
+                      style={{ padding: '2px 5px', fontSize: 'var(--font-size-xs)' }}
                     >
                       <CheckSquare size={11} />
                     </button>
@@ -842,7 +842,7 @@ export const DiaryView: React.FC = () => {
                       onClick={() => insertMarkdownSnippet('### ')}
                       title="Heading"
                       className="btn btn-ghost btn-sm"
-                      style={{ padding: '2px 5px', fontSize: '9.5px' }}
+                      style={{ padding: '2px 5px', fontSize: 'var(--font-size-xs)' }}
                     >
                       H3
                     </button>
@@ -851,7 +851,7 @@ export const DiaryView: React.FC = () => {
                       onClick={() => insertMarkdownSnippet('- ')}
                       title="Bullet List"
                       className="btn btn-ghost btn-sm"
-                      style={{ padding: '2px 5px', fontSize: '9.5px' }}
+                      style={{ padding: '2px 5px', fontSize: 'var(--font-size-xs)' }}
                     >
                       <List size={11} />
                     </button>
@@ -859,7 +859,7 @@ export const DiaryView: React.FC = () => {
                     <div style={{ width: '1px', height: '12px', background: 'var(--border-subtle)', margin: '0 2px' }} />
 
                     {/* DSA & System Design Note Templates */}
-                    <span style={{ fontSize: '9px', color: '#818cf8', fontWeight: 700, marginLeft: '2px' }}>⚡ Templates:</span>
+                    <span style={{ fontSize: 'var(--font-size-2xs)', color: '#818cf8', fontWeight: 700, marginLeft: '2px' }}>⚡ Templates:</span>
 
                     <button
                       type="button"
@@ -871,7 +871,7 @@ export const DiaryView: React.FC = () => {
                       title="Insert LeetCode / DSA Solution Blueprint"
                       style={{
                         padding: '2px 6px',
-                        fontSize: '9px',
+                        fontSize: 'var(--font-size-2xs)',
                         fontWeight: 600,
                         borderRadius: '4px',
                         border: '1px solid rgba(99, 102, 241, 0.3)',
@@ -894,7 +894,7 @@ export const DiaryView: React.FC = () => {
                       title="Insert System Design Interview Framework"
                       style={{
                         padding: '2px 6px',
-                        fontSize: '9px',
+                        fontSize: 'var(--font-size-2xs)',
                         fontWeight: 600,
                         borderRadius: '4px',
                         border: '1px solid rgba(16, 185, 129, 0.3)',
@@ -917,7 +917,7 @@ export const DiaryView: React.FC = () => {
                       title="Insert Algorithm Cheat Sheet (Binary Search & Sliding Window)"
                       style={{
                         padding: '2px 6px',
-                        fontSize: '9px',
+                        fontSize: 'var(--font-size-2xs)',
                         fontWeight: 600,
                         borderRadius: '4px',
                         border: '1px solid rgba(245, 158, 11, 0.3)',
@@ -945,7 +945,7 @@ export const DiaryView: React.FC = () => {
                       border: 'none',
                       padding: '12px',
                       color: 'var(--text-primary)',
-                      fontSize: '12px',
+                      fontSize: 'var(--font-size-md)',
                       fontFamily: 'var(--font-mono)',
                       lineHeight: '1.6',
                       resize: 'none',
@@ -977,8 +977,8 @@ export const DiaryView: React.FC = () => {
         ) : (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px', color: 'var(--text-muted)' }}>
             <BookOpen size={28} color="var(--text-dim)" />
-            <div style={{ fontSize: '12px', fontWeight: 600 }}>This notebook is currently empty</div>
-            <button type="button" className="btn btn-primary btn-sm" onClick={handleCreateNewEntry} style={{ fontSize: '11px' }}>
+            <div style={{ fontSize: 'var(--font-size-md)', fontWeight: 600 }}>This notebook is currently empty</div>
+            <button type="button" className="btn btn-primary btn-sm" onClick={handleCreateNewEntry} style={{ fontSize: 'var(--font-size-sm)' }}>
               <Plus size={12} style={{ marginRight: '4px' }} />
               <span>Write First Page</span>
             </button>

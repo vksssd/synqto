@@ -94,8 +94,8 @@ export const PasswordPromptModal: React.FC<PasswordPromptModalProps> = ({
             {group.avatar}
           </div>
           <div>
-            <div style={{ fontWeight: 600, color: '#f8fafc', fontSize: '13px' }}>{group.name}</div>
-            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{group.topicTag}</div>
+            <div style={{ fontWeight: 600, color: '#f8fafc', fontSize: 'var(--font-size-md)' }}>{group.name}</div>
+            <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>{group.topicTag}</div>
           </div>
         </div>
 
@@ -107,7 +107,7 @@ export const PasswordPromptModal: React.FC<PasswordPromptModalProps> = ({
               background: 'rgba(244, 63, 94, 0.15)',
               border: '1px solid rgba(244, 63, 94, 0.3)',
               color: '#fca5a5',
-              fontSize: '11px',
+              fontSize: 'var(--font-size-sm)',
             }}
           >
             {errorMsg}
@@ -116,7 +116,7 @@ export const PasswordPromptModal: React.FC<PasswordPromptModalProps> = ({
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
           <div>
-            <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
+            <label style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
               Enter Squad Password
             </label>
             <div style={{ position: 'relative' }}>
@@ -155,7 +155,7 @@ export const PasswordPromptModal: React.FC<PasswordPromptModalProps> = ({
               display: 'flex',
               alignItems: 'center',
               gap: '4px',
-              fontSize: '10px',
+              fontSize: 'var(--font-size-xs)',
               color: '#c4b5fd',
             }}
           >

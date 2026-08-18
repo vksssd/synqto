@@ -232,7 +232,7 @@ export const CodeTogether: React.FC<CodeTogetherProps> = ({ currentRoomId, isCom
             alignItems: 'center',
             gap: '6px',
             padding: '5px 8px',
-            fontSize: '10px',
+            fontSize: 'var(--font-size-xs)',
             borderBottom: '1px solid var(--border-subtle)',
             background: pageEditorAttached ? 'rgba(16,185,129,0.10)' : 'rgba(255,255,255,0.03)',
             color: pageEditorAttached ? '#6ee7b7' : 'var(--text-muted)',

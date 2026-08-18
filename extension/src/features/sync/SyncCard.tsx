@@ -51,8 +51,8 @@ export const SyncCard: React.FC = () => {
             border: '1px solid var(--border-subtle)',
           }}
         >
-          <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Assigned Role</div>
-          <div style={{ fontWeight: 600, fontSize: '12px', color: '#f8fafc', marginTop: '2px' }}>
+          <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)' }}>Assigned Role</div>
+          <div style={{ fontWeight: 600, fontSize: 'var(--font-size-md)', color: '#f8fafc', marginTop: '2px' }}>
             {state.isLeader ? '👑 Cluster Leader' : '⚡ Regular Peer'}
           </div>
         </div>
@@ -66,10 +66,10 @@ export const SyncCard: React.FC = () => {
             border: '1px solid var(--border-subtle)',
           }}
         >
-          <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+          <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)' }}>
             {state.isLeader ? 'Cluster Peers' : 'Upstream Leader'}
           </div>
-          <div style={{ fontWeight: 600, fontSize: '12px', color: '#f8fafc', marginTop: '2px' }}>
+          <div style={{ fontWeight: 600, fontSize: 'var(--font-size-md)', color: '#f8fafc', marginTop: '2px' }}>
             {state.isLeader
               ? `${state.clusterPeers.length} Peers Connected`
               : state.assignedLeader
@@ -84,7 +84,7 @@ export const SyncCard: React.FC = () => {
         <div
           style={{
             marginTop: '8px',
-            fontSize: '11px',
+            fontSize: 'var(--font-size-sm)',
             color: 'var(--text-secondary)',
             background: 'rgba(139, 92, 246, 0.1)',
             padding: '6px 8px',

@@ -40,7 +40,7 @@ export const BoardAndDiaryContainer: React.FC = () => {
               alignItems: 'center',
               gap: '5px',
               padding: '4px 10px',
-              fontSize: '11px',
+              fontSize: 'var(--font-size-sm)',
               fontWeight: 700,
               borderRadius: '4px',
               border: 'none',
@@ -62,7 +62,7 @@ export const BoardAndDiaryContainer: React.FC = () => {
               alignItems: 'center',
               gap: '5px',
               padding: '4px 10px',
-              fontSize: '11px',
+              fontSize: 'var(--font-size-sm)',
               fontWeight: 700,
               borderRadius: '4px',
               border: 'none',
@@ -77,7 +77,7 @@ export const BoardAndDiaryContainer: React.FC = () => {
           </button>
         </div>
 
-        <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 500 }}>
+        <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', fontWeight: 500 }}>
           {activeView === 'whiteboard' ? 'Drawing & Architecture Workspace' : 'Private Offline Local Storage Journal'}
         </div>
       </div>

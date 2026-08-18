@@ -90,7 +90,7 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
       <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '400px' }} {...dialogProps} aria-labelledby="create-squad-title">
         {/* Header */}
         <div className="glass-card-header" style={{ marginBottom: 4 }}>
-          <div className="glass-card-title" style={{ fontSize: '15px' }}>
+          <div className="glass-card-title" style={{ fontSize: 'var(--font-size-lg)' }}>
             <Sparkles size={16} color="var(--primary)" />
             <span id="create-squad-title">Create Study Squad</span>
           </div>
@@ -99,7 +99,7 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
           </button>
         </div>
 
-        <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '8px' }}>
+        <p style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)', marginBottom: '8px' }}>
           Form an instant serverless P2P study room. All connections and audio are peer-to-peer.
         </p>
 
@@ -111,7 +111,7 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
               background: 'rgba(244, 63, 94, 0.15)',
               border: '1px solid rgba(244, 63, 94, 0.3)',
               color: '#fca5a5',
-              fontSize: '11px',
+              fontSize: 'var(--font-size-sm)',
             }}
           >
             {errorMsg}
@@ -121,7 +121,7 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           {/* Avatar & Name Row */}
           <div>
-            <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
+            <label style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
               Squad Name & Icon
             </label>
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -194,7 +194,7 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                     background: avatar === emoji ? 'rgba(99, 102, 241, 0.25)' : 'rgba(255, 255, 255, 0.04)',
                     border: avatar === emoji ? '1px solid var(--primary)' : '1px solid var(--border-subtle)',
                     cursor: 'pointer',
-                    fontSize: '14px',
+                    fontSize: 'var(--font-size-lg)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -209,7 +209,7 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
 
           {/* Topic Selector */}
           <div>
-            <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
+            <label style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
               Topic / Category
             </label>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', marginBottom: '6px' }}>
@@ -236,7 +236,7 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
 
           {/* Description (Optional) */}
           <div>
-            <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
+            <label style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
               Group Goal / Description (Optional)
             </label>
             <input
@@ -265,10 +265,10 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 {isPrivate ? <Lock size={15} color="var(--accent-purple)" /> : <Globe size={15} color="var(--text-secondary)" />}
                 <div>
-                  <div style={{ fontWeight: 600, fontSize: '12px', color: '#f8fafc' }}>
+                  <div style={{ fontWeight: 600, fontSize: 'var(--font-size-md)', color: '#f8fafc' }}>
                     {isPrivate ? 'Password Protected Group' : 'Open Public Group'}
                   </div>
-                  <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                  <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)' }}>
                     {isPrivate
                       ? 'Requires a secret passcode to discover & enter'
                       : 'Anyone with the name can discover & join'}
@@ -344,7 +344,7 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                     display: 'flex',
                     alignItems: 'center',
                     gap: '4px',
-                    fontSize: '10px',
+                    fontSize: 'var(--font-size-xs)',
                     color: '#c4b5fd',
                   }}
                 >

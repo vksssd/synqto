@@ -151,7 +151,11 @@ export class TutorService {
 
   public broadcastCursor(xPct: number, yPct: number, currentRoomId: string): void {
     const now = Date.now();
-    if (now - this.lastCursorSentTime < 40) return;
+    // 40ms was 25 packets/sec/peer, and each one fans out to EVERY peer in the room — so a
+    // 20-peer room with five people moving the mouse generated ~2,500 packets/sec of pure
+    // pointer noise. 75ms (~13/sec) is still visually smooth for a remote cursor, which the
+    // eye integrates anyway, at roughly half the traffic.
+    if (now - this.lastCursorSentTime < 75) return;
     this.lastCursorSentTime = now;
 
     const myIdentity = this.identityService.getCachedIdentity();

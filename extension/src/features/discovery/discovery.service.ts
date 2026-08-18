@@ -113,7 +113,23 @@ export class DiscoveryService {
       lastSeen: Date.now(),
     };
     this.onlinePeers.set(from.peerId, updated);
-    this.emitChange();
+
+    // Only re-render when something a viewer can actually see changed.
+    //
+    // This used to emit on every ping. With a 5s heartbeat and 20 peers that is four
+    // subscriber notifications per second — each one re-rendering the peer list — purely to
+    // record a new `lastSeen` timestamp that is never displayed. Liveness is already
+    // handled by the prune timer, so a heartbeat carrying identical status is silent.
+    const visiblyChanged =
+      !existing ||
+      existing.status !== updated.status ||
+      existing.problemTitle !== updated.problemTitle ||
+      existing.problemUrl !== updated.problemUrl ||
+      existing.identity?.nickname !== updated.identity?.nickname;
+
+    if (visiblyChanged) {
+      this.emitChange();
+    }
   }
 
   public sendWave(targetPeerId?: string) {
@@ -152,18 +168,47 @@ export class DiscoveryService {
     this.network.send(targetPeerId, 'presence:ping', payload);
   }
 
-  private startTimers() {
-    // Ping every 5s
-    this.heartbeatTimer = setInterval(() => {
-      this.sendPing();
-    }, 5000);
+  /**
+   * Heartbeat period, scaled to room size.
+   *
+   * Presence is a full mesh broadcast, so its cost is O(N^2) in the room: a fixed 5s period
+   * meant 20 peers spent ~76 packets/sec on keepalive alone before anyone typed anything,
+   * competing with chat and cursors for the same send buffers. Widening the period with N
+   * keeps aggregate presence traffic roughly linear.
+   *
+   * The prune threshold is derived from this (see PRUNE_MULTIPLIER) so peers are never
+   * pruned faster than their peers can plausibly ping.
+   */
+  private static readonly BASE_HEARTBEAT_MS = 5000;
+  private static readonly MAX_HEARTBEAT_MS = 20000;
+  private static readonly PRUNE_MULTIPLIER = 4;
 
-    // Prune stale peers every 5s (peers not seen in 20s)
+  private heartbeatIntervalMs(): number {
+    const n = Math.max(1, this.onlinePeers.size);
+    return Math.min(
+      DiscoveryService.MAX_HEARTBEAT_MS,
+      DiscoveryService.BASE_HEARTBEAT_MS * Math.max(1, Math.ceil(n / 5))
+    );
+  }
+
+  private startTimers() {
+    // Self-rescheduling rather than setInterval: the period depends on the current peer
+    // count, which changes as people join and leave.
+    const scheduleHeartbeat = () => {
+      this.heartbeatTimer = setTimeout(() => {
+        this.sendPing();
+        scheduleHeartbeat();
+      }, this.heartbeatIntervalMs());
+    };
+    scheduleHeartbeat();
+
+    // Prune peers that have gone quiet for several heartbeat periods.
     this.pruneTimer = setInterval(() => {
       const now = Date.now();
+      const staleAfter = this.heartbeatIntervalMs() * DiscoveryService.PRUNE_MULTIPLIER;
       let changed = false;
       this.onlinePeers.forEach((peer, id) => {
-        if (now - peer.lastSeen > 20000) {
+        if (now - peer.lastSeen > staleAfter) {
           this.onlinePeers.delete(id);
           changed = true;
         }
@@ -205,8 +250,11 @@ export class DiscoveryService {
   }
 
   public destroy() {
-    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+    // heartbeatTimer is a self-rescheduling setTimeout, not an interval.
+    if (this.heartbeatTimer) clearTimeout(this.heartbeatTimer);
     if (this.pruneTimer) clearInterval(this.pruneTimer);
+    this.heartbeatTimer = null;
+    this.pruneTimer = null;
     this.network.broadcast('presence:leave', {});
     this.onlinePeers.clear();
   }

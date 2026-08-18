@@ -893,9 +893,15 @@ export class WhiteboardService {
       this.savePersonalNotebook();
     } else {
       this.saveCollabNotebook();
-      strokes.forEach((s) => {
-        this.network.broadcast('whiteboard:stroke', { pageId: page.id, stroke: s });
-      });
+      // Restoring an undo/clear used to broadcast EVERY stroke as its own packet, so a
+
+      // 500-stroke board emitted 500 packets in one burst — the single biggest amplifier
+
+      // of client send pressure in the app. whiteboard:strokes_batch already exists and is
+
+      // handled by peers, so the whole restore travels as one message.
+
+      this.network.broadcast('whiteboard:strokes_batch', { pageId: page.id, strokes: strokes }, { channelPriority: 'bulk' });
     }
 
     strokes.forEach((s) => {
@@ -939,9 +945,15 @@ export class WhiteboardService {
           this.savePersonalNotebook();
         } else {
           this.saveCollabNotebook();
-          page.strokes.forEach((s) => {
-            this.network.broadcast('whiteboard:stroke', { pageId: page.id, stroke: s });
-          });
+          // Restoring an undo/clear used to broadcast EVERY stroke as its own packet, so a
+
+          // 500-stroke board emitted 500 packets in one burst — the single biggest amplifier
+
+          // of client send pressure in the app. whiteboard:strokes_batch already exists and is
+
+          // handled by peers, so the whole restore travels as one message.
+
+          this.network.broadcast('whiteboard:strokes_batch', { pageId: page.id, strokes: page.strokes }, { channelPriority: 'bulk' });
         }
         page.strokes.forEach((s) => {
           this.broadcastLocal('stroke', { stroke: s, pageId: page.id });

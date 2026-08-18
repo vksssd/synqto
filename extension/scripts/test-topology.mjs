@@ -757,6 +757,80 @@ test('TransportRouter drops stale control packets but preserves stale applicatio
 });
 
 // ─── 13. Dual-Path Draining Deduplication & Failure Resilience ───
+test('TIER1/TIER2 never silently relay app traffic when the P2P path is not up yet', () => {
+  // The bug this locks out: for the first seconds of every room WebRTC is still
+  // negotiating, so the P2P sender returns false for everything. The router used to fall
+  // through to the server relay, so a TWO-PEER room — which is supposed to keep the server
+  // out of its data path entirely — pushed all of its chat, presence, cursor and stroke
+  // traffic into the shared server queue. That is what produced "send buffer full".
+  let relayBroadcasts = 0;
+  let relayUnicasts = 0;
+  const mockRelay = {
+    broadcast: () => { relayBroadcasts++; return true; },
+    sendTo: () => { relayUnicasts++; return true; },
+    onPacket: () => () => {},
+  };
+
+  const router = new TransportRouter(mockRelay);
+  router.updateView({
+    roomId: 'room-1', tier: 'TIER1_FULL_MESH', phase: 'STABLE', epoch: 1,
+    generation: 1, membershipVersion: 1, leaders: [], relayAvailable: true, timestamp: Date.now(),
+  });
+  // P2P not up yet — exactly the WebRTC negotiation window.
+  router.bindP2PSender(() => false);
+
+  const mk = (type) => createPacket(type, { peerId: 'a', nickname: 'A', avatar: '', color: '' }, 'room-1', {});
+
+  router.broadcast(mk('chat:message'));
+  router.broadcast(mk('presence:ping'));
+  router.broadcast(mk('canvas:cursor'));
+
+  assert.strictEqual(relayBroadcasts, 0, 'TIER1 must not relay app traffic when P2P is unavailable');
+  assert.strictEqual(relayUnicasts, 0, 'TIER1 must not relay unicast when P2P is unavailable');
+
+  const stats = router.getDeferralStats();
+  // Chat is reliable => deferred. Presence and cursor are best-effort => dropped locally,
+  // because a newer one supersedes them within milliseconds.
+  assert.strictEqual(stats.pending, 1, 'reliable traffic should be deferred, not relayed');
+  assert.strictEqual(stats.droppedBestEffort, 2, 'best-effort traffic should be dropped locally');
+});
+
+test('Deferred traffic flushes once the P2P path comes up, without touching the relay', () => {
+  let relayCalls = 0;
+  const mockRelay = {
+    broadcast: () => { relayCalls++; return true; },
+    sendTo: () => { relayCalls++; return true; },
+    onPacket: () => () => {},
+  };
+
+  const router = new TransportRouter(mockRelay);
+  const view = {
+    roomId: 'room-1', tier: 'TIER1_FULL_MESH', phase: 'STABLE', epoch: 1,
+    generation: 1, membershipVersion: 1, leaders: [], relayAvailable: true, timestamp: Date.now(),
+  };
+  router.updateView(view);
+
+  let p2pUp = false;
+  const sent = [];
+  router.bindP2PSender((pkt) => {
+    if (!p2pUp) return false;
+    sent.push(pkt.type);
+    return true;
+  });
+
+  const mk = (type) => createPacket(type, { peerId: 'a', nickname: 'A', avatar: '', color: '' }, 'room-1', {});
+  router.broadcast(mk('chat:message'));
+  assert.strictEqual(router.getDeferralStats().pending, 1);
+
+  // Mesh connects; a topology view update is the natural flush trigger.
+  p2pUp = true;
+  router.updateView({ ...view, membershipVersion: 2 });
+
+  assert.strictEqual(router.getDeferralStats().pending, 0, 'queue should drain once P2P is usable');
+  assert.deepStrictEqual(sent, ['chat:message'], 'the deferred chat message should be delivered over P2P');
+  assert.strictEqual(relayCalls, 0, 'flushing must never fall back to the server relay');
+});
+
 console.log('\n📦 Section 13: Dual-Path Draining Deduplication & Failure Resilience');
 
 test('Dual delivery during draining generates exactly one application event', () => {

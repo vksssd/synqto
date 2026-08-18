@@ -83,7 +83,8 @@ export const IdentityCard: React.FC<IdentityCardProps> = ({ identity, isLeader =
             onClick={handleRegenerate}
             title="Reroll Avatar & Nickname"
             style={{ width: '24px', height: '24px', padding: 0 }}
-          >
+          
+            aria-label="Reroll Avatar & Nickname">
             <RefreshCw size={12} />
           </button>
           <div

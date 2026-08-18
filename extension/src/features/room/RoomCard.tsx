@@ -99,7 +99,8 @@ export const RoomCard: React.FC<RoomCardProps> = ({
               style={{ width: '24px', height: '24px' }}
               onClick={onLeaveRoom}
               title="Leave Room"
-            >
+            
+            aria-label="Leave Room">
               <LogOut size={13} />
             </button>
           )}

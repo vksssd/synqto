@@ -1492,8 +1492,23 @@ export const WhiteboardCanvas: React.FC = () => {
     };
 
     handleResize();
+
+    // A window 'resize' event does NOT fire when the side panel itself is resized by
+    // dragging its edge, nor when the canvas container changes size because surrounding UI
+    // appeared or collapsed. In those cases the backing store kept its old dimensions while
+    // the CSS box changed, so the board rendered blurry AND pointer coordinates no longer
+    // matched what was drawn. Observing the container covers every case, including the
+    // window resize the old listener handled.
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined' && containerRef.current) {
+      ro = new ResizeObserver(() => handleResize());
+      ro.observe(containerRef.current);
+    }
     window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener('resize', handleResize);
+    };
   }, [redrawCanvas, whiteboardService, sizeMode, customHeight]);
 
   // Subscribe to strokes
@@ -2279,7 +2294,8 @@ export const WhiteboardCanvas: React.FC = () => {
             onClick={handleClearCanvas}
             title="Clear Page (Can be Undone)"
             style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', padding: '2px' }}
-          >
+          
+            aria-label="Clear Page (Can be Undone)">
             <Trash2 size={11} />
           </button>
 
@@ -2297,7 +2313,8 @@ export const WhiteboardCanvas: React.FC = () => {
             onClick={handleExportPNG}
             title="Save PNG Image"
             style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '2px' }}
-          >
+          
+            aria-label="Save PNG Image">
             <Download size={11} />
           </button>
         </div>
@@ -2756,7 +2773,8 @@ export const WhiteboardCanvas: React.FC = () => {
                   alignItems: 'center',
                   gap: '3px',
                 }}
-              >
+              
+            aria-label="Delete Selection (Del)">
                 <Trash2 size={10} />
               </button>
               <button
@@ -2785,10 +2803,21 @@ export const WhiteboardCanvas: React.FC = () => {
           onTouchStart={handlePointerDown}
           onTouchMove={handlePointerMove}
           onTouchEnd={handlePointerUp}
+          // Without an explicit role and label the board is an unlabelled graphic to a
+          // screen reader. It is also focusable so keyboard users can reach the surface and
+          // use the tool shortcuts that are already bound to window keydown.
+          role="img"
+          aria-label={`Collaborative whiteboard, ${activeTool} tool selected`}
+          tabIndex={0}
           style={{
             width: '100%',
             height: '100%',
             display: 'block',
+            // Drawing by touch previously also scrolled and pinch-zoomed the page, because
+            // the browser's default touch gestures were never suppressed — which made the
+            // board close to unusable on a touchscreen or trackpad-with-touch device.
+            touchAction: 'none',
+            overscrollBehavior: 'contain',
             cursor: activeTool === 'hand' ? (isPanning ? 'grabbing' : 'grab') : activeTool === 'select' ? 'default' : activeTool === 'text' ? 'text' : activeTool === 'eraser' ? 'cell' : 'crosshair',
           }}
         />

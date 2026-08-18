@@ -133,7 +133,8 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({
                 style={{ background: 'rgba(244, 63, 94, 0.2)', borderColor: 'rgba(244, 63, 94, 0.4)' }}
                 onClick={handleToggleVoice}
                 title="Leave Voice"
-              >
+              
+            aria-label="Leave Voice">
                 <PhoneOff size={14} color="#f43f5e" />
               </button>
             </>

@@ -704,7 +704,8 @@ const handleSend = () => {
           onClick={insertSpoiler}
           title="Insert Spoiler Blur ||text||"
           style={{ width: '30px', height: '30px', flexShrink: 0 }}
-        >
+        
+            aria-label="Insert Spoiler Blur ||text||">
           <EyeOff size={14} color="var(--text-muted)" />
         </button>
 

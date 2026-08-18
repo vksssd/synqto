@@ -1383,7 +1383,8 @@ export const DiaryWhiteboardCanvas: React.FC<{
               cursor: 'pointer',
               padding: '2px 4px',
             }}
-          >
+          
+            aria-label="Clear Sketchpad">
             <Trash2 size={12} />
           </button>
         </div>
@@ -1635,7 +1636,8 @@ export const DiaryWhiteboardCanvas: React.FC<{
                   alignItems: 'center',
                   gap: '3px',
                 }}
-              >
+              
+            aria-label="Delete Selection (Del)">
                 <Trash2 size={10} />
               </button>
               <button

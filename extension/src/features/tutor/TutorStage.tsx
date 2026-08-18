@@ -768,7 +768,8 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                     style={{ width: '22px', height: '22px', padding: 0, background: 'rgba(0,0,0,0.4)' }}
                     onClick={togglePictureInPicture}
                     title="Pop out in Picture-in-Picture window"
-                  >
+                  
+            aria-label="Pop out in Picture-in-Picture window">
                     <Tv size={11} />
                   </button>
 
@@ -778,7 +779,8 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                     style={{ width: '22px', height: '22px', padding: 0, background: 'rgba(0,0,0,0.4)' }}
                     onClick={handlePopoutWindow}
                     title="Pop out in standalone full window"
-                  >
+                  
+            aria-label="Pop out in standalone full window">
                     <ExternalLink size={11} />
                   </button>
 

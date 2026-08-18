@@ -161,7 +161,8 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                     padding: 0,
                   }}
                   title="Randomize Icon"
-                >
+                
+            aria-label="Randomize Icon">
                   <Dices size={10} />
                 </button>
               </div>

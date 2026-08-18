@@ -45,6 +45,14 @@ export class PacketPipeline {
     });
   }
 
+  /**
+   * Updates the identity stamped on outgoing packets without resetting pipeline state.
+   * peerId is stable across a rename, so sequence numbers and pending transfers stay valid.
+   */
+  public updateIdentity(identity: PeerIdentity): void {
+    this.myIdentity = identity;
+  }
+
   public init(identity: PeerIdentity, roomId: RoomId): void {
     this.myIdentity = identity;
     this.currentRoomId = roomId;

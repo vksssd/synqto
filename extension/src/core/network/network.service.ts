@@ -198,6 +198,26 @@ export class NetworkService {
     return this.myIdentity;
   }
 
+  /**
+   * Refreshes the identity stamped on OUTGOING packets, without touching the mesh.
+   *
+   * Identity was captured once at init() and cached in three places (here, PacketPipeline and
+   * TopologyService). Renaming yourself, or changing your avatar/colour, updated local UI only:
+   * every packet you sent afterwards still carried the OLD nickname, so peers kept seeing the
+   * previous name in chat, presence and cursors until you happened to switch rooms and trigger
+   * a re-init.
+   *
+   * Deliberately NOT a re-init: peerId is stable across a rename (IdentityService preserves
+   * it), so tearing down and rebuilding WebRTC connections would drop a live session to change
+   * a display name.
+   */
+  public updateIdentity(identity: PeerIdentity): void {
+    if (!identity) return;
+    this.myIdentity = identity;
+    this.topology.updateIdentity(identity);
+    this.packetPipeline.updateIdentity(identity);
+  }
+
   private dispatchPacket(packet: NetworkPacket) {
     // Merge the sender's hybrid timestamp BEFORE any handler runs.
     //

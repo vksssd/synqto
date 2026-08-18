@@ -1,6 +1,11 @@
 // ─── WebRTC Peer Connection & Dual-Channel Mesh Service (Perfect Negotiation) ───
 
 import { NetworkPacket } from './packet';
+import {
+  PeerIdentityStore,
+  detectCandidateKind,
+  extractFingerprint,
+} from './peer-identity-store';
 
 export interface PeerConnectionWrapper {
   peerId: string;
@@ -41,6 +46,13 @@ export class WebRTCService {
   private static readonly MAX_PENDING_ICE_PER_PEER = 40;
   private static readonly MAX_ICE_PEERS = 200;
   private iceDropped = 0;
+
+  /** Stable DTLS identity, loaded once by prewarmIdentity(). */
+  private cachedCertificate: RTCCertificate | null = null;
+  /** Peers known to require TURN, so ICE can skip the doomed direct attempt. */
+  private forceRelayPeers: Set<string> = new Set();
+  private identityStore = PeerIdentityStore.getInstance();
+  private fingerprintMismatches = 0;
 
   // Distinct local media tracks
   private localAudioTrack: MediaStreamTrack | null = null;
@@ -115,6 +127,36 @@ export class WebRTCService {
 
   public setMyPeerId(peerId: string) {
     this.myPeerId = peerId;
+  }
+
+  /**
+   * Loads the persistent DTLS identity before any connection is built.
+   *
+   * Called from init rather than lazily inside createPeerConnection, because applying a
+   * certificate requires it at construction time and createPeerConnection cannot be made
+   * async without rippling through every caller. Loading it up front means the only
+   * connections that miss it are ones attempted in the first few milliseconds of a cold
+   * start, which fall back to an ephemeral identity and still work.
+   */
+  public async prewarmIdentity(): Promise<void> {
+    try {
+      this.cachedCertificate = await this.identityStore.getCertificate();
+    } catch {
+      this.cachedCertificate = null;
+    }
+  }
+
+  /** Marks peers that have historically needed TURN, so ICE can skip direct attempts. */
+  public async loadRelayHints(peerIds: string[]): Promise<void> {
+    for (const peerId of peerIds) {
+      try {
+        if (await this.identityStore.shouldForceRelay(peerId)) {
+          this.forceRelayPeers.add(peerId);
+        }
+      } catch {
+        // A hint is an optimisation; failing to load one must never block connecting.
+      }
+    }
   }
 
   public onRemoteStream(fn: (peerId: string, stream: MediaStream) => void): () => void {
@@ -478,10 +520,24 @@ export class WebRTCService {
   }
 
   private createPeerConnection(remotePeerId: string): RTCPeerConnection {
-    const pc = new RTCPeerConnection({
+    // The persistent certificate is applied when it is already loaded. It cannot be awaited
+    // here without making every caller async, and a connection built before the certificate
+    // resolves is still perfectly valid — it just uses an ephemeral identity for that one
+    // session. prewarmIdentity() loads it during init so that is a cold-start-only case.
+    const config: RTCConfiguration = {
       iceServers: this.iceServers,
       iceCandidatePoolSize: 2,
-    });
+    };
+    if (this.cachedCertificate) {
+      config.certificates = [this.cachedCertificate];
+    }
+    if (this.forceRelayPeers.has(remotePeerId)) {
+      // This peer has needed TURN more than once. Their NATs have not changed, so attempting
+      // direct connectivity again would spend the full ICE timeout rediscovering that.
+      config.iceTransportPolicy = 'relay';
+    }
+
+    const pc = new RTCPeerConnection(config);
 
     try {
       pc.addTransceiver(
@@ -513,6 +569,15 @@ export class WebRTCService {
 
     pc.onconnectionstatechange = () => {
       const state = pc.connectionState;
+
+      if (state === 'connected') {
+        // Record how this connection was actually established, so the next attempt to this
+        // peer can start from what worked rather than rediscovering it.
+        void this.recordConnectionOutcome(remotePeerId, pc);
+      } else if (state === 'failed') {
+        void this.identityStore.recordFailure(remotePeerId);
+      }
+
       let status: 'connecting' | 'connected' | 'disconnected' | 'failed' = 'connecting';
       if (state === 'connected') status = 'connected';
       else if (state === 'disconnected') status = 'disconnected';
@@ -730,6 +795,47 @@ export class WebRTCService {
   public closeAll() {
     const peerIds = Array.from(this.connections.keys());
     peerIds.forEach((id) => this.closeConnection(id));
+  }
+
+  /**
+   * Persists the candidate type and DTLS fingerprint of a successful connection.
+   *
+   * The fingerprint check is identity pinning: a peer ID presenting a different key than we
+   * recorded is either a genuine new install or an impersonation attempt, and the two are
+   * indistinguishable from here. It is counted rather than enforced — refusing the
+   * connection would lock out anyone who reinstalled or cleared storage, which is a far more
+   * common event than an attack. Surfacing it is the useful part.
+   */
+  private async recordConnectionOutcome(remotePeerId: string, pc: RTCPeerConnection): Promise<void> {
+    try {
+      const kind = await detectCandidateKind(pc);
+      const fingerprint = extractFingerprint(pc.remoteDescription?.sdp);
+
+      if (fingerprint && (await this.identityStore.isFingerprintMismatch(remotePeerId, fingerprint))) {
+        this.fingerprintMismatches++;
+        console.warn(
+          `[WebRTCService] Peer ${remotePeerId} presented a different DTLS fingerprint than previously recorded`
+        );
+      }
+
+      if (kind) {
+        await this.identityStore.recordSuccess(remotePeerId, kind, fingerprint);
+        if (kind === 'relay') this.forceRelayPeers.add(remotePeerId);
+        else this.forceRelayPeers.delete(remotePeerId);
+      }
+    } catch {
+      // Diagnostics only — never let this affect the connection.
+    }
+  }
+
+  /** Identity and reconnection-hint diagnostics. */
+  public getIdentityStats() {
+    return {
+      hasPersistentCertificate: this.cachedCertificate !== null,
+      forceRelayPeers: this.forceRelayPeers.size,
+      fingerprintMismatches: this.fingerprintMismatches,
+      iceDropped: this.iceDropped,
+    };
   }
 
   private handleConnectionFailure(remotePeerId: string) {

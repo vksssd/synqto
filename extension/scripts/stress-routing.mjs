@@ -15,6 +15,7 @@ import { LinkStateRouter } from '../src/core/topology/link-state.ts';
 import { planMesh, planIsSymmetric } from '../src/core/topology/mesh-plan.ts';
 import { LinkAffinity, isInteractiveType } from '../src/core/topology/link-affinity.ts';
 import { DEFAULT_TTL } from '../src/core/network/packet.ts';
+import { extractFingerprint } from '../src/core/network/peer-identity-store.ts';
 
 let passed = 0;
 let total = 0;
@@ -910,6 +911,38 @@ scenario('RPF keeps broadcast cost near tree size, not mesh size', () => {
   // A full mesh would be 29 sends from the origin alone. Plain flooding over this graph
   // would be about 2*|E| = ~180. RPF should land far below flooding.
   assert.ok(sends < 90, `RPF used ${sends} sends, no better than flooding`);
+});
+
+
+console.log('\n── Persistent identity ──');
+
+scenario('DTLS fingerprint is extracted from real-shaped SDP', () => {
+  const sdp = [
+    'v=0',
+    'o=- 4611731400430051336 2 IN IP4 127.0.0.1',
+    's=-',
+    't=0 0',
+    'a=group:BUNDLE 0',
+    'm=application 9 UDP/DTLS/SCTP webrtc-datachannel',
+    'a=ice-ufrag:F7gI',
+    'a=ice-pwd:x9cml/YzichV2+XlhiMu8g',
+    'a=fingerprint:sha-256 D1:2C:BE:AD:C4:F6:64:2F:22:8B:71:C1:23:45:67:89:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89',
+    'a=setup:actpass',
+  ].join('\r\n');
+
+  assert.strictEqual(
+    extractFingerprint(sdp),
+    'D1:2C:BE:AD:C4:F6:64:2F:22:8B:71:C1:23:45:67:89:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89'
+  );
+});
+
+scenario('fingerprint extraction is safe on malformed or absent SDP', () => {
+  // Identity pinning must never throw on input from the network.
+  for (const bad of [undefined, '', 'v=0', 'a=fingerprint:', 'a=fingerprint']) {
+    assert.doesNotThrow(() => extractFingerprint(bad));
+  }
+  assert.strictEqual(extractFingerprint(undefined), undefined);
+  assert.strictEqual(extractFingerprint('v=0\r\na=setup:actpass'), undefined);
 });
 
 console.log(`\n========================================`);

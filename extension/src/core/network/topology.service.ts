@@ -20,6 +20,7 @@ import { LinkMonitor } from './link-monitor';
 import { LinkStateRouter, LSA } from '../topology/link-state';
 import { planMesh } from '../topology/mesh-plan';
 import { LinkAffinity, isInteractiveType } from '../topology/link-affinity';
+import { PeerIdentityStore } from './peer-identity-store';
 
 export interface TopologyState {
   isLeader: boolean;
@@ -47,6 +48,8 @@ export class TopologyService {
   private router: LinkStateRouter;
   private routerTimer: any = null;
   private affinity: LinkAffinity = new LinkAffinity();
+  private identityStore = PeerIdentityStore.getInstance();
+  private snapshotTimer: any = null;
 
   private myIdentity: PeerIdentity | null = null;
   private currentRoomId = '';
@@ -162,6 +165,17 @@ export class TopologyService {
   }
 
   /**
+   * Updates the cached identity used to stamp outgoing packets.
+   *
+   * Only safe because peerId does not change on a rename — if it ever did, this would have to
+   * be a full re-init, since peerId is the key the entire mesh routes on.
+   */
+  public updateIdentity(identity: PeerIdentity): void {
+    if (!identity || identity.peerId !== this.myIdentity?.peerId) return;
+    this.myIdentity = identity;
+  }
+
+  /**
    * @param policy Topology constraints for THIS room. Defaults to ADAPTIVE_POLICY, preserving
    * the behaviour of every pre-CoFocus call site. CoFocus rooms pass DIRECT_ONLY_POLICY, which
    * both forbids tier promotion and skips leader-mesh construction entirely.
@@ -209,6 +223,12 @@ export class TopologyService {
     }
 
     this.webrtc.setMyPeerId(identity.peerId);
+    // Load the persistent DTLS identity before any connection is constructed. Fire-and-forget
+    // because blocking room entry on IndexedDB would be a poor trade — a connection built
+    // before it resolves simply uses an ephemeral identity.
+    void this.webrtc.prewarmIdentity();
+    void this.warmStartFromSnapshot(roomId);
+
     this.peerSignaling.setMyPeerId(identity.peerId);
     this.peerSignaling.reset();
     this.linkMonitor.reset();
@@ -223,6 +243,7 @@ export class TopologyService {
     this.startReconciliationLoop();
     this.linkMonitor.start();
     this.startRoutingLoop();
+    this.startSnapshotLoop();
   }
 
   public leave() {
@@ -230,6 +251,9 @@ export class TopologyService {
     this.linkMonitor.stop();
     this.linkMonitor.reset();
     this.stopRoutingLoop();
+    this.stopSnapshotLoop();
+    // Save on the way out: leaving is the moment the room state is most complete.
+    void this.saveSnapshot();
     this.router.reset();
     this.affinity.reset();
     this.peerSignaling.reset();
@@ -589,6 +613,67 @@ export class TopologyService {
    */
   private shouldKeepLink(peerId: string): boolean {
     return this.affinity.shouldKeep(peerId);
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Persistence: room snapshot and cold-start bootstrap
+  // ───────────────────────────────────────────────────────────────────────────
+
+  private startSnapshotLoop() {
+    this.stopSnapshotLoop();
+    // Infrequent by design. The snapshot is a hint for the next cold start, not live state,
+    // and writing it often would put IndexedDB traffic on the critical path for no gain.
+    this.snapshotTimer = setInterval(() => void this.saveSnapshot(), 30_000);
+  }
+
+  private stopSnapshotLoop() {
+    if (this.snapshotTimer) {
+      clearInterval(this.snapshotTimer);
+      this.snapshotTimer = null;
+    }
+  }
+
+  private async saveSnapshot(): Promise<void> {
+    if (!this.currentRoomId || this.allPeers.size === 0) return;
+    try {
+      await this.identityStore.saveRoomSnapshot({
+        roomId: this.currentRoomId,
+        members: Array.from(this.allPeers),
+        topology: this.router.getTopology(),
+      });
+    } catch {
+      // Persistence is best-effort; a session must never fail because storage did.
+    }
+  }
+
+  /**
+   * Seeds relay hints for peers we expect to meet in this room.
+   *
+   * This is the cheap half of the cold-start ladder, and the only half that is reliable. The
+   * expensive half — reconnecting to cached peers without the server — cannot work in
+   * general: their ICE candidates are long expired, so we still need fresh SDP from
+   * somewhere. What the snapshot genuinely buys is knowing WHO to look for and HOW they were
+   * reachable, so that once any single path opens, the rest of the room follows from the
+   * mesh rather than from the server.
+   */
+  private async warmStartFromSnapshot(roomId: string): Promise<void> {
+    try {
+      const snap = await this.identityStore.getRoomSnapshot(roomId);
+      if (!snap) return;
+
+      await this.webrtc.loadRelayHints(snap.members);
+      console.info(
+        `[TopologyService] Warm start: ${snap.members.length} known members, ` +
+          `${snap.topology.length} known links from a previous session`
+      );
+    } catch {
+      // No snapshot, or storage unavailable. Cold start proceeds normally.
+    }
+  }
+
+  /** Identity, routing and snapshot diagnostics. */
+  public getPersistenceStats() {
+    return this.webrtc.getIdentityStats();
   }
 
   // ───────────────────────────────────────────────────────────────────────────

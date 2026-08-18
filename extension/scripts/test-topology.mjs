@@ -287,7 +287,7 @@ test('TierCoordinator defaults to ADAPTIVE_POLICY (pre-CoFocus behaviour preserv
 test('DIRECT_ONLY policy pins tier to TIER1 far beyond the TIER1 promote threshold', () => {
   const coordinator = new TierCoordinator(DIRECT_ONLY_POLICY);
 
-  // Well past TIER1_PROMOTE_AT (9) — an adaptive room would be TIER1_EVALUATING here.
+  // Well past TIER1_PROMOTE_AT — an adaptive room would be TIER1_EVALUATING here.
   coordinator.updatePeerCount(TOPOLOGY_THRESHOLDS.TIER1_PROMOTE_AT);
   assert.strictEqual(coordinator.getCurrentTier(), 'TIER1_FULL_MESH');
   assert.strictEqual(coordinator.getLifecycleState(), 'STABLE_TIER1');

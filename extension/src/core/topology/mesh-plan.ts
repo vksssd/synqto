@@ -4,9 +4,10 @@
 // "everyone connects to everyone" stops being viable.
 //
 // A full mesh costs each peer N-1 PeerConnections and N-1 sends per broadcast. That is what
-// pins TIER1_MAX at 8: at 30 peers it would be 29 connections each and 435 links in the
+// pinned TIER1_MAX at 8: at 30 peers it would be 29 connections each and 435 links in the
 // room, which no browser will sustain. Cutting degree to a constant makes room size almost
-// irrelevant to per-peer cost.
+// irrelevant to per-peer cost — which is what let TIER1_MAX rise to 24, with hop count
+// rather than connection count as the new binding constraint.
 //
 // CONNECTIVITY MUST BE GUARANTEED, NOT LIKELY. A random k-regular graph is *usually*
 // connected, and usually is not good enough for a room that would split silently — two

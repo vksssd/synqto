@@ -36,11 +36,30 @@ export type LeaderHealthStatus = 'HEALTHY' | 'SUSPECTED' | 'FAILED';
  * SIZING — raised in P3.9 on the strength of the post-fix measurements, and shaped by the
  * production target of a 512 MB / 0.1 vCPU instance:
  *
- * TIER1 4 -> 8. Every peer holds N-1 RTCPeerConnections, so per-peer cost is O(N).
- * Data-channel-only connections are far cheaper than media ones, and 8 keeps each peer at
- * 7 connections — comfortably inside what a browser sustains. Raising TIER1 is also the
- * single best lever for the constrained server: rooms that stay in full mesh never consult
- * the server for topology at all beyond initial signaling.
+ * TIER1 4 -> 8 -> 24. The 8 was correct while TIER1 meant a literal full mesh: per-peer
+ * cost was O(N), and 8 kept each peer at 7 connections. That premise no longer holds.
+ * Above the full-mesh threshold in mesh-plan.ts the tier is a degree-6 ring-plus-chords
+ * graph, so per-peer connection count is CONSTANT and room size no longer drives it.
+ *
+ * The binding constraint moved to hop count, and 24 is where the measurement puts the
+ * boundary (simulated, degree 6, 40ms per hop):
+ *
+ *     N   deg  p50  p95  max   worst non-interactive latency
+ *     12    6    1    2    2    80ms
+ *     20    6    2    3    3   120ms
+ *     24    6    2    3    3   120ms      <- TIER1_MAX
+ *     30    6    2    3    4   160ms
+ *     50    6    3    4    4   160ms
+ *
+ * Worst-case hops stay at 3 through 24 peers and rise at 30. Latency-critical traffic is
+ * unaffected either way — link-affinity.ts keeps co-editing pairs on a direct 1-hop link —
+ * so what this bounds is chat, presence and state sync, where 120ms is comfortable and
+ * beyond ~200ms starts to feel sluggish.
+ *
+ * 24 rather than 30 or 50 because the gain is already 3x, the hop budget is still intact,
+ * and none of this has been validated in a real browser yet. LSA flooding also grows
+ * quadratically with room size (measured 3,456 transmissions to converge a 24-peer room
+ * from cold against 15,000 for 50), which is affordable at 24 and less obviously so above.
  *
  * TIER2 19 -> 50. Post-fix the roster broadcast is O(N) and drops zero state messages
  * through 500 peers/room, so the previous ceiling was set by a defect rather than by the
@@ -61,10 +80,10 @@ export type LeaderHealthStatus = 'HEALTHY' | 'SUSPECTED' | 'FAILED';
  * The invariants these must satisfy are asserted in the test suite.
  */
 export const TOPOLOGY_THRESHOLDS = {
-  // ── TIER 1: Full mesh ──
-  TIER1_MAX: 8,
-  TIER1_PROMOTE_AT: 9, // 9+ peers => leave full mesh
-  TIER1_DEMOTE_AT: 6,  // fall back only at <=6, a 3-peer margin below promotion
+  // ── TIER 1: Direct mesh (full below mesh-plan's threshold, degree-6 sparse above it) ──
+  TIER1_MAX: 24,
+  TIER1_PROMOTE_AT: 25, // 25+ peers => leave the direct mesh
+  TIER1_DEMOTE_AT: 18,  // fall back only at <=18, a 7-peer margin below promotion
 
   // ── TIER 2: Multi-leader clustered mesh ──
   TIER2_MAX: 50,

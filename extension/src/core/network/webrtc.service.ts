@@ -7,8 +7,40 @@ import {
   extractFingerprint,
 } from './peer-identity-store';
 
+/**
+ * Why an offer was created.
+ *
+ * Every createOffer must name one. The aggregate "110 offers, 56 answers, 1267 ICE" is
+ * uninterpretable precisely because it has no attribution: it cannot distinguish a room that
+ * negotiated once per peer from one looping on renegotiation, and those are opposite
+ * problems. There is deliberately no UNKNOWN — an offer nobody can explain is the bug.
+ */
+export type NegotiationReason =
+  | 'INITIAL'
+  | 'NEGOTIATION_NEEDED'
+  | 'ICE_RESTART'
+  | 'TRACK_CHANGE'
+  | 'RECOVERY';
+
+export interface NegotiationRecord {
+  peerId: string;
+  /** Which PeerConnection instance for this peer, counting from 1. */
+  generation: number;
+  reason: NegotiationReason;
+  at: number;
+}
+
 export interface PeerConnectionWrapper {
   peerId: string;
+  /**
+   * Which PeerConnection this is for this peer.
+   *
+   * Without a generation, SDP and ICE counts are summed across every connection ever built
+   * to a peer, so "1267 ICE candidates" could be 12 connections gathering 100 each or one
+   * connection gathering 1267 — the first is normal, the second is pathological, and the
+   * aggregate cannot tell them apart.
+   */
+  generation: number;
   pc: RTCPeerConnection;
   controlChannel: RTCDataChannel | null;
   bulkChannel: RTCDataChannel | null;
@@ -47,6 +79,23 @@ export class WebRTCService {
   private forceRelayPeers: Set<string> = new Set();
   private identityStore = PeerIdentityStore.getInstance();
   private fingerprintMismatches = 0;
+
+  /** Per-peer PeerConnection generation counter. */
+  private generations: Map<string, number> = new Map();
+  /** Per-generation negotiation and candidate accounting, keyed `peerId#generation`. */
+  private pcStats: Map<string, {
+    peerId: string;
+    generation: number;
+    offers: Record<NegotiationReason, number>;
+    answers: number;
+    iceSent: number;
+    iceReceived: number;
+    createdAt: number;
+    closedAt?: number;
+    closeReason?: string;
+  }> = new Map();
+  private recentNegotiations: NegotiationRecord[] = [];
+  private static readonly MAX_NEGOTIATION_HISTORY = 200;
 
   // Distinct local media tracks
   private localAudioTrack: MediaStreamTrack | null = null;
@@ -256,7 +305,7 @@ export class WebRTCService {
       }
 
       if (needsRenegotiation) {
-        await this.renegotiate(wrapper.peerId);
+        await this.renegotiate(wrapper.peerId, 'TRACK_CHANGE');
       }
     }
   }
@@ -264,7 +313,10 @@ export class WebRTCService {
   /**
    * Renegotiates SDP offer using Perfect Negotiation
    */
-  public async renegotiate(remotePeerId: string): Promise<void> {
+  public async renegotiate(
+    remotePeerId: string,
+    reason: NegotiationReason = 'NEGOTIATION_NEEDED'
+  ): Promise<void> {
     const wrapper = this.connections.get(remotePeerId);
     if (!wrapper || !wrapper.pc) return;
 
@@ -277,6 +329,7 @@ export class WebRTCService {
       if ((wrapper.pc.signalingState as string) === 'closed') return;
       await wrapper.pc.setLocalDescription(offer);
 
+      this.noteOffer(remotePeerId, reason);
       this.signalNeededListeners.forEach((fn) => fn(remotePeerId, 'offer', offer));
     } catch (err) {
       console.warn(`[WebRTCService] Renegotiation offer error for ${remotePeerId}:`, err);
@@ -300,6 +353,7 @@ export class WebRTCService {
       if ((wrapper.pc.signalingState as string) === 'closed') return;
       await wrapper.pc.setLocalDescription(offer);
 
+      this.noteOffer(remotePeerId, 'ICE_RESTART');
       this.signalNeededListeners.forEach((fn) => fn(remotePeerId, 'offer', offer));
     } catch (err) {
       console.warn(`[WebRTCService] ICE restart offer error for ${remotePeerId}, re-initiating:`, err);
@@ -340,6 +394,7 @@ export class WebRTCService {
 
     const wrapper: PeerConnectionWrapper = {
       peerId: remotePeerId,
+      generation: this.nextGeneration(remotePeerId),
       pc,
       controlChannel,
       bulkChannel,
@@ -357,6 +412,7 @@ export class WebRTCService {
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
+      this.noteOffer(remotePeerId, 'INITIAL');
       this.signalNeededListeners.forEach((fn) => fn(remotePeerId, 'offer', offer));
     } catch (err) {
       console.error(`[WebRTCService] Failed to create offer for ${remotePeerId}:`, err);
@@ -414,6 +470,7 @@ export class WebRTCService {
         const answer = await wrapper.pc.createAnswer();
         await wrapper.pc.setLocalDescription(answer);
 
+        this.recordAnswer(remotePeerId);
         this.signalNeededListeners.forEach((fn) => fn(remotePeerId, 'answer', answer));
         return;
       } catch (err) {
@@ -428,6 +485,7 @@ export class WebRTCService {
     const pc = this.createPeerConnection(remotePeerId);
     wrapper = {
       peerId: remotePeerId,
+      generation: this.nextGeneration(remotePeerId),
       pc,
       controlChannel: null,
       bulkChannel: null,
@@ -446,6 +504,7 @@ export class WebRTCService {
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
 
+      this.recordAnswer(remotePeerId);
       this.signalNeededListeners.forEach((fn) => fn(remotePeerId, 'answer', answer));
     } catch (err) {
       console.error(`[WebRTCService] Failed to handle offer from ${remotePeerId}:`, err);
@@ -507,6 +566,7 @@ export class WebRTCService {
     try {
       if (candidate.candidate) {
         await wrapper.pc.addIceCandidate(new RTCIceCandidate(candidate));
+        this.noteIce(remotePeerId, 'received');
       }
     } catch (err) {
       console.warn(`[WebRTCService] Failed to add ICE candidate for ${remotePeerId}:`, err);
@@ -551,6 +611,7 @@ export class WebRTCService {
         // minutes — so a stored candidate would point at nothing on the next connection.
         // What is worth persisting is which candidate TYPE succeeded; see
         // peer-identity-store.ts.
+        this.noteIce(remotePeerId, 'sent');
         this.signalNeededListeners.forEach((fn) => fn(remotePeerId, 'ice', event.candidate!.toJSON()));
       }
       // event.candidate === null means gathering is complete; nothing to send.
@@ -580,7 +641,7 @@ export class WebRTCService {
       this.connectionStateListeners.forEach((fn) => fn(remotePeerId, status));
 
       if (state === 'failed' || state === 'closed') {
-        this.closeConnection(remotePeerId);
+        this.closeConnection(remotePeerId, `connectionState=${state}`);
       }
     };
 
@@ -745,7 +806,15 @@ export class WebRTCService {
     return result;
   }
 
-  public closeConnection(remotePeerId: string) {
+  private recordAnswer(peerId: string): void {
+    const wrapper = this.connections.get(peerId);
+    const gen = wrapper?.generation ?? this.generations.get(peerId) ?? 0;
+    const stat = this.pcStats.get(this.statsKey(peerId, gen));
+    if (stat) stat.answers++;
+  }
+
+  public closeConnection(remotePeerId: string, reason = 'explicit') {
+    this.noteClose(remotePeerId, reason);
     // Drop buffered ICE first, unconditionally.
     //
     // This used to sit at the end of the method, after an early `if (!wrapper) return`.
@@ -823,6 +892,111 @@ export class WebRTCService {
       forceRelayPeers: this.forceRelayPeers.size,
       fingerprintMismatches: this.fingerprintMismatches,
       iceDropped: this.iceDropped,
+    };
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Negotiation accounting
+  // ───────────────────────────────────────────────────────────────────────────
+
+  private statsKey(peerId: string, generation: number): string {
+    return `${peerId}#${generation}`;
+  }
+
+  private nextGeneration(peerId: string): number {
+    const gen = (this.generations.get(peerId) ?? 0) + 1;
+    this.generations.set(peerId, gen);
+    this.pcStats.set(this.statsKey(peerId, gen), {
+      peerId,
+      generation: gen,
+      offers: {
+        INITIAL: 0,
+        NEGOTIATION_NEEDED: 0,
+        ICE_RESTART: 0,
+        TRACK_CHANGE: 0,
+        RECOVERY: 0,
+      },
+      answers: 0,
+      iceSent: 0,
+      iceReceived: 0,
+      createdAt: Date.now(),
+    });
+
+    // Bounded: keyed by peer and generation, both of which grow over a long session.
+    if (this.pcStats.size > 400) {
+      const oldest = this.pcStats.keys().next().value;
+      if (oldest !== undefined) this.pcStats.delete(oldest);
+    }
+    return gen;
+  }
+
+  /** Records an offer against its connection generation and reason. */
+  private noteOffer(peerId: string, reason: NegotiationReason): void {
+    const wrapper = this.connections.get(peerId);
+    const gen = wrapper?.generation ?? this.generations.get(peerId) ?? 0;
+    const stat = this.pcStats.get(this.statsKey(peerId, gen));
+    if (stat) stat.offers[reason]++;
+
+    this.recentNegotiations.push({ peerId, generation: gen, reason, at: Date.now() });
+    if (this.recentNegotiations.length > WebRTCService.MAX_NEGOTIATION_HISTORY) {
+      this.recentNegotiations.shift();
+    }
+  }
+
+  private noteIce(peerId: string, direction: 'sent' | 'received'): void {
+    const wrapper = this.connections.get(peerId);
+    const gen = wrapper?.generation ?? this.generations.get(peerId) ?? 0;
+    const stat = this.pcStats.get(this.statsKey(peerId, gen));
+    if (!stat) return;
+    if (direction === 'sent') stat.iceSent++;
+    else stat.iceReceived++;
+  }
+
+  private noteClose(peerId: string, reason: string): void {
+    const wrapper = this.connections.get(peerId);
+    const gen = wrapper?.generation ?? this.generations.get(peerId) ?? 0;
+    const stat = this.pcStats.get(this.statsKey(peerId, gen));
+    if (stat && !stat.closedAt) {
+      stat.closedAt = Date.now();
+      stat.closeReason = reason;
+    }
+  }
+
+  /**
+   * Per-generation negotiation accounting.
+   *
+   * The invariant to read this against: a stable PeerConnection with no network, media or
+   * topology change should produce NO new SDP. A generation showing repeated
+   * NEGOTIATION_NEEDED or ICE_RESTART without a corresponding cause is a renegotiation loop,
+   * which the aggregate counters could never have revealed.
+   */
+  public getNegotiationStats() {
+    const perGeneration = Array.from(this.pcStats.values()).map((s) => ({
+      ...s,
+      totalOffers: Object.values(s.offers).reduce((a, b) => a + b, 0),
+      lifetimeMs: (s.closedAt ?? Date.now()) - s.createdAt,
+    }));
+
+    const byReason: Record<string, number> = {};
+    for (const s of perGeneration) {
+      for (const [reason, count] of Object.entries(s.offers)) {
+        byReason[reason] = (byReason[reason] ?? 0) + count;
+      }
+    }
+
+    // Generations that renegotiated more than once are where a loop would show.
+    const suspicious = perGeneration
+      .filter((s) => s.totalOffers > 2)
+      .map((s) => `${s.peerId}#${s.generation}: ${s.totalOffers} offers`);
+
+    return {
+      byReason,
+      generations: perGeneration.length,
+      peersWithMultipleGenerations: Array.from(this.generations.entries())
+        .filter(([, g]) => g > 1)
+        .map(([peerId, g]) => ({ peerId, generations: g })),
+      suspicious,
+      recent: [...this.recentNegotiations].slice(-20),
     };
   }
 

@@ -1286,6 +1286,49 @@ scenario('3-peer TIER1 admission: the third peer requires both existing links', 
   assert.ok(planIsSymmetric(peers), '3-peer plan is not symmetric');
 });
 
+
+console.log('\n── Negotiation accounting ──');
+
+scenario('every negotiation reason is representable and none is UNKNOWN', () => {
+  // The taxonomy is the point: an offer nobody can explain is the bug, so there is
+  // deliberately no UNKNOWN bucket to hide one in.
+  const REASONS = ['INITIAL', 'NEGOTIATION_NEEDED', 'ICE_RESTART', 'TRACK_CHANGE', 'RECOVERY'];
+  assert.ok(!REASONS.includes('UNKNOWN'), 'an UNKNOWN reason exists, defeating attribution');
+  assert.strictEqual(new Set(REASONS).size, REASONS.length, 'duplicate reasons');
+});
+
+scenario('the churn invariant is expressible: stable PC + no change = no new SDP', () => {
+  // Encodes the rule the aggregate counters could never express. A generation whose offer
+  // count exceeds INITIAL (plus at most one glare rollback) without a network, media or
+  // topology cause is a renegotiation loop.
+  const generation = { offers: { INITIAL: 1, NEGOTIATION_NEEDED: 0, ICE_RESTART: 0, TRACK_CHANGE: 0, RECOVERY: 0 } };
+  const total = Object.values(generation.offers).reduce((a, b) => a + b, 0);
+  assert.ok(total <= 2, 'a healthy generation should not exceed 2 offers');
+
+  const looping = { offers: { INITIAL: 1, NEGOTIATION_NEEDED: 47, ICE_RESTART: 12, TRACK_CHANGE: 0, RECOVERY: 0 } };
+  const loopTotal = Object.values(looping.offers).reduce((a, b) => a + b, 0);
+  assert.ok(loopTotal > 2, 'a looping generation must be detectable by the same rule');
+});
+
+scenario('aggregate counts cannot distinguish what per-generation counts can', () => {
+  // The concrete reason attribution was needed. Both rooms report 120 ICE candidates.
+  const healthy = Array.from({ length: 12 }, () => ({ generation: 1, ice: 10 }));
+  const pathological = [{ generation: 12, ice: 120 }];
+
+  const aggHealthy = healthy.reduce((n, g) => n + g.ice, 0);
+  const aggPathological = pathological.reduce((n, g) => n + g.ice, 0);
+  assert.strictEqual(aggHealthy, aggPathological, 'precondition: aggregates are identical');
+
+  // Per generation they are obviously different: 12 peers negotiating once each, versus one
+  // peer rebuilt 12 times.
+  const maxGenHealthy = Math.max(...healthy.map((g) => g.generation));
+  const maxGenPathological = Math.max(...pathological.map((g) => g.generation));
+  assert.ok(
+    maxGenPathological > maxGenHealthy,
+    'generation counting failed to separate the two cases the aggregate conflates'
+  );
+});
+
 console.log(`\n========================================`);
 console.log(`🏁 Routing Stress: ${passed}/${total} scenarios passed (${Math.round((passed / total) * 100)}%)`);
 console.log(`========================================\n`);

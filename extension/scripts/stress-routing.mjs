@@ -16,6 +16,7 @@ import { planMesh, planIsSymmetric, planFallbackTargets } from '../src/core/topo
 import { LinkAffinity, isInteractiveType } from '../src/core/topology/link-affinity.ts';
 import { DEFAULT_TTL } from '../src/core/network/packet.ts';
 import { extractFingerprint } from '../src/core/network/peer-identity-store.ts';
+import { JoinTracker, JOIN_STAGES, STAGE_STALL_MS } from '../src/core/network/join-tracker.ts';
 
 let passed = 0;
 let total = 0;
@@ -1143,6 +1144,146 @@ scenario('batches reassemble into the same database on the receiver', () => {
     sender.getStats().lsdbSize,
     'receiver database did not match after batched transfer'
   );
+});
+
+
+console.log('\n── Join admission ladder ──');
+
+scenario('a completed join reaches ACTIVE through every stage in order', () => {
+  let t = 0;
+  const jt = new JoinTracker(() => t);
+  jt.begin('room-1', 'peer-1');
+
+  for (const stage of JOIN_STAGES.slice(1)) {
+    t += 50;
+    jt.advance(stage);
+  }
+
+  const snap = jt.getSnapshot();
+  assert.strictEqual(snap.stage, 'ACTIVE');
+  assert.strictEqual(snap.stalled, false, 'a completed join must never report stalled');
+  assert.strictEqual(snap.events.length, JOIN_STAGES.length);
+});
+
+scenario('a join that stops at REGISTERED is identified as exactly that', () => {
+  // The reported symptom: the server has the peer, the client is not a participant. The
+  // tracker must name the stage rather than saying "join failed".
+  let t = 0;
+  const jt = new JoinTracker(() => t);
+  jt.begin('room-1', 'ghost');
+  jt.advance('REGISTERING');
+  jt.advance('REGISTERED');
+
+  t += STAGE_STALL_MS + 1000;
+
+  const snap = jt.getSnapshot();
+  assert.strictEqual(snap.stage, 'REGISTERED');
+  assert.ok(snap.stalled, 'a join sitting past the stall threshold was not flagged');
+  assert.match(snap.failureHint, /roster/i, `hint did not point at roster delivery: ${snap.failureHint}`);
+});
+
+scenario('each stall stage produces a distinguishable hint', () => {
+  // The diagnostic value is entirely in telling these apart: "no roster" and "ICE never
+  // completed" are different bugs with the same user-visible symptom.
+  const hints = new Set();
+  for (const stage of JOIN_STAGES) {
+    if (stage === 'ACTIVE') continue;
+    let t = 0;
+    const jt = new JoinTracker(() => t);
+    jt.begin('r', 'p');
+    for (const s of JOIN_STAGES) {
+      jt.advance(s);
+      if (s === stage) break;
+    }
+    t += STAGE_STALL_MS + 1;
+    const snap = jt.getSnapshot();
+    assert.ok(snap.stalled, `${stage} did not report stalled`);
+    if (snap.failureHint) hints.add(snap.failureHint);
+  }
+  assert.ok(hints.size >= 7, `only ${hints.size} distinct hints across the ladder`);
+});
+
+scenario('progress is monotonic — a lost link cannot un-join a peer', () => {
+  // Links break after admission all the time. If that dragged the join state backwards,
+  // "did this peer ever join?" would become unanswerable, which is the question the tracker
+  // exists to answer.
+  let t = 0;
+  const jt = new JoinTracker(() => t);
+  jt.begin('r', 'p');
+  for (const s of JOIN_STAGES.slice(1)) { t += 10; jt.advance(s); }
+
+  jt.advance('REGISTERED');            // a late/stale event
+  jt.advance('NEIGHBORS_SELECTED');    // a repair re-selecting neighbours
+
+  assert.strictEqual(jt.getSnapshot().stage, 'ACTIVE', 'join state moved backwards');
+});
+
+scenario('ACTIVE is never reported as stalled however long it persists', () => {
+  let t = 0;
+  const jt = new JoinTracker(() => t);
+  jt.begin('r', 'p');
+  for (const s of JOIN_STAGES.slice(1)) jt.advance(s);
+
+  t += 60 * 60 * 1000; // an hour in the room
+  assert.strictEqual(jt.getSnapshot().stalled, false, 'a healthy long session was flagged stalled');
+});
+
+scenario('link progress is reported against the tier requirement', () => {
+  // TIER1 with 3 peers requires 2 links each. Partial admission must be visible as partial.
+  let t = 0;
+  const jt = new JoinTracker(() => t);
+  jt.begin('trio', 'p3');
+  jt.setLinkProgress(1, 2);
+
+  const snap = jt.getSnapshot();
+  assert.strictEqual(snap.connectedLinks, 1);
+  assert.strictEqual(snap.requiredLinks, 2);
+  assert.ok(snap.connectedLinks < snap.requiredLinks, 'partial admission looked complete');
+});
+
+scenario('the event trail survives a long repair sequence without growing unbounded', () => {
+  let t = 0;
+  const jt = new JoinTracker(() => t);
+  jt.begin('r', 'p');
+  for (let i = 0; i < 5000; i++) {
+    t += 1;
+    jt.advance(JOIN_STAGES[i % JOIN_STAGES.length]);
+  }
+  assert.ok(jt.getSnapshot().events.length <= 64, 'join event trail grew without bound');
+});
+
+scenario('the formatted trace names the stall point', () => {
+  let t = 0;
+  const jt = new JoinTracker(() => t);
+  jt.begin('room-x', 'peer-y');
+  jt.advance('REGISTERING');
+  jt.advance('REGISTERED');
+  jt.advance('ROSTER_SYNCED');
+  jt.advance('TOPOLOGY_SYNCED');
+  jt.advance('NEIGHBORS_SELECTED');
+  jt.setLinkProgress(0, 2);
+  t += STAGE_STALL_MS + 1;
+
+  const line = jt.format();
+  assert.match(line, /peer-y/);
+  assert.match(line, /room-x/);
+  assert.match(line, /0\/2 links/);
+  assert.match(line, /STALLED/);
+  assert.match(line, /signalling|signaling/i, `trace did not name the stall cause: ${line}`);
+});
+
+scenario('3-peer TIER1 admission: the third peer requires both existing links', () => {
+  // P0-04/P0-15. The invariant a third joiner must satisfy, expressed against the real plan
+  // rather than against an assumption about it.
+  const peers = ['p1', 'p2', 'p3'];
+  for (const me of peers) {
+    const plan = planMesh(me, peers);
+    assert.ok(plan.isFullMesh, '3 peers should be a full mesh');
+    assert.strictEqual(plan.desired.size, 2, `${me} requires 2 links in a 3-peer room`);
+  }
+
+  // And the plan must be mutual, or the third peer dials someone who never dials back.
+  assert.ok(planIsSymmetric(peers), '3-peer plan is not symmetric');
 });
 
 console.log(`\n========================================`);

@@ -2108,6 +2108,38 @@ test('inbound packets advance the local hybrid clock before handlers run', () =>
   );
 });
 
+
+console.log('\n📦 Section 30: Server/Client Topology Policy Agreement');
+
+test('TIER1_MAX is documented as the shared server constant', () => {
+  // The server has its own Tier1MaxPeers governing when it elects leaders. If the two drift,
+  // the mismatch is silent: the server nominates a backbone for rooms the client runs as a
+  // leaderless mesh, which is exactly the state that produced leader promotions in 3-peer
+  // rooms. This test fails loudly if TIER1_MAX changes without the server being updated.
+  const t = TOPOLOGY_THRESHOLDS;
+  const SERVER_TIER1_MAX_PEERS = 24; // MUST equal hub.Tier1MaxPeers in synqto-server
+
+  assert.strictEqual(
+    t.TIER1_MAX,
+    SERVER_TIER1_MAX_PEERS,
+    `TIER1_MAX (${t.TIER1_MAX}) no longer matches the server's Tier1MaxPeers ` +
+      `(${SERVER_TIER1_MAX_PEERS}). Update internal/hub/room.go and this constant together.`
+  );
+});
+
+test('no tier expects leaders below the TIER1 ceiling', () => {
+  // Leader-dependent behaviour must not be reachable while the room is a direct mesh.
+  const t = TOPOLOGY_THRESHOLDS;
+  assert.ok(
+    t.TIER1_PROMOTE_AT > t.TIER1_MAX,
+    'a room can reach TIER2 without exceeding TIER1_MAX, so leaders and full mesh overlap'
+  );
+  assert.ok(
+    t.TIER2_DEMOTE_AT > t.TIER1_MAX,
+    'TIER2 can demote into a size where the server would still elect leaders'
+  );
+});
+
 console.log(`\n========================================`);
 console.log(`🏁 Test Summary: ${passed}/${total} tests passed (${Math.round((passed / total) * 100)}%)`);
 console.log(`========================================\n`);

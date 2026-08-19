@@ -21,6 +21,7 @@ import { LinkStateRouter, LSA } from '../topology/link-state';
 import { planMesh, planFallbackTargets } from '../topology/mesh-plan';
 import { LinkAffinity } from '../topology/link-affinity';
 import { PeerIdentityStore } from './peer-identity-store';
+import { JoinTracker } from './join-tracker';
 
 export interface TopologyState {
   isLeader: boolean;
@@ -50,6 +51,7 @@ export class TopologyService {
   private affinity: LinkAffinity = new LinkAffinity();
   private identityStore = PeerIdentityStore.getInstance();
   private snapshotTimer: any = null;
+  private joinTracker = new JoinTracker();
 
   private myIdentity: PeerIdentity | null = null;
   private currentRoomId = '';
@@ -227,6 +229,8 @@ export class TopologyService {
       console.info(`[TopologyService] Room ${roomId} initialised DIRECT_ONLY (no leader election, no relay)`);
     }
 
+    this.joinTracker.reset();
+    this.joinTracker.begin(roomId, identity.peerId);
     this.webrtc.setMyPeerId(identity.peerId);
     // Load the persistent DTLS identity before any connection is constructed. Fire-and-forget
     // because blocking room entry on IndexedDB would be a poor trade — a connection built
@@ -242,6 +246,7 @@ export class TopologyService {
     this.affinity.reset();
 
     // Connect to signaling server
+    this.joinTracker.advance('REGISTERING');
     this.signaling.connect(roomId, identity.peerId, identity.nickname);
 
     // Start background topology reconciliation and link liveness loops
@@ -317,6 +322,13 @@ export class TopologyService {
       // permit. The plan is deterministic and symmetric, so both endpoints of every link
       // agree it should exist without any negotiation.
       const plan = planMesh(this.myIdentity.peerId, this.allPeers);
+      if (plan.desired.size > 0) {
+        this.joinTracker.advance('NEIGHBORS_SELECTED', { required: plan.desired.size });
+      }
+      this.joinTracker.setLinkProgress(
+        this.webrtc.getConnectedPeers().filter((p) => plan.desired.has(p)).length,
+        plan.desired.size
+      );
 
       plan.desired.forEach((peerId) => {
         if (peerId === this.myIdentity?.peerId) return;
@@ -504,9 +516,15 @@ export class TopologyService {
         return;
       }
 
+      this.joinTracker.advance('REGISTERED');
+      this.joinTracker.advance('ROSTER_SYNCED', { peers: roster.peers.length });
+
       this.allPeers = new Set(roster.peers.map((p) => p.peerId));
       this.tierCoordinator.updatePeerCount(roster.peers.length);
       this.pruneDepartedPeers();
+      this.joinTracker.advance('TOPOLOGY_SYNCED', {
+        tier: this.tierCoordinator.getCurrentTier(),
+      });
 
       this.isLeader = me ? me.isLeader : false;
 
@@ -708,6 +726,56 @@ export class TopologyService {
     }
   }
 
+  /**
+   * Re-evaluates admission progress against the links that actually exist.
+   *
+   * Recorded, not enforced: nothing here blocks traffic or refuses a peer. The point is that
+   * "registered" and "able to talk to anyone" become separately observable, so a stalled join
+   * says which of the two it stopped at.
+   */
+  private updateJoinProgress(): void {
+    if (!this.myIdentity) return;
+
+    const tier = this.tierCoordinator.getCurrentTier();
+    const connected = this.webrtc.getConnectedPeers();
+
+    let required: string[];
+    if (tier === 'TIER1_FULL_MESH') {
+      required = Array.from(planMesh(this.myIdentity.peerId, this.allPeers).desired);
+    } else if (this.isLeader) {
+      required = Array.from(this.backboneLeaders);
+    } else {
+      required = [this.assignedLeader, this.assignedStandbyLeader].filter(
+        (x): x is string => Boolean(x)
+      );
+    }
+
+    const have = connected.filter((p) => required.includes(p));
+    this.joinTracker.setLinkProgress(have.length, required.length);
+
+    // A single open link means signalling worked end to end; the full set means the tier's
+    // admission requirement is met.
+    if (have.length > 0) this.joinTracker.advance('LINKS_CONNECTED');
+    if (required.length > 0 && have.length >= required.length) {
+      this.joinTracker.advance('TOPOLOGY_CONFIRMED', { required: required.length });
+      // Reachability is the last honest check: links can be open while routing has not yet
+      // converged, and a peer that cannot be routed to is not yet a participant.
+      if (this.router.getReachable().length >= this.allPeers.size - 1) {
+        this.joinTracker.advance('ACTIVE');
+      }
+    }
+  }
+
+  /** Current admission state, for diagnostics and bug reports. */
+  public getJoinState() {
+    return this.joinTracker.getSnapshot();
+  }
+
+  /** One-line join trace: which stages were reached, when, and where it stalled. */
+  public formatJoinTrace(): string {
+    return this.joinTracker.format();
+  }
+
   /** Identity, routing and snapshot diagnostics. */
   public getPersistenceStats() {
     return this.webrtc.getIdentityStats();
@@ -728,6 +796,7 @@ export class TopologyService {
     this.routerTimer = setInterval(() => {
       this.router.ageOut();
       this.advertiseNeighbours();
+      this.updateJoinProgress();
     }, 2000);
   }
 
@@ -902,6 +971,7 @@ export class TopologyService {
       // Route through the mesh where possible; the server is the last resort, not the
       // default. See core/network/peer-signaling.ts for the preference order.
       this.peerSignaling.route(targetPeerId, type, payload);
+      this.joinTracker.advance('SIGNALING_ESTABLISHED', { kind: type });
     });
 
     this.webrtc.onPacket((fromPeerId, packet) => {
@@ -921,6 +991,7 @@ export class TopologyService {
         // new LSA references it.
         this.syncDatabaseWith(peerId);
         this.advertiseNeighbours();
+        this.updateJoinProgress();
 
         if (this.isLeader && !this.backboneLeaders.has(peerId)) {
           this.clusterPeers.add(peerId);

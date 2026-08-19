@@ -90,6 +90,13 @@ export class WebRTCService {
     answers: number;
     iceSent: number;
     iceReceived: number;
+    /**
+     * Locally gathered candidates by type. The decisive diagnostic for "connects on the same
+     * machine but not across machines": host candidates alone are enough for loopback and
+     * often for the same LAN, but a cross-network peer needs srflx (from STUN) or relay (from
+     * TURN). Zero srflx means STUN produced nothing; zero relay means TURN did.
+     */
+    gathered: { host: number; srflx: number; relay: number };
     createdAt: number;
     closedAt?: number;
     closeReason?: string;
@@ -123,17 +130,30 @@ export class WebRTCService {
     { urls: 'stun:stun.cloudflare.com:3478' },
     // 3. Matrix Public STUN
     { urls: 'stun:turn.matrix.org:3478' },
-    // 4. OpenRelay Free Public TURN Relay (UDP + TCP + TLS Port 443 Strict Firewall Bypass)
-    {
-      urls: [
-        'turn:openrelay.metered.ca:80',
-        'turn:openrelay.metered.ca:443',
-        'turn:openrelay.metered.ca:443?transport=tcp',
-        'turns:openrelay.metered.ca:443?transport=tcp',
-      ],
-      username: 'openrelayproject',
-      credential: 'openrelayproject',
-    },
+    // NO TURN SERVER IS CONFIGURED BY DEFAULT.
+    //
+    // This list previously carried openrelay.metered.ca with the public
+    // openrelayproject/openrelayproject credentials. That host no longer resolves — the free
+    // service was withdrawn — which made it worse than absent: a TURN URL that cannot be
+    // resolved still consumes ICE gathering time waiting to fail, delaying the candidates that
+    // would have worked.
+    //
+    // The consequence of having no TURN at all is specific and worth stating plainly, because
+    // it matches a symptom that looks like a bug in this codebase: peers on the same machine
+    // connect instantly (host candidates), peers on the same LAN usually connect (host again),
+    // and peers across networks connect only when at least one side's NAT is permissive enough
+    // for STUN's reflexive candidate to be usable. A pair where both sides are behind
+    // symmetric NAT cannot connect at all without a relay — no amount of signalling fixes it,
+    // because there is no path.
+    //
+    // TURN is therefore a deployment requirement, not an optimisation. Supply one via
+    // setIceServers() (persisted in chrome.storage) or by editing this list:
+    //
+    //   - Cloudflare Calls TURN, Twilio NTS, or metered.ca's current paid tier
+    //   - self-hosted coturn, which is the cheapest option at this scale
+    //
+    // getConnectivityDiagnosis() reports 'no-turn' whenever relay candidates are absent, so
+    // this condition is visible rather than presenting as an unexplained connection failure.
   ];
 
   private constructor() {
@@ -612,6 +632,7 @@ export class WebRTCService {
         // What is worth persisting is which candidate TYPE succeeded; see
         // peer-identity-store.ts.
         this.noteIce(remotePeerId, 'sent');
+        this.noteGatheredCandidate(remotePeerId, event.candidate!);
         this.signalNeededListeners.forEach((fn) => fn(remotePeerId, 'ice', event.candidate!.toJSON()));
       }
       // event.candidate === null means gathering is complete; nothing to send.
@@ -885,6 +906,58 @@ export class WebRTCService {
     }
   }
 
+  /**
+   * Whether this client can reach peers beyond its own machine, and if not, why.
+   *
+   * Reported as a verdict rather than raw counters because the raw numbers require knowing
+   * what host/srflx/relay mean to interpret, and the actionable distinction is simple: no
+   * srflx means STUN is not reachable, no relay means TURN is not usable, and with neither
+   * only same-machine (and sometimes same-LAN) connections can ever succeed.
+   */
+  public getConnectivityDiagnosis(): {
+    verdict: 'ok' | 'no-stun' | 'no-turn' | 'host-only' | 'unknown';
+    detail: string;
+    gathered: { host: number; srflx: number; relay: number };
+  } {
+    const totals = { host: 0, srflx: 0, relay: 0 };
+    for (const s of this.pcStats.values()) {
+      totals.host += s.gathered.host;
+      totals.srflx += s.gathered.srflx;
+      totals.relay += s.gathered.relay;
+    }
+
+    if (totals.host + totals.srflx + totals.relay === 0) {
+      return { verdict: 'unknown', detail: 'No candidates gathered yet.', gathered: totals };
+    }
+    if (totals.srflx === 0 && totals.relay === 0) {
+      return {
+        verdict: 'host-only',
+        detail:
+          'Only host candidates were gathered. This client can reach peers on the same machine ' +
+          'and sometimes the same LAN, but cannot reach anyone across a network. Both STUN and ' +
+          'TURN are unreachable.',
+        gathered: totals,
+      };
+    }
+    if (totals.relay === 0) {
+      return {
+        verdict: 'no-turn',
+        detail:
+          'No relay candidates. Peers behind symmetric NAT cannot be reached. Check that a ' +
+          'working TURN server is configured.',
+        gathered: totals,
+      };
+    }
+    if (totals.srflx === 0) {
+      return {
+        verdict: 'no-stun',
+        detail: 'No server-reflexive candidates — STUN is unreachable; every connection will pay for TURN.',
+        gathered: totals,
+      };
+    }
+    return { verdict: 'ok', detail: 'Host, reflexive and relay candidates all present.', gathered: totals };
+  }
+
   /** Identity and reconnection-hint diagnostics. */
   public getIdentityStats() {
     return {
@@ -919,6 +992,7 @@ export class WebRTCService {
       answers: 0,
       iceSent: 0,
       iceReceived: 0,
+      gathered: { host: 0, srflx: 0, relay: 0 },
       createdAt: Date.now(),
     });
 
@@ -941,6 +1015,26 @@ export class WebRTCService {
     if (this.recentNegotiations.length > WebRTCService.MAX_NEGOTIATION_HISTORY) {
       this.recentNegotiations.shift();
     }
+  }
+
+  /**
+   * Records the TYPE of each locally gathered candidate.
+   *
+   * `candidate.type` is authoritative and free — it is already parsed by the browser — and it
+   * answers the one question that separates a signalling bug from a connectivity bug. A peer
+   * that gathers only `host` will connect to another tab on the same machine and to nothing
+   * else, which is exactly the reported symptom.
+   */
+  private noteGatheredCandidate(peerId: string, candidate: RTCIceCandidate): void {
+    const wrapper = this.connections.get(peerId);
+    const gen = wrapper?.generation ?? this.generations.get(peerId) ?? 0;
+    const stat = this.pcStats.get(this.statsKey(peerId, gen));
+    if (!stat) return;
+
+    const type = candidate.type;
+    if (type === 'relay') stat.gathered.relay++;
+    else if (type === 'srflx' || type === 'prflx') stat.gathered.srflx++;
+    else stat.gathered.host++;
   }
 
   private noteIce(peerId: string, direction: 'sent' | 'received'): void {

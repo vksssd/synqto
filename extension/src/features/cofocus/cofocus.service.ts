@@ -111,6 +111,19 @@ export class CoFocusService {
       // Still in our own session room — nothing to reconcile.
       if (room && this.state.roomId && room.roomId === this.state.roomId) return;
 
+      // Tell the partner before the session state is discarded.
+      //
+      // endSession() covers the explicit End button, but that is not how sessions usually
+      // finish. A user who navigates to another page, opens a problem, or closes the tab
+      // leaves through THIS path — and the logs show the cost: one peer left a watcher room
+      // by navigating away at 05:32:29 and the other sat there until 05:36:00, three and a
+      // half minutes later, still believing the session was running.
+      //
+      // Announcing here is best-effort by nature: on a tab close the channel may already be
+      // gone, and the partner then falls back to the absence path. But navigation within the
+      // extension keeps the mesh alive long enough for the message to land, which covers the
+      // common case the End button never did.
+      this.announceSessionEnd('ended');
       this.clearTimers();
       this.detachTopologyWatch();
       this.setState({ ...INITIAL_COFOCUS_STATE });

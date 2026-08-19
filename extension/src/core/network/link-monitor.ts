@@ -212,3 +212,25 @@ export class LinkMonitor {
     };
   }
 }
+
+
+/**
+ * How long to wait before repairing a link, given the state WebRTC reported.
+ *
+ * `disconnected` is transient by specification: it means ICE consent checks are currently
+ * failing, and the spec explicitly allows a return to `connected` without any intervention.
+ * A Wi-Fi roam, a brief burst of loss, or an interface change all produce it routinely.
+ *
+ * Repairing immediately on `disconnected` is therefore worse than waiting twice over — it
+ * spends a fresh offer and a full ICE gather on a link that was about to recover, and the
+ * restart itself disrupts the recovery in progress. Repeated across a room, that is a
+ * plausible source of unexplained offer and candidate volume.
+ *
+ * `failed` is terminal: ICE has exhausted its candidate pairs and will not recover by
+ * itself, so waiting only adds dead time to a link that is already gone.
+ */
+export const DISCONNECT_GRACE_MS = 5000;
+
+export function repairDelayFor(status: 'disconnected' | 'failed'): number {
+  return status === 'failed' ? 0 : DISCONNECT_GRACE_MS;
+}

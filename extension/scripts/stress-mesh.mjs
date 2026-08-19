@@ -9,7 +9,7 @@
 
 import assert from 'assert';
 import { PeerSignaling, MAX_SIGNAL_HOPS } from '../src/core/network/peer-signaling.ts';
-import { LinkMonitor } from '../src/core/network/link-monitor.ts';
+import { LinkMonitor, repairDelayFor, DISCONNECT_GRACE_MS } from '../src/core/network/link-monitor.ts';
 
 let passed = 0;
 let total = 0;
@@ -552,6 +552,42 @@ scenario('relay forwarding cannot be used to amplify traffic', () => {
   const amplification = mesh.delivered.length - before;
 
   assert.ok(amplification <= 3, `one signal produced ${amplification} sends`);
+});
+
+
+console.log('\n── Scenario G: ICE restart discipline ──');
+
+scenario('a transient disconnect is given time to recover before repair', () => {
+  // WebRTC's `disconnected` is transient by specification — consent checks are failing and
+  // the connection may return to `connected` unaided, which a Wi-Fi roam or a burst of loss
+  // produces routinely. Repairing immediately spends an offer and a full ICE gather on a
+  // link that was recovering, and the restart disrupts the recovery itself.
+  assert.ok(
+    repairDelayFor('disconnected') > 0,
+    'a transient disconnect triggers an immediate ICE restart'
+  );
+  assert.strictEqual(repairDelayFor('disconnected'), DISCONNECT_GRACE_MS);
+});
+
+scenario('a failed connection is repaired immediately, with no grace', () => {
+  // `failed` is terminal: ICE has exhausted its candidate pairs and will not recover on its
+  // own, so waiting only adds dead time to a link that is already gone.
+  assert.strictEqual(
+    repairDelayFor('failed'),
+    0,
+    'a terminal failure was made to wait out the transient grace period'
+  );
+});
+
+scenario('the grace window sits between a network blip and the link monitor probe budget', () => {
+  // Too short and it repairs blips; too long and a genuinely dead link waits behind it while
+  // the monitor is already declaring it dead by its own route.
+  const monitorBudget = 9000 + 3 * 4000; // silenceThreshold + probes * sweepInterval
+  assert.ok(DISCONNECT_GRACE_MS >= 2000, 'grace too short to outlast a typical blip');
+  assert.ok(
+    DISCONNECT_GRACE_MS < monitorBudget,
+    'grace outlasts the link monitor, so the two repair paths would race'
+  );
 });
 
 console.log(`\n========================================`);

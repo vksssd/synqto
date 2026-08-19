@@ -16,7 +16,7 @@ import {
 import { TopologyView } from '../topology/topology-view';
 import { IRouteResolver } from '../topology/route-resolver';
 import { PeerSignaling, PeerSignalPayload } from './peer-signaling';
-import { LinkMonitor } from './link-monitor';
+import { LinkMonitor, repairDelayFor, DISCONNECT_GRACE_MS } from './link-monitor';
 import { LinkStateRouter, LSA } from '../topology/link-state';
 import { planMesh, planFallbackTargets } from '../topology/mesh-plan';
 import { LinkAffinity } from '../topology/link-affinity';
@@ -52,6 +52,11 @@ export class TopologyService {
   private identityStore = PeerIdentityStore.getInstance();
   private snapshotTimer: any = null;
   private joinTracker = new JoinTracker();
+  /**
+   * Pending repairs held during the disconnect grace period, so a link that recovers on its
+   * own is never torn down by a repair it did not need.
+   */
+  private repairGraceTimers: Map<string, any> = new Map();
 
   private myIdentity: PeerIdentity | null = null;
   private currentRoomId = '';
@@ -300,7 +305,17 @@ export class TopologyService {
     }
   }
 
+  private clearRepairGrace(peerId: string) {
+    const timer = this.repairGraceTimers.get(peerId);
+    if (timer) {
+      clearTimeout(timer);
+      this.repairGraceTimers.delete(peerId);
+    }
+  }
+
   private clearAllRetryTimers() {
+    this.repairGraceTimers.forEach((t) => clearTimeout(t));
+    this.repairGraceTimers.clear();
     this.retryTimers.forEach((timer) => clearTimeout(timer));
     this.retryTimers.clear();
   }
@@ -980,6 +995,8 @@ export class TopologyService {
 
     this.webrtc.onConnectionState((peerId, status) => {
       if (status === 'connected') {
+        // Recovered on its own — cancel any pending repair before it fires.
+        this.clearRepairGrace(peerId);
         this.retryAttempts.delete(peerId);
         if (this.retryTimers.has(peerId)) {
           clearTimeout(this.retryTimers.get(peerId));
@@ -1017,9 +1034,29 @@ export class TopologyService {
           }
         }
 
-        // Schedule automatic reconnection if this peer is part of our required topology links
+        // Schedule repair, but give a transient disconnect time to recover first.
+        //
+        // `disconnected` does not mean the link is gone — it means consent checks are
+        // currently failing, and WebRTC may return to `connected` unaided. Repairing
+        // immediately spends an offer and a full ICE gather on a link that was recovering,
+        // and the restart disrupts the recovery itself. `failed` is terminal and repaired
+        // at once.
         if (this.isLinkRequired(peerId) && this.allPeers.has(peerId)) {
-          this.schedulePeerReconnection(peerId);
+          const delay = repairDelayFor(status);
+          if (delay === 0) {
+            this.clearRepairGrace(peerId);
+            this.schedulePeerReconnection(peerId);
+          } else if (!this.repairGraceTimers.has(peerId)) {
+            const timer = setTimeout(() => {
+              this.repairGraceTimers.delete(peerId);
+              // Re-check: the link may have recovered while we waited, which is the whole
+              // point of waiting.
+              if (this.webrtc.isConnected(peerId)) return;
+              if (!this.allPeers.has(peerId)) return;
+              this.schedulePeerReconnection(peerId);
+            }, delay);
+            this.repairGraceTimers.set(peerId, timer);
+          }
         }
       }
       this.emitState();

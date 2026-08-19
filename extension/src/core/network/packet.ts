@@ -47,6 +47,7 @@ export type PacketType =
   | 'community:wave'
   | 'community:poke'
   | 'community:problem_mention'
+  | 'cofocus:session_end'
   | 'sync:request'
   | 'sync:response'
   | 'sync:digest'

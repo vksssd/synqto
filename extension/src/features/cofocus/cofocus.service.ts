@@ -49,6 +49,42 @@ export class CoFocusService {
     this.network = NetworkService.getInstance();
     this.bindLobbyListeners();
     this.bindRoomReconciliation();
+    this.bindPartnerEndListener();
+  }
+
+  /**
+   * Ends the local session when the partner announces they are leaving.
+   *
+   * Distinguishes a deliberate exit from a drop. Absence alone cannot: a partner who reloads
+   * disappears from the roster exactly like one who quit, and the reload case must keep the
+   * countdown running. Only an explicit announcement is treated as final.
+   */
+  private bindPartnerEndListener(): void {
+    this.network.on<{ reason?: string; endedBy?: string; roomId?: string }>(
+      'cofocus:session_end',
+      (payload, packet) => {
+        // Ignore our own broadcast and anything for a room we are not in — a stale packet
+        // arriving after a room switch must not end the session the user just started.
+        const me = this.currentPeerId();
+        if (packet.from?.peerId === me) return;
+        if (!this.state.roomId || payload?.roomId !== this.state.roomId) return;
+        if (this.state.phase !== 'active' && this.state.phase !== 'matched') return;
+
+        this.clearTimers();
+        this.detachTopologyWatch();
+
+        const who = packet.from?.nickname || 'Your partner';
+        this.setState({
+          ...INITIAL_COFOCUS_STATE,
+          error:
+            payload?.reason === 'completed'
+              ? `${who} finished the session.`
+              : `${who} ended the session.`,
+        });
+
+        if (this.state.roomId) this.roomService.leaveCurrentRoom();
+      }
+    );
   }
 
   /**
@@ -163,8 +199,22 @@ export class CoFocusService {
     this.setState({ ...INITIAL_COFOCUS_STATE });
   }
 
-  /** Ends the session, leaving the room and returning to idle. */
+  /**
+   * Ends the session, telling the partner before leaving.
+   *
+   * The announcement is the point. Departure was previously observable only as absence from
+   * the roster, and absence is deliberately treated as a possible reload — the countdown keeps
+   * running because a partner refreshing at minute 20 must not end the session. That is right
+   * for a drop and wrong for a deliberate exit, and the two were indistinguishable, so
+   * quitting looked to the other person exactly like a network blip: their timer kept
+   * counting against a partner who was never coming back.
+   *
+   * Sent before leaveCurrentRoom() because leaving tears down the very channels the message
+   * needs. Best-effort by nature — if the link is already gone the partner falls back to the
+   * absence path, which is the correct behaviour for an unannounced departure anyway.
+   */
   public endSession(): void {
+    this.announceSessionEnd('ended');
     this.clearTimers();
     this.detachTopologyWatch();
     this.lobby.leaveQueue();
@@ -172,6 +222,20 @@ export class CoFocusService {
       this.roomService.leaveCurrentRoom();
     }
     this.setState({ ...INITIAL_COFOCUS_STATE });
+  }
+
+  /** Tells the partner why the session is ending, while the channel is still up. */
+  private announceSessionEnd(reason: 'ended' | 'completed'): void {
+    if (!this.state.roomId) return;
+    try {
+      this.network.broadcast('cofocus:session_end', {
+        reason,
+        endedBy: this.currentPeerId(),
+        roomId: this.state.roomId,
+      });
+    } catch {
+      // Never let a failed announcement block the local exit — the user asked to leave.
+    }
   }
 
   /** Adds time to a running session (used by the "keep going" action at completion). */

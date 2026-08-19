@@ -23,6 +23,34 @@ interface CoFocusWatcherViewProps {
   identity: PeerIdentity | null;
 }
 
+/**
+ * Turns a getUserMedia rejection into something actionable.
+ *
+ * The distinction that matters: NotAllowedError with no prompt having appeared means the
+ * extension origin has not been granted camera access and this context cannot ask. The user
+ * needs to grant it somewhere that can prompt, which is a different action from "plug in a
+ * camera" or "close the other app using it".
+ */
+function describeCameraFailure(err: unknown): string {
+  const name = (err as { name?: string } | null)?.name ?? '';
+  switch (name) {
+    case 'NotAllowedError':
+    case 'SecurityError':
+      return 'Camera permission was not granted. Chrome may not be able to show the prompt in the side panel — open the extension in a tab and allow camera access there once.';
+    case 'NotFoundError':
+    case 'OverconstrainedError':
+      return 'No camera was found on this device.';
+    case 'NotReadableError':
+      return 'Your camera is in use by another app.';
+    case 'AbortError':
+      return 'Starting the camera was interrupted. Try again.';
+    default:
+      return name
+        ? `Camera unavailable (${name}). Check permissions and try again.`
+        : 'Camera unavailable. Check permissions and try again.';
+  }
+}
+
 function formatCountdown(totalSec: number): string {
   const m = Math.floor(totalSec / 60);
   const s = totalSec % 60;
@@ -60,11 +88,19 @@ export const CoFocusWatcherView: React.FC<CoFocusWatcherViewProps> = ({ room, id
         );
         if (cancelled) return;
         if (!ok) {
-          setCameraError('Camera unavailable. Check permissions and try again.');
+          setCameraError(describeCameraFailure(null));
         }
         setLocalStream(tutorService.getLocalStream());
-      } catch {
-        if (!cancelled) setCameraError('Could not start your camera.');
+      } catch (err) {
+        // Name the actual failure rather than collapsing every cause into one message.
+        //
+        // "Camera is off" is true and useless: it cannot distinguish a denied permission from
+        // an absent device from a context that is not allowed to prompt at all. That last case
+        // is the one worth calling out — a Chrome extension side panel does not reliably show
+        // the camera permission bubble, so getUserMedia can reject with NotAllowedError without
+        // the user ever being asked. Reported as "no camera feed and no prompt", it looks like
+        // the feature is missing rather than blocked.
+        if (!cancelled) setCameraError(describeCameraFailure(err));
       } finally {
         if (!cancelled) setIsStartingCamera(false);
       }

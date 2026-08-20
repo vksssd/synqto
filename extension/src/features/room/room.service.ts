@@ -176,12 +176,43 @@ export class RoomService {
     const identity = await this.identityService.getOrCreateIdentity();
     this.network.init(identity, roomId, DIRECT_ONLY_POLICY);
 
+    // Cross-context signal that a CoFocus session is live, independent of chrome.storage's
+    // synqto_active_problem (which this session does not use at all, and which the offscreen
+    // document's background-mesh listener otherwise has no way to distinguish from an
+    // ordinary problem room).
+    //
+    // RoomService is a singleton PER EXECUTION CONTEXT, not a shared instance: the side panel
+    // and the offscreen document are separate pages with separate JS heaps, so
+    // this.currentRoom here is invisible to offscreen.ts's own RoomService instance. Without
+    // this flag, offscreen.ts's resumeBackgroundMesh() — which fires the instant the side
+    // panel closes, precisely when a Watcher session (which occupies the whole panel) is most
+    // likely to be running — had no way to know a CoFocus room was active anywhere and would
+    // silently replace it via joinProblemRoom()'s leaveCurrentRoom(). See offscreen.ts for the
+    // read side.
+    this.setCoFocusActiveFlag(roomId, opts.mode);
+
     this.emitChange();
     return roomContext;
   }
 
+  private setCoFocusActiveFlag(roomId: string, mode: 'WATCHER' | 'TOGETHER') {
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      chrome.storage.local.set({ synqto_cofocus_active: { roomId, mode } });
+    }
+  }
+
+  private clearCoFocusActiveFlag() {
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      chrome.storage.local.remove('synqto_cofocus_active');
+    }
+  }
+
   public leaveCurrentRoom() {
     if (!this.currentRoom) return;
+
+    if (this.currentRoom.cofocusMode) {
+      this.clearCoFocusActiveFlag();
+    }
 
     this.network.leave();
     this.currentRoom = null;

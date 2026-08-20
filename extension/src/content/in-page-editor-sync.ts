@@ -1,5 +1,7 @@
 // ─── In-Page LeetCode & Coding Platform Collaborative Editor Sync ───
 
+import { safeCssColor, safeDisplayText, escapeHtml } from '@/core/security/sanitize';
+
 export interface RemotePeerCursor {
   peerId: string;
   nickname: string;
@@ -409,9 +411,22 @@ export class InPageEditorSync {
       </span>
       ${this.isEnabled && peerCount > 0 ? `
         <div style="display:flex;align-items:center;gap:2px;margin-left:4px;">
-          ${Array.from(this.activePeers.values()).map(p => `
-            <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${p.color || '#3b82f6'};box-shadow:0 0 6px ${p.color || '#3b82f6'};" title="${p.nickname} (line ${p.line}, col ${p.ch})"></span>
-          `).join('')}
+          ${Array.from(this.activePeers.values()).map(p => {
+            // Every field on `p` came from a remote peer's CODE_DELTA_REMOTE /
+            // CODE_CURSOR_REMOTE payload and this whole string is assigned via innerHTML.
+            //
+            // Unsanitised, `nickname` closed the title attribute and added an event handler
+            // (script execution in the content script's world on the victim's page), and
+            // `color` appended CSS declarations to a style attribute. line/ch were
+            // interpolated as if numeric but arrive as arbitrary JSON values.
+            const dotColor = safeCssColor(p.color, '#3b82f6');
+            const name = escapeHtml(safeDisplayText(p.nickname, 32) || 'Peer');
+            const line = Number.isFinite(Number(p.line)) ? Math.trunc(Number(p.line)) : 0;
+            const col = Number.isFinite(Number(p.ch)) ? Math.trunc(Number(p.ch)) : 0;
+            return `
+            <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${dotColor};box-shadow:0 0 6px ${dotColor};" title="${name} (line ${line}, col ${col})"></span>
+          `;
+          }).join('')}
         </div>
       ` : ''}
     `;

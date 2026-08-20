@@ -163,7 +163,7 @@ export class PeerSignaling {
     }
 
     // 2. Peer-relay through common neighbours.
-    const relays = this.pickRelays(targetPeerId);
+    const { relays, routed } = this.pickRelays(targetPeerId);
     if (relays.length > 0) {
       let sent = 0;
       for (const relay of relays) {
@@ -171,6 +171,29 @@ export class PeerSignaling {
       }
       if (sent > 0) {
         this.counters.peerRelay++;
+
+        // A *routed* hop came from the link-state map: some peer told us, via a converged
+        // LSA, that it can reach the target. That is real knowledge and is trusted alone.
+        //
+        // A *blind* fan-out is a guess with no such confirmation — it is what happens before
+        // routing has converged, which is precisely the newcomer-admission case (a peer that
+        // just joined has no LSAs about it yet). sendViaMesh succeeding only proves the
+        // relay's *local* channel accepted the write; it says nothing about whether that
+        // relay can forward to the target. handleInbound drops silently when it cannot
+        // (droppedNoRoute), and until now nothing here ever found out — route() had already
+        // returned 'peer-relay' success, so the server fallback below never ran, and a
+        // newcomer whose only accessible neighbours could not yet reach it never joined.
+        //
+        // Also sending via the server here is the cheap fix: worst case is one redundant
+        // message on a channel this module already treats as harmless-if-duplicated (SDP is
+        // guarded by seq, ICE is idempotent). It costs nothing when the blind guess was
+        // right, since the server copy just arrives as a harmless duplicate, and it is the
+        // only thing that gets an unlucky guess unstuck.
+        if (!routed) {
+          this.counters.server++;
+          this.sendViaServer(targetPeerId, kind, data);
+        }
+
         return { transport: 'peer-relay', via: relays[0], fanout: sent };
       }
     }
@@ -203,7 +226,7 @@ export class PeerSignaling {
    *
    * Sorted for determinism, so logs and tests stay reproducible.
    */
-  private pickRelays(targetPeerId: string): string[] {
+  private pickRelays(targetPeerId: string): { relays: string[]; routed: boolean } {
     // Exact next-hop when routing knows one.
     //
     // The fan-out below is a guess standing in for knowledge: three neighbours chosen
@@ -211,21 +234,26 @@ export class PeerSignaling {
     // actually leads to the target, so one send replaces three — and it reaches targets the
     // guess could not, because it follows multi-hop paths instead of only trying peers
     // adjacent to the destination.
-    const routed = this.getNextHop?.(targetPeerId);
-    if (routed) {
+    const nextHop = this.getNextHop?.(targetPeerId);
+    if (nextHop) {
       this.counters.routed++;
-      return [routed];
+      return { relays: [nextHop], routed: true };
     }
 
     // Fallback: no route known. Happens before the first LSAs converge, immediately after a
     // partition, and for peers that have never been adjacent to anyone we can see. Blind
     // fan-out is the right behaviour here — it is what discovers a path when the map is
-    // empty, and it is exactly how the signal that bootstraps routing gets through.
+    // empty, and it is exactly how the signal that bootstraps routing gets through. Because
+    // this is a guess rather than confirmed knowledge, route() also falls back to the server
+    // when it is used — see the `!routed` branch there.
     this.counters.unroutedFanout++;
-    return this.getConnectedPeers()
-      .filter((p) => p !== targetPeerId && p !== this.myPeerId)
-      .sort()
-      .slice(0, PeerSignaling.RELAY_FANOUT);
+    return {
+      relays: this.getConnectedPeers()
+        .filter((p) => p !== targetPeerId && p !== this.myPeerId)
+        .sort()
+        .slice(0, PeerSignaling.RELAY_FANOUT),
+      routed: false,
+    };
   }
 
   /**

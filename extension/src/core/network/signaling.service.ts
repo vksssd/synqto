@@ -177,7 +177,25 @@ export class SignalingService {
     if (nickname) this.nickname = nickname;
 
     if (!this.currentRoomId) {
-      this.currentRoomId = 'room:lobby';
+      // There is nothing to reconnect TO. This used to fall back to a hardcoded
+      // 'room:lobby' — a bare room ID with no hash suffix, unlike every real room, which
+      // is always `room:${slug}-${hash}` (see room-utils.ts computeRoomId). That made it a
+      // genuine, observed collision: production logs showed two unrelated peers who both
+      // hit this fallback (one navigating away mid-reconnect, whose `room` state was
+      // transiently undefined) ending up registered together in a room neither of them
+      // actually chose, invisibly to both.
+      //
+      // Callers reach here from a UI-triggered reconnect (App.tsx's manual button,
+      // SettingsCard's retry-server-connection button) at a moment when the caller does not
+      // yet know which room to rejoin — typically the gap between leaving one page's room
+      // and the next page's room being detected. Inventing a room name defeats the purpose
+      // of "reconnect" anyway: it would not reunite the user with whoever they were
+      // actually talking to. Refusing to connect and surfacing that clearly is the correct
+      // behaviour; the next real `connect(roomId, ...)` call, once a room is known, proceeds
+      // normally.
+      console.warn('[SignalingService] reconnect() called with no known room — nothing to rejoin, not connecting');
+      this.emit('connection:change', { connected: false, roomId: '', reason: 'no-room' });
+      return;
     }
     if (!this.peerId) {
       if (typeof crypto !== 'undefined' && crypto.randomUUID) {

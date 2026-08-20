@@ -50,6 +50,15 @@ export interface PeerConnectionWrapper {
   makingOffer: boolean;
   ignoreOffer: boolean;
   isPolite: boolean;
+  /**
+   * When this wrapper entered 'connecting'. Exists to detect an offer or answer that was
+   * handed to the signaling layer but never actually delivered — see sweepStuckConnections.
+   * Without this a peer whose only path was a relay hop that silently failed to forward (the
+   * relay had no route to the target yet) sits in 'connecting' forever: no browser timeout
+   * fires because ICE never starts without a remote description, and the reconciliation loop
+   * treats isConnecting()===true as "already being handled" and never retries.
+   */
+  connectingSince: number;
 }
 
 export class WebRTCService {
@@ -424,6 +433,7 @@ export class WebRTCService {
       makingOffer: false,
       ignoreOffer: false,
       isPolite,
+      connectingSince: Date.now(),
     };
     this.connections.set(remotePeerId, wrapper);
 
@@ -515,6 +525,7 @@ export class WebRTCService {
       makingOffer: false,
       ignoreOffer: false,
       isPolite,
+      connectingSince: Date.now(),
     };
     this.connections.set(remotePeerId, wrapper);
 
@@ -804,6 +815,55 @@ export class WebRTCService {
     const wrapper = this.connections.get(remotePeerId);
     if (!wrapper) return false;
     return wrapper.status === 'connecting' || wrapper.makingOffer;
+  }
+
+  /**
+   * Default budget for how long a connection may sit in 'connecting' before
+   * sweepStuckConnections gives up on it. See that method for why this exists.
+   *
+   * 15s is generous relative to normal negotiation (host candidates land in under a second;
+   * STUN/TURN reflexive candidates typically resolve within 2-4s) but short enough that a
+   * genuinely undeliverable offer does not leave a newcomer waiting through several
+   * reconciliation cycles before the mesh notices and tries a different path.
+   */
+  public static readonly STUCK_CONNECTING_MS = 15_000;
+
+  /**
+   * Resets any connection that has sat in 'connecting' for longer than maxAgeMs.
+   *
+   * This exists because a connection attempt can fail silently with no browser-level signal
+   * to react to. handleIncomingOffer/initiateConnection hand the SDP to
+   * PeerSignaling.route(), which prefers relaying through an existing mesh neighbour over the
+   * server — but pickRelays' blind fan-out (used before routing has converged, which is
+   * exactly the newcomer case) cannot verify the chosen neighbour can actually reach the
+   * target. When it cannot, the neighbour drops the signal and route() has already reported
+   * success. The local RTCPeerConnection then has a local description and nothing else: no
+   * remote description ever arrives, so ICE never begins checking and `connectionState` never
+   * leaves 'new' — there is no browser timeout to rescue this.
+   *
+   * Without this sweep, isConnecting() stays true forever and the reconciliation loop
+   * (topology.service.ts) treats the peer as already being handled, so it is never retried.
+   * A newcomer whose first attempt took the unlucky relay path would simply never join.
+   *
+   * Resetting closes the stuck attempt so the connection is fully absent from `connections`
+   * afterward — the next reconciliation tick then sees neither isConnected() nor
+   * isConnecting() and calls initiateConnection() again, this time with fresh routing state
+   * (the relay attempt that failed will itself have taught the mesh something, if link-state
+   * has advanced) or a renewed server fallback.
+   */
+  public sweepStuckConnections(maxAgeMs: number = WebRTCService.STUCK_CONNECTING_MS): string[] {
+    const now = Date.now();
+    const stuck: string[] = [];
+    this.connections.forEach((wrapper, peerId) => {
+      if (wrapper.status === 'connecting' && now - wrapper.connectingSince > maxAgeMs) {
+        stuck.push(peerId);
+      }
+    });
+    for (const peerId of stuck) {
+      console.warn(`[WebRTCService] Connection to ${peerId} stuck in 'connecting' for over ${maxAgeMs}ms — resetting for retry`);
+      this.handleConnectionFailure(peerId);
+    }
+    return stuck;
   }
 
   public getConnectionStatus(

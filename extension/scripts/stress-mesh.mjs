@@ -42,29 +42,65 @@ class SimMesh {
     this.nodes = new Map();
 
     for (const id of this.peerIds) {
-      const node = {
-        id,
-        applied: [],
-        signaling: null,
-      };
-      node.signaling = new PeerSignaling(
-        (peerId) => this.isLinked(id, peerId),
-        () => this.neighbours(id),
-        (targetPeerId, payload) => this.deliver(id, targetPeerId, payload),
-        (targetPeerId, kind) => {
-          if (!this.serverUp) return; // server down: signal is simply lost
-          this.serverSignals++;
-          const target = this.nodes.get(targetPeerId);
-          if (target) target.applied.push({ via: 'server', kind, from: id });
-        }
-      );
-      node.signaling.setMyPeerId(id);
-      this.nodes.set(id, node);
+      this.addPeer(id);
     }
+  }
+
+  /**
+   * Adds a peer after construction — e.g. a newcomer arriving into an already-running mesh,
+   * rather than everyone starting present at t=0. Shares the exact same wiring as the
+   * constructor so a dynamically-joined peer behaves identically to a founding one.
+   */
+  addPeer(id) {
+    if (!this.peerIds.includes(id)) this.peerIds.push(id);
+    const node = { id, applied: [], signaling: null };
+    node.signaling = new PeerSignaling(
+      (peerId) => this.isLinked(id, peerId),
+      () => this.neighbours(id),
+      (targetPeerId, payload) => this.deliver(id, targetPeerId, payload),
+      (targetPeerId, kind) => {
+        if (!this.serverUp) return; // server down: signal is simply lost
+        this.serverSignals++;
+        const target = this.nodes.get(targetPeerId);
+        if (target) target.applied.push({ via: 'server', kind, from: id });
+      }
+    );
+    node.signaling.setMyPeerId(id);
+    // Mirrors topology.service.ts, which binds PeerSignaling to the live link-state
+    // router (this.router.nextHop). Leaving this unbound would make every relay attempt
+    // in this harness a blind guess, which is only true of a mesh before its first LSA
+    // converges — not of the steady state these scenarios are meant to exercise.
+    node.signaling.bindRouter((targetPeerId) => this.nextHop(id, targetPeerId));
+    this.nodes.set(id, node);
+    return node;
   }
 
   key(a, b) {
     return [a, b].sort().join('|');
+  }
+
+  /**
+   * BFS shortest-path first hop over the *current* link snapshot — a stand-in for what
+   * link-state routing converges to once LSAs have propagated. Real convergence is not
+   * instantaneous, which is exactly the gap the `routed: false` path in PeerSignaling
+   * exists to cover; this harness models the converged case so that gap is only exercised
+   * by scenarios that deliberately partition the mesh, not by every relay in every test.
+   */
+  nextHop(fromId, toId) {
+    if (fromId === toId) return null;
+    const visited = new Set([fromId]);
+    const queue = [[fromId, null]];
+    while (queue.length > 0) {
+      const [cur, firstHop] = queue.shift();
+      for (const nb of this.neighbours(cur)) {
+        if (visited.has(nb)) continue;
+        visited.add(nb);
+        const hop = firstHop === null ? nb : firstHop;
+        if (nb === toId) return hop;
+        queue.push([nb, hop]);
+      }
+    }
+    return null;
   }
 
   link(a, b) {
@@ -155,6 +191,36 @@ scenario('direct link is preferred over relay when it is still open', () => {
   assert.strictEqual(mesh.delivered.length, 1, 'renegotiation took extra hops');
 });
 
+scenario('two same-system pairs merging into one room reach each other across the boundary', () => {
+  // Reproduces the reported real-world symptom: two browser tabs on one machine (a1-a2,
+  // already connected to each other) and two on another machine (b1-b2, already connected
+  // to each other) join the same room. The signaling server groups all four correctly — the
+  // roster is right — but nobody has a link, let alone a route, across the a/b boundary yet.
+  //
+  // Each side's only neighbour is its own tab-mate, who is equally unable to reach the other
+  // machine. Before the routed/unrouted distinction, whichever side initiated (lower peer ID)
+  // would hand its offer to its tab-mate as a "successful" peer-relay, the tab-mate would
+  // drop it (droppedNoRoute), and the offer would vanish — cross-machine peers would never
+  // connect while same-machine pairs looked perfectly healthy, exactly as reported.
+  const mesh = new SimMesh(['a1', 'a2', 'b1', 'b2'], { serverUp: true });
+  mesh.link('a1', 'a2');
+  mesh.link('b1', 'b2');
+
+  // Deterministic initiator election (topology.service.ts): lower peer ID dials.
+  for (const [lo, hi] of [
+    ['a1', 'b1'], ['a1', 'b2'], ['a2', 'b1'], ['a2', 'b2'],
+  ]) {
+    mesh.nodes.get(lo).signaling.route(hi, 'offer', { sdp: `${lo}->${hi}` });
+  }
+
+  for (const [, hi] of [['a1', 'b1'], ['a1', 'b2'], ['a2', 'b1'], ['a2', 'b2']]) {
+    assert.ok(
+      mesh.nodes.get(hi).applied.length > 0,
+      `${hi} never received an offer across the machine boundary — cross-system admission failed`
+    );
+  }
+});
+
 console.log('\n── Scenario B: the server is genuinely required ──');
 
 scenario('isolated peer with no mesh path falls back to the server', () => {
@@ -167,20 +233,46 @@ scenario('isolated peer with no mesh path falls back to the server', () => {
 });
 
 scenario('a partitioned mesh does not silently swallow signals', () => {
-  // a-c linked, b-d linked, no path between the halves.
+  // a-c linked, b-d linked, no path between the halves — so a's router has never heard of
+  // b and pickRelays falls back to a blind guess (its only neighbour, c).
   const mesh = new SimMesh(['a', 'b', 'c', 'd'], { serverUp: true });
   mesh.link('a', 'c');
   mesh.link('b', 'd');
 
   const res = mesh.nodes.get('a').signaling.route('b', 'offer', { sdp: 'v=0' });
 
-  // 'a' hands it to 'c', its only neighbour. 'c' cannot reach 'b' and drops it. The signal
-  // is lost — which is correct and must be visible, not silent, so the caller's retry can
-  // eventually reach the server.
+  // 'a' hands it to 'c', its only neighbour, because that is a guess (routed: false) rather
+  // than confirmed knowledge — the router has no path to offer. 'c' cannot reach 'b' either
+  // and drops it: that failure is real and must stay visible in the relay's own stats.
+  //
+  // What must NOT happen is the signal simply vanishing because route() reported success.
+  // A blind guess earns no trust, so route() also fires the server fallback concurrently —
+  // this is the fix for exactly the bug a genuine partition exposes: an unconfirmed relay
+  // hop failing silently while nothing else was ever going to retry.
   const cStats = mesh.nodes.get('c').signaling.getStats();
-  assert.strictEqual(res.transport, 'peer-relay');
+  assert.strictEqual(res.transport, 'peer-relay', 'the relay attempt itself is still reported as the transport');
   assert.strictEqual(cStats.droppedNoRoute, 1, 'relay drop was not accounted for');
-  assert.strictEqual(mesh.nodes.get('b').applied.length, 0);
+  assert.strictEqual(mesh.serverSignals, 1, 'an unrouted (blind-guess) relay must be backstopped by the server');
+  assert.strictEqual(mesh.nodes.get('b').applied.length, 1, 'signal was lost despite the server being reachable');
+  assert.strictEqual(mesh.nodes.get('b').applied[0].via, 'server');
+});
+
+scenario('a routed (confirmed) relay hop does NOT also hit the server', () => {
+  // Distinguishes the fix above from a regression that would double-send on every relay.
+  // a-b-c chain: a's router has a real, converged path to c via b, so that hop is trusted
+  // alone — redundant server traffic here would defeat the entire point of peer-assisted
+  // signaling (the server should be needed only for genuinely new peers).
+  const mesh = new SimMesh(['a', 'b', 'c'], { serverUp: true });
+  mesh.link('a', 'b');
+  mesh.link('b', 'c');
+
+  const res = mesh.nodes.get('a').signaling.route('c', 'offer', { sdp: 'v=0' });
+
+  assert.strictEqual(res.transport, 'peer-relay');
+  assert.strictEqual(res.via, 'b');
+  assert.strictEqual(mesh.serverSignals, 0, 'a routed hop must not also touch the server');
+  assert.strictEqual(mesh.nodes.get('c').applied.length, 1);
+  assert.strictEqual(mesh.nodes.get('c').applied[0].via, 'mesh');
 });
 
 console.log('\n── Scenario C: hostile and malformed input ──');
@@ -394,6 +486,78 @@ scenario('20-peer mesh losing half its links still repairs entirely off-server',
   for (const [, b] of broken) {
     assert.ok(mesh.nodes.get(b).applied.length > 0, `${b} never received its repair offer`);
   }
+});
+
+scenario('ten isolated pairs merging into one room all cross the boundary (scale)', () => {
+  // Generalises "two same-system pairs merging" (Scenario A) to P2 capacity: 20 peers
+  // arriving as 10 independent pairs — each pair already linked to its own partner, none
+  // linked across pairs — all landing in the same room at once, the way a room fills as
+  // multiple already-open browser sessions discover each other. Every cross-pair link is a
+  // newcomer-admission case with zero routing knowledge, so this is the routed/unrouted fix
+  // under load rather than under a single instance.
+  const pairs = Array.from({ length: 10 }, (_, i) => [`pair${i}-a`, `pair${i}-b`]);
+  const allPeers = pairs.flat();
+  const mesh = new SimMesh(allPeers, { serverUp: true });
+  pairs.forEach(([a, b]) => mesh.link(a, b));
+
+  // Deterministic initiator election, exactly as topology.service.ts's reconciliation loop
+  // does it: lower peer ID dials every peer it doesn't yet have a route to.
+  let attempts = 0;
+  for (const from of allPeers) {
+    for (const to of allPeers) {
+      if (from === to || from > to) continue;
+      attempts++;
+      mesh.nodes.get(from).signaling.route(to, 'offer', { sdp: `${from}->${to}` });
+    }
+  }
+
+  let missing = 0;
+  for (const from of allPeers) {
+    for (const to of allPeers) {
+      if (from === to || from > to) continue;
+      const applied = mesh.nodes.get(to).applied.some((x) => x.kind === 'offer');
+      if (!applied) missing++;
+    }
+  }
+
+  assert.strictEqual(missing, 0, `${missing} of ${attempts} cross-boundary offers never arrived`);
+});
+
+scenario('a 50-peer mesh admitting 10 newcomers one at a time stays server-light', () => {
+  // The steady-state expectation (server-free ratio > 0.95, Scenario E above) needs to keep
+  // holding as newcomers keep arriving — not just once a mesh is already dense. Each newcomer
+  // starts with zero links, so every one of its first offers is necessarily an unrouted
+  // (blind-guess) relay attempt or a genuine server fallback, which is exactly the traffic
+  // the routed/unrouted fix is allowed to spend on the server. What must not happen is that
+  // cost growing unboundedly as the mesh scales.
+  const base = Array.from({ length: 50 }, (_, i) => `base-${i}`);
+  const mesh = new SimMesh(base, { serverUp: true });
+  mesh.linkAll();
+
+  for (let n = 0; n < 10; n++) {
+    const newcomer = `newcomer-${n}`;
+    const node = mesh.addPeer(newcomer);
+
+    // The newcomer has no links yet — it must reach at least one existing peer to bootstrap,
+    // exactly like a real join reaching the server because the mesh has never heard of it.
+    const anchor = base[n % base.length];
+    const res = node.signaling.route(anchor, 'offer', { sdp: 'join' });
+    assert.strictEqual(res.transport, 'server', `newcomer ${n} should bootstrap via the server`);
+    assert.ok(mesh.nodes.get(anchor).applied.length > 0, `newcomer ${n} never reached its anchor`);
+
+    // Now link it in, as WebRTC establishing would, so later newcomers see a mesh that
+    // includes it.
+    mesh.link(newcomer, anchor);
+  }
+
+  // Confirm the mesh members' OWN traffic (unrelated to bootstrapping brand-new newcomers)
+  // still stays server-light — the cost above is newcomer bootstrap cost, not steady-state
+  // repair cost, and the two must not be conflated. base was linkAll()'d, so this is 'direct'
+  // rather than 'peer-relay'; either is fine, 'server' is the only failure.
+  const a = base[0];
+  const b = base[base.length - 1];
+  const res = mesh.nodes.get(a).signaling.route(b, 'offer', { sdp: 'steady-state' });
+  assert.notStrictEqual(res.transport, 'server', 'established members should not need the server for each other');
 });
 
 scenario('server-free ratio stays high across sustained churn', () => {

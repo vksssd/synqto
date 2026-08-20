@@ -294,6 +294,11 @@ export class TopologyService {
   private startReconciliationLoop() {
     this.stopReconciliationLoop();
     this.reconciliationTimer = setInterval(() => {
+      // Free any connection stuck in 'connecting' before deciding what needs dialling this
+      // tick, so a newcomer whose first attempt silently failed (see
+      // WebRTCService.sweepStuckConnections) is retried in the same cycle that notices,
+      // rather than waiting for one more 3.5s tick to see the freed slot.
+      this.webrtc.sweepStuckConnections();
       this.reconcileConnections();
     }, 3500);
   }
@@ -1229,7 +1234,16 @@ export class TopologyService {
   }
 
   /**
-   * Broadcasts packet from local client
+   * Broadcasts a control packet from this client, bypassing TransportRouter.
+   *
+   * This is NOT the application broadcast path — that goes through NetworkService and
+   * TransportRouter. This one exists for the leader-mesh digest (`topology:digest`), the
+   * TIER2 backbone's own coordination gossip, which cannot route through TransportRouter
+   * because TransportRouter's view is derived from the very topology these digests maintain.
+   *
+   * Because it bypasses the router, it also bypasses everything the router enforces —
+   * deferral, dedup, and most importantly the relay policy. The guard below therefore has to
+   * be repeated here rather than inherited.
    */
   public broadcastPacket(packet: NetworkPacket) {
     this.markPacketSeen(packet.id);
@@ -1238,14 +1252,28 @@ export class TopologyService {
     const currentTier = this.tierCoordinator.getCurrentTier();
     const lifecycleState = this.tierCoordinator.getLifecycleState();
 
+    // Never put the server in the data path of a room whose policy forbids it.
+    //
+    // TransportRouter.setRelayAllowed enforces this for application traffic, but this method
+    // does not go through TransportRouter, so it had no such check: under TIER3 or a draining
+    // lifecycle it would call sendRelayPacket unconditionally and route a DIRECT_ONLY room's
+    // control traffic through the signalling server.
+    //
+    // That is currently unreachable — DIRECT_ONLY_POLICY forbids TIER3 and forbids leader
+    // election, so neither the tier nor the caller (leaderMesh) can exist in a CoFocus room.
+    // But an invariant defended only by the unreachability of its violation is one refactor
+    // away from being violated, and this one is the feature's central promise. Enforce it
+    // where it could be broken, not two layers away.
+    const relayPermitted = this.activePolicy.allowRelay;
+
     // 1. Tier 3 Server Relay Broadcast
     if (currentTier === 'TIER3_SERVER_RELAY') {
-      this.signaling.sendRelayPacket(packet);
+      if (relayPermitted) this.signaling.sendRelayPacket(packet);
       return;
     }
 
     // 2. Dual-Path Migration: If preparing or demoting Tier 3, send copy to server relay as fallback
-    if (lifecycleState === 'TIER3_PREPARING' || lifecycleState === 'TIER3_DEMOTING') {
+    if (relayPermitted && (lifecycleState === 'TIER3_PREPARING' || lifecycleState === 'TIER3_DEMOTING')) {
       this.signaling.sendRelayPacket(packet);
     }
 
@@ -1288,9 +1316,10 @@ export class TopologyService {
 
     const currentTier = this.tierCoordinator.getCurrentTier();
 
-    // 1. Tier 3 Server Relay Directed Message
+    // 1. Tier 3 Server Relay Directed Message.
+    // Same policy guard as broadcastPacket — see the reasoning there.
     if (currentTier === 'TIER3_SERVER_RELAY') {
-      this.signaling.sendRelayPacket(packet);
+      if (this.activePolicy.allowRelay) this.signaling.sendRelayPacket(packet);
       return;
     }
 
@@ -1405,12 +1434,25 @@ export class TopologyService {
       const children = this.router.getBroadcastChildren(this.myIdentity!.peerId);
       const targets = children ?? this.webrtc.getConnectedPeers();
 
+      // anySent must record that a send SUCCEEDED, not that one was attempted.
+      //
+      // This previously did `sendPacket(...); anySent = true;` — discarding the return and
+      // setting the flag unconditionally. The consequence was not local: this boolean is the
+      // only failure signal TransportRouter.broadcast has, and it drives the entire deferral
+      // path (pendingP2P, the flush timer, the TTL, the drop counters). Because the flag was
+      // true whenever `targets` was non-empty, deferOrDrop was unreachable for broadcasts and
+      // all of that machinery was dead code. Reliable traffic still recovered via ACK timeout
+      // seconds later; unreliable traffic — strokes, code deltas, digests — was simply lost
+      // with no signal at any layer.
+      //
+      // isConnected() is deliberately NOT treated as proof of delivery either: it reads
+      // readyState, and the channel can close between that read and the send. Only
+      // sendPacket's own result reflects what actually happened.
       let anySent = false;
       for (const peerId of targets) {
         if (peerId === this.myIdentity?.peerId) continue;
         if (!this.webrtc.isConnected(peerId)) continue;
-        this.webrtc.sendPacket(peerId, packet);
-        anySent = true;
+        if (this.webrtc.sendPacket(peerId, packet)) anySent = true;
       }
 
       // If the tree told us to send to nobody but we do have neighbours, fall back. A tree
@@ -1418,8 +1460,7 @@ export class TopologyService {
       if (!anySent) {
         for (const peerId of this.webrtc.getConnectedPeers()) {
           if (peerId === this.myIdentity?.peerId) continue;
-          this.webrtc.sendPacket(peerId, packet);
-          anySent = true;
+          if (this.webrtc.sendPacket(peerId, packet)) anySent = true;
         }
       }
       return anySent;
@@ -1427,13 +1468,18 @@ export class TopologyService {
 
     if (currentTier === 'TIER2_MULTI_LEADER') {
       if (this.isLeader) {
+        // Same correction as TIER1 above, and this branch was blunter: it fanned out and then
+        // `return true` unconditionally, reporting success even with an empty cluster and no
+        // backbone — a leader isolated from every peer it is supposed to serve still told the
+        // transport its broadcast had gone out.
+        let anySent = false;
         this.clusterPeers.forEach((peerId) => {
-          this.webrtc.sendPacket(peerId, packet);
+          if (this.webrtc.sendPacket(peerId, packet)) anySent = true;
         });
         this.backboneLeaders.forEach((leaderId) => {
-          this.webrtc.sendPacket(leaderId, packet);
+          if (this.webrtc.sendPacket(leaderId, packet)) anySent = true;
         });
-        return true;
+        return anySent;
       } else {
         if (this.assignedLeader && this.webrtc.isConnected(this.assignedLeader)) {
           return this.webrtc.sendPacket(this.assignedLeader, packet);

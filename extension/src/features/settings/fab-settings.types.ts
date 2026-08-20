@@ -55,7 +55,15 @@ export const DEFAULT_FAB_SETTINGS: FabSettings = {
   showMainFab: true,
   showTimerFab: true,
   showCodeTogetherDock: false,
-  clickAction: 'open_popup',
+  // Default: the FAB opens the SIDE PANEL, not the in-page popup.
+  //
+  // The popup was the default and it is the wrong first impression: it is a reduced surface
+  // (chat and whiteboard only — no CoFocus, no groups, no settings, no peers), so a user
+  // whose only entry point is the FAB never sees most of the product and has no way to
+  // discover that a fuller UI exists. Clicking the extension's own button should open the
+  // extension. The popup remains available by switching this setting, for people who prefer
+  // to stay on the page.
+  clickAction: 'open_extension',
   customDomains: ['leetcode.com', 'neetcode.io', 'codeforces.com', 'hackerrank.com', 'geeksforgeeks.org', 'codechef.com', 'atcoder.jp', 'localhost', '127.0.0.1'],
   enableWhiteboard: true,
   enableTimer: true,

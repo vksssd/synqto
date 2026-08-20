@@ -8,6 +8,13 @@ import { ChatService } from '@/features/chat/chat.service';
 console.log('[Synqto] Background offscreen runner initialized');
 
 let isSidepanelOpen = false;
+/**
+ * Mirrors room.service.ts's synqto_cofocus_active storage flag. RoomService is a singleton
+ * per execution context (see its setCoFocusActiveFlag comment) — this offscreen page has its
+ * own instance, entirely blind to a CoFocus room the side panel joined. The storage flag is
+ * the only channel that crosses that boundary.
+ */
+let cofocusActiveElsewhere = false;
 const network = NetworkService.getInstance();
 const identityService = IdentityService.getInstance();
 const roomService = RoomService.getInstance();
@@ -21,9 +28,11 @@ if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       'nerd_buddy_sidepanel_open',
       'synqto_active_problem',
       'nerd_buddy_active_problem',
+      'synqto_cofocus_active',
     ],
     (res) => {
       isSidepanelOpen = Boolean(res.synqto_sidepanel_open ?? res.nerd_buddy_sidepanel_open);
+      cofocusActiveElsewhere = Boolean(res.synqto_cofocus_active);
       const activeProb = res.synqto_active_problem || res.nerd_buddy_active_problem;
       if (!isSidepanelOpen && activeProb) {
         resumeBackgroundMesh(activeProb);
@@ -33,11 +42,20 @@ if (typeof chrome !== 'undefined' && chrome.storage?.local) {
 
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area === 'local') {
+      if ('synqto_cofocus_active' in changes) {
+        cofocusActiveElsewhere = Boolean(changes.synqto_cofocus_active.newValue);
+      }
+
       const panelChange = changes.synqto_sidepanel_open || changes.nerd_buddy_sidepanel_open;
       if (panelChange) {
         isSidepanelOpen = Boolean(panelChange.newValue);
         if (isSidepanelOpen) {
-          // Sidepanel opened -> yield WebRTC slots so UI owns the direct connection
+          // Sidepanel opened -> yield WebRTC slots so UI owns the direct connection.
+          //
+          // Safe to call unconditionally even during a CoFocus session: this offscreen page's
+          // own RoomService never joins a CoFocus room (resumeBackgroundMesh refuses to while
+          // cofocusActiveElsewhere is set — see below), so there is nothing CoFocus-related
+          // here to yield. The side panel reopening is what a CoFocus session is waiting for.
           roomService.leaveCurrentRoom();
         } else {
           // Sidepanel closed -> resume background WebRTC mesh
@@ -75,6 +93,26 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
 
 async function resumeBackgroundMesh(problem: any) {
   if (!problem || isSidepanelOpen) return;
+
+  // Never let stale problem-page detection evict an active CoFocus session.
+  //
+  // App.tsx's own copy of this same "resume from stored active problem" listener carries this
+  // exact guard (see its comment: closing a session's room by surprise "camera and partner
+  // gone, no prompt, no explanation" was a real, observed bug). This offscreen listener exists
+  // to do the identical job — rejoin whatever room the last detected page implies — for the
+  // case where the side panel is closed, which is precisely when a CoFocus Watcher session is
+  // running: Watcher takes over the whole side panel surface, so a user checking another tab
+  // mid-session closes the panel routinely. That is exactly the moment this function used to
+  // fire unconditionally, tearing the CoFocus room down via joinProblemRoom()'s leaveCurrentRoom()
+  // and replacing it with an unrelated, non-DIRECT_ONLY_POLICY room — breaking the "CoFocus is
+  // always exactly two peers, always direct P2P" invariant with no user action and no signal to
+  // the partner beyond whatever the room-reconciliation watcher manages to salvage after the fact.
+  //
+  // Checked against cofocusActiveElsewhere (the cross-context storage flag), NOT
+  // roomService.getCurrentRoom() — this offscreen page's own RoomService never joins a CoFocus
+  // room itself, so its local state can never reflect a session the side panel is running. See
+  // room.service.ts's setCoFocusActiveFlag for the write side.
+  if (cofocusActiveElsewhere) return;
 
   const room = await roomService.joinProblemRoom(
     problem.platform,

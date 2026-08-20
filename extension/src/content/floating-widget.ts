@@ -2,6 +2,12 @@ import { FabSettings, DEFAULT_FAB_SETTINGS, FAB_STORAGE_KEY, SYNQTO_FAB_STORAGE_
 import { THEME_SETTINGS_STORAGE_KEY } from '@/features/settings/theme.service';
 import { detectResource } from './resource-detector';
 import { getPlatformBadgeColor, computeRoomId } from '@/features/room/room-utils';
+import { safeMediaUrl, safeCssColor, escapeHtml as sharedEscapeHtml } from '@/core/security/sanitize';
+import { renderIconSprite, icon, toolButton, ICON_BUTTON_CSS } from './tool-icons';
+// `import type` matters under isolatedModules: a type imported through a value binding is
+// emitted as a real runtime import by transpilers that compile file-by-file, and resolving
+// an export that does not exist at runtime throws at module load.
+import type { ToolIconId } from './tool-icons';
 import {
   TimerState,
   PomodoroConfig,
@@ -219,7 +225,73 @@ export class FloatingWidget {
   private wbPersonalStrokes: InPageStroke[] = [];
   private wbPersonalTheme: string = 'grid';
   private wbPersonalBgColor: string = '#090d16';
+  /**
+   * Undo history for the COLLABORATIVE board only.
+   *
+   * THE BUG THIS SPLIT FIXES — there used to be a single redo stack shared by both boards,
+   * while every producer and consumer of it branched on wbPrivacyMode to decide which stroke
+   * list to read from. That made the stack a channel between the private board and the shared
+   * one:
+   *
+   *   1. draw a stroke in 'personal' mode — never broadcast, that is the whole point
+   *   2. undo — the stroke moves onto the shared redo stack
+   *   3. switch privacy mode to 'collaborative'
+   *   4. redo — the else-branch pushes it into wbStrokes AND sends WHITEBOARD_STROKE_LOCAL
+   *
+   * ...so private content is transmitted to every peer in the room, with no user action that
+   * looks like sharing. The eraser, selection-delete and clear paths all fed the same stack,
+   * so the leak had four entrances, and a REMOTE peer's clear wiped the local personal
+   * board's history as collateral.
+   *
+   * Two stacks make the mode boundary structural: a stroke can only ever be restored into the
+   * board it was removed from, because there is no longer a stack that spans both.
+   */
   private wbRedoStack: InPageStroke[] = [];
+  /** Undo history for the PERSONAL board. Never leaves this device. */
+  private wbPersonalRedoStack: InPageStroke[] = [];
+  /** Two-step confirm state for the destructive collaborative Clear. */
+  private wbClearArmed = false;
+  private wbClearArmTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * Set once the extension context has been torn out from under this content script.
+   *
+   * Every content script injected into a page is orphaned when the extension reloads — which
+   * happens on every auto-update, not just during development. After that, chrome.runtime is
+   * a husk: sendMessage throws "Extension context invalidated" and storage calls fail.
+   *
+   * This widget had fifteen `.catch(() => {})` sites and no validity check anywhere, so the
+   * orphaned state was completely silent: the FAB still rendered, the panel still opened, the
+   * chat box still accepted text, the send button still animated — and nothing was delivered
+   * to anyone. The user's only clue was that no one ever replied.
+   *
+   * cursor-overlay.ts and page-observer.ts already guard with isExtensionValid(); the pattern
+   * simply had not been applied to the largest surface. Detecting it is only half the fix —
+   * the other half is saying so, because the remedy (reload the tab) is not one the user can
+   * guess from a UI that appears to be working.
+   */
+  private contextInvalidated = false;
+
+  /**
+   * The redo stack belonging to the board currently being edited.
+   *
+   * Returned by reference so callers can push onto it directly, mirroring how the stroke
+   * lists themselves are selected. Every call site that previously touched wbRedoStack goes
+   * through here, so adding a third board cannot reintroduce the cross-board leak by
+   * forgetting one branch.
+   */
+  private activeRedoStack(): InPageStroke[] {
+    return this.wbPrivacyMode === 'personal' ? this.wbPersonalRedoStack : this.wbRedoStack;
+  }
+
+  /** Replaces the active board's redo stack (push-based callers use activeRedoStack). */
+  private setActiveRedoStack(next: InPageStroke[]): void {
+    if (this.wbPrivacyMode === 'personal') {
+      this.wbPersonalRedoStack = next;
+    } else {
+      this.wbRedoStack = next;
+    }
+  }
   private isWbDrawing: boolean = false;
   private wbCurrentPoints: WhiteboardPoint[] = [];
   private wbStartPoint: WhiteboardPoint | null = null;
@@ -255,6 +327,7 @@ export class FloatingWidget {
     this.checkVisibilityAndRender();
     this.listenToStorageChanges();
     this.listenForRuntimeMessages();
+    this.listenForViewportResize();
     console.log('[Synqto] Floating widget initialized. State:', this.shouldShow() ? 'VISIBLE' : 'HIDDEN', 'Mode:', this.settings.mode);
   }
 
@@ -478,6 +551,93 @@ export class FloatingWidget {
     this.render();
   }
 
+  /**
+   * Re-clamps the FAB into the viewport whenever the window changes size.
+   *
+   * The position is stored as an offset from the bottom-right corner and persisted across
+   * sessions, and applyHostPosition() clamps it — but it was only ever called on render and
+   * at the end of a drag. Nothing ran on resize, so a position saved on a wide display put
+   * the FAB outside a narrower one: `right: 1800px` on a 1200px-wide window places it 600px
+   * off the left edge. It is then unreachable, and because the only way to move it is to drag
+   * it, the user cannot recover without clearing extension storage.
+   *
+   * Covers the ordinary cases too: unmaximising a window, opening devtools, rotating a tablet,
+   * or dragging the window to a smaller external display.
+   */
+  /**
+   * True while this content script still has a live connection to the extension.
+   *
+   * Reading chrome.runtime.id is the standard probe: it becomes undefined the moment the
+   * context is invalidated, and touching it can itself throw, hence the try/catch.
+   */
+  private isExtensionValid(): boolean {
+    try {
+      return Boolean(typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Sends a runtime message, and notices when the extension context is gone.
+   *
+   * Replaces the bare sendMessage-with-swallowed-rejection idiom. The swallow is still
+   * there — a failed cursor broadcast genuinely is not worth surfacing — but a failure caused
+   * by context invalidation is different in kind from a dropped message, and this is the
+   * single place able to tell them apart and record it.
+   */
+  private safeSendMessage(message: unknown): void {
+    if (this.contextInvalidated) return;
+    if (!this.isExtensionValid()) {
+      this.markContextInvalidated();
+      return;
+    }
+    try {
+      const p = (chrome.runtime as any)?.sendMessage?.(message);
+      if (p && typeof p.catch === 'function') {
+        p.catch((err: any) => {
+          if (String(err?.message || err).includes('Extension context invalidated')) {
+            this.markContextInvalidated();
+          }
+        });
+      }
+    } catch (err: any) {
+      if (String(err?.message || err).includes('Extension context invalidated')) {
+        this.markContextInvalidated();
+      }
+    }
+  }
+
+  /** Records the orphaned state once and re-renders so the banner appears. */
+  private markContextInvalidated(): void {
+    if (this.contextInvalidated) return;
+    this.contextInvalidated = true;
+    try {
+      this.render();
+    } catch {
+      /* render itself may fail in a torn-down context; the flag is what matters */
+    }
+  }
+
+  private listenForViewportResize() {
+    if (typeof window === 'undefined') return;
+    let scheduled = false;
+    window.addEventListener(
+      'resize',
+      () => {
+        // Coalesce to one clamp per frame — resize fires continuously while dragging a window
+        // edge, and each handler run does layout-reading work.
+        if (scheduled) return;
+        scheduled = true;
+        requestAnimationFrame(() => {
+          scheduled = false;
+          this.applyHostPosition();
+        });
+      },
+      { passive: true }
+    );
+  }
+
   private applyHostPosition() {
     if (!this.hostElement) return;
     const curRight = Number.isFinite(this.currentPosition?.right) ? this.currentPosition.right : 24;
@@ -491,7 +651,12 @@ export class FloatingWidget {
   /** Signature of the currently injected stylesheet, so it is only re-parsed on real change. */
   private lastStyleSignature = '';
 
-  private render() {
+  /**
+   * @param mode 'full' rebuilds the body markup and reattaches listeners. 'style-only'
+   *        re-injects the stylesheet and updates class-expressible state, leaving the DOM
+   *        (and therefore the canvas, scroll position, focus and listeners) untouched.
+   */
+  private render(mode: 'full' | 'style-only' = 'full') {
     if (!this.shadow) return;
     const contentMode = this.settings.popupContentMode || (this.settings.enableWhiteboard ? 'both' : 'chat_only');
     if (contentMode === 'none' || this.settings.mode === 'disabled') {
@@ -530,6 +695,26 @@ export class FloatingWidget {
         :host {
           ${this.getThemeCSS()}
           --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+          /* Reset the INHERITED properties, which a shadow root does not protect against.
+             Shadow DOM stops the host page's SELECTORS from matching our nodes, but inherited
+             values still cross the boundary through the host element — so a page that sets
+             text-transform: uppercase on body renders this entire widget in caps, a page with
+             line-height: 2.5 stretches every row apart, and an RTL page mirrors the layout.
+             The host element's inline cssText already pins font-family for this reason; these
+             are the rest of the properties that leak the same way. */
+          line-height: normal;
+          letter-spacing: normal;
+          word-spacing: normal;
+          text-transform: none;
+          text-align: left;
+          text-indent: 0;
+          font-style: normal;
+          font-variant: normal;
+          font-weight: 400;
+          white-space: normal;
+          direction: ltr;
+          color: var(--text-primary);
         }
 
         * {
@@ -670,9 +855,13 @@ export class FloatingWidget {
           border-radius: 9999px;
         }
 
-        /* In-Page Popup Card */
+        /* In-Page Popup Card.
+           Open/closed is a CLASS on the element, not a value baked into this stylesheet —
+           see the cache-signature note in render(). Toggling the popup is the highest
+           frequency state change in the widget and must not depend on re-parsing ~50KB of
+           CSS. */
         .popup-card {
-          display: ${this.isOpen ? 'flex' : 'none'};
+          display: none;
           flex-direction: column;
           position: absolute;
           ${isNearTop ? 'top: 52px; bottom: auto;' : 'bottom: 52px; top: auto;'}
@@ -681,7 +870,7 @@ export class FloatingWidget {
           height: ${this.popupSize === 'fullscreen' ? 'min(880px, 92vh)' : this.popupSize === 'large' ? 'min(740px, 88vh)' : this.popupSize === 'medium' ? 'min(640px, 84vh)' : '540px'};
           max-height: 94vh;
           max-width: 96vw;
-          background: rgba(15, 23, 42, 0.97);
+          background: var(--bg-card);
           border: 1px solid ${isLive ? 'rgba(239, 68, 68, 0.45)' : 'rgba(99, 102, 241, 0.35)'};
           border-radius: 16px;
           box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.9), 0 0 28px ${isLive ? 'rgba(239, 68, 68, 0.25)' : 'rgba(99, 102, 241, 0.25)'};
@@ -693,6 +882,8 @@ export class FloatingWidget {
           transition: width 0.2s cubic-bezier(0.16, 1, 0.3, 1), height 0.2s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
+        .popup-card.is-open { display: flex; }
+
         /* Dedicated Standalone Timer & Pomodoro Popup Window */
         .timer-popup-card {
           display: ${this.isTimerOpen ? 'flex' : 'none'};
@@ -701,7 +892,7 @@ export class FloatingWidget {
           ${isNearTop ? 'top: 52px; bottom: auto;' : 'bottom: 52px; top: auto;'}
           ${isNearLeft ? 'left: 0; right: auto;' : 'right: 0; left: auto;'}
           width: 320px;
-          background: rgba(15, 23, 42, 0.98);
+          background: var(--bg-card);
           border: 1px solid rgba(244, 63, 94, 0.5);
           border-radius: 16px;
           box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.95), 0 0 28px rgba(244, 63, 94, 0.3);
@@ -811,7 +1002,7 @@ export class FloatingWidget {
         /* Segmented View Switcher */
         .tab-switcher {
           display: flex;
-          background: rgba(15, 23, 42, 0.9);
+          background: var(--bg-surface-elevated);
           padding: 3px 6px;
           border-bottom: 1px solid var(--border-subtle);
           gap: 4px;
@@ -936,7 +1127,7 @@ export class FloatingWidget {
           align-items: center;
           justify-content: space-between;
           padding: 6px 8px;
-          background: rgba(15, 23, 42, 0.95);
+          background: var(--bg-surface-elevated);
           border-bottom: 1px solid var(--border-subtle);
           flex-wrap: wrap;
           gap: 4px;
@@ -966,6 +1157,8 @@ export class FloatingWidget {
           background: rgba(99, 102, 241, 0.25);
           color: #c7d2fe;
         }
+
+        ${ICON_BUTTON_CSS}
 
         .wb-palette-bar {
           display: flex;
@@ -1020,7 +1213,7 @@ export class FloatingWidget {
           align-items: center;
           gap: 6px;
           padding: 8px 10px;
-          background: rgba(15, 23, 42, 0.95);
+          background: var(--bg-surface-elevated);
           border-top: 1px solid var(--border-subtle);
         }
 
@@ -1081,7 +1274,7 @@ export class FloatingWidget {
     const bodyHtml = `
 
       <!-- In-Page Popup Card Window -->
-      <div class="popup-card" id="nb-popup-card">
+      <div class="popup-card ${this.isOpen ? 'is-open' : ''}" id="nb-popup-card">
         <!-- Room Header Bar -->
         <div class="room-header">
           <div class="room-info">
@@ -1142,8 +1335,19 @@ export class FloatingWidget {
           </div>
         ` : ''}
 
+        <!-- Extension reloaded out from under this page: nothing this widget does can reach
+             the extension any more. Shown ABOVE the offline notice and phrased around the
+             action that actually fixes it, because "offline" would be misleading here — the
+             server is irrelevant, the local link is what broke. -->
+        ${this.contextInvalidated ? `
+          <div style="background:linear-gradient(135deg, #f59e0b, #d97706);color:#1f2937;padding:5px 10px;font-size: var(--font-size-xs);font-weight:700;display:flex;align-items:center;gap:6px;border-bottom:1px solid rgba(0,0,0,0.2);">
+            <span>♻️</span>
+            <span>Synqto updated — reload this page to reconnect.</span>
+          </div>
+        ` : ''}
+
         <!-- Red Offline Notice Banner when Server is Unreachable -->
-        ${!this.isServerConnected ? `
+        ${!this.contextInvalidated && !this.isServerConnected ? `
           <div style="background:linear-gradient(135deg, #ef4444, #dc2626);color:#fff;padding:5px 10px;font-size: var(--font-size-xs);font-weight:600;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,0.2);">
             <div style="display:flex;align-items:center;gap:5px;">
               <span>⚠️</span>
@@ -1156,13 +1360,13 @@ export class FloatingWidget {
         ` : ''}
 
         <!-- Segmented Switcher for Chat and Whiteboard -->
-        <div class="tab-switcher" style="display:flex;border-bottom:1px solid var(--border-subtle);background:rgba(0,0,0,0.25);">
-          <button class="tab-btn ${this.activeTab === 'chat' ? 'active' : ''}" id="nb-tab-chat" style="flex:1;display:flex;align-items:center;justify-content:center;gap:5px;padding:8px 4px;font-size: var(--font-size-sm);font-weight:600;background:transparent;border:none;border-bottom:2px solid ${this.activeTab === 'chat' ? 'var(--primary)' : 'transparent'};color:${this.activeTab === 'chat' ? '#fff' : 'var(--text-muted)'};cursor:pointer;">
-            <span>💬 Live Chat</span>
+        <div class="tab-switcher nb-navstrip" style="display:flex;border-bottom:1px solid var(--border-subtle);background:rgba(0,0,0,0.25);">
+          <button class="tab-btn ${this.activeTab === 'chat' ? 'active' : ''}" id="nb-tab-chat" style="flex:1;display:flex;align-items:center;justify-content:center;gap:5px;padding:8px 4px;font-size: var(--font-size-sm);font-weight:600;background:transparent;border:none;border-bottom:2px solid ${this.activeTab === 'chat' ? 'var(--primary)' : 'transparent'};color:${this.activeTab === 'chat' ? '#fff' : 'var(--text-muted)'};cursor:pointer;" title="Live chat" aria-label="Live chat" aria-selected="${this.activeTab === 'chat'}">
+            ${icon('users', 15)}<span class="nb-nav-label">Live chat</span>
           </button>
           ${this.settings.enableWhiteboard ? `
-            <button class="tab-btn ${this.activeTab === 'whiteboard' ? 'active' : ''}" id="nb-tab-whiteboard" style="flex:1;display:flex;align-items:center;justify-content:center;gap:5px;padding:8px 4px;font-size: var(--font-size-sm);font-weight:600;background:transparent;border:none;border-bottom:2px solid ${this.activeTab === 'whiteboard' ? 'var(--primary)' : 'transparent'};color:${this.activeTab === 'whiteboard' ? '#fff' : 'var(--text-muted)'};cursor:pointer;">
-              <span>🎨 Whiteboard</span>
+            <button class="tab-btn ${this.activeTab === 'whiteboard' ? 'active' : ''}" id="nb-tab-whiteboard" style="flex:1;display:flex;align-items:center;justify-content:center;gap:5px;padding:8px 4px;font-size: var(--font-size-sm);font-weight:600;background:transparent;border:none;border-bottom:2px solid ${this.activeTab === 'whiteboard' ? 'var(--primary)' : 'transparent'};color:${this.activeTab === 'whiteboard' ? '#fff' : 'var(--text-muted)'};cursor:pointer;" title="Whiteboard" aria-label="Whiteboard" aria-selected="${this.activeTab === 'whiteboard'}">
+              ${icon('palette', 15)}<span class="nb-nav-label">Whiteboard</span>
             </button>
           ` : ''}
         </div>
@@ -1190,10 +1394,15 @@ export class FloatingWidget {
                   }]
               ).map((s: any) => `
                 <div style="display:flex;align-items:center;gap:4px;padding:3px 6px;border-radius:4px;background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.1);font-size: var(--font-size-xs);color:#f8fafc;white-space:nowrap;">
-                  <span>${s.broadcasterIdentity?.avatar || '👤'}</span>
-                  <span style="font-weight:600;">${s.broadcasterIdentity?.nickname || 'Streamer'}:</span>
+                  <!-- Every field here comes from liveStage, which is distributed by the
+                       stage owner and mirrored through chrome.storage. The title field was
+                       escaped; avatar, nickname and broadcastType beside it were not, which
+                       is the same one-field-missed pattern as the chat imageUrl bug. All
+                       four are remote strings landing in innerHTML, all four escaped now. -->
+                  <span>${this.escapeHtml(s.broadcasterIdentity?.avatar || '👤')}</span>
+                  <span style="font-weight:600;">${this.escapeHtml(s.broadcasterIdentity?.nickname || 'Streamer')}:</span>
                   <span style="color:#c7d2fe;max-width:110px;overflow:hidden;text-overflow:ellipsis;">${this.escapeHtml(s.title || 'Live Stream')}</span>
-                  <span style="font-size: var(--font-size-2xs);padding:1px 4px;border-radius:3px;background:rgba(239,68,68,0.3);color:#fca5a5;text-transform:uppercase;">${s.broadcastType || 'live'}</span>
+                  <span style="font-size: var(--font-size-2xs);padding:1px 4px;border-radius:3px;background:rgba(239,68,68,0.3);color:#fca5a5;text-transform:uppercase;">${this.escapeHtml(s.broadcastType || 'live')}</span>
                 </div>
               `).join('')}
             </div>
@@ -1206,123 +1415,146 @@ export class FloatingWidget {
           <div class="whiteboard-container">
             <div class="wb-toolbar">
               <div class="wb-tool-group" style="flex-wrap:wrap;gap:2px;">
-                <button class="wb-tool-btn ${this.wbTool === 'select' ? 'active' : ''}" data-wbtool="select" title="Select & Move (↖️)">↖️</button>
-                <button class="wb-tool-btn ${this.wbTool === 'hand' ? 'active' : ''}" data-wbtool="hand" title="Pan Canvas (✋)">✋</button>
-                <button class="wb-tool-btn ${this.wbTool === 'pen' ? 'active' : ''}" data-wbtool="pen" title="Fine Pen (✏️)">✏️</button>
-                <button class="wb-tool-btn ${this.wbTool === 'brush' ? 'active' : ''}" data-wbtool="brush" title="Brush Pen (✒️)">✒️</button>
-                <button class="wb-tool-btn ${this.wbTool === 'highlighter' ? 'active' : ''}" data-wbtool="highlighter" title="Translucent Highlighter (🖍️)">🖍️</button>
-                <button class="wb-tool-btn ${this.wbTool === 'temp_pen' ? 'active' : ''}" data-wbtool="temp_pen" title="⏳ Disappearing Ink (3s Fade)">⏳</button>
-                <button class="wb-tool-btn ${this.wbTool === 'laser' ? 'active' : ''}" data-wbtool="laser" title="Live Laser Pointer (🔴)">🔴</button>
-                <button class="wb-tool-btn ${this.wbTool === 'torch' ? 'active' : ''}" data-wbtool="torch" title="Spotlight Torch (🔦)">🔦</button>
-                <button class="wb-tool-btn ${this.wbTool === 'eraser' ? 'active' : ''}" data-wbtool="eraser" title="Precision Eraser (🧹)">🧹</button>
-                <button class="wb-tool-btn ${this.wbTool === 'text' ? 'active' : ''}" data-wbtool="text" title="Text Label (🔤)">🔤</button>
+                <!-- Primary tools are icon-ONLY at every width: there are ten of them, they
+                     are the most-used controls, and their titles carry the accessible name. -->
+                ${([
+                  { id: 'select', icon: 'select', title: 'Select & move' },
+                  { id: 'hand', icon: 'hand', title: 'Pan canvas' },
+                  { id: 'pen', icon: 'pen', title: 'Fine pen' },
+                  { id: 'brush', icon: 'brush', title: 'Brush pen' },
+                  { id: 'highlighter', icon: 'highlighter', title: 'Translucent highlighter' },
+                  { id: 'temp_pen', icon: 'temp-pen', title: 'Disappearing ink (fades after 3s)' },
+                  { id: 'laser', icon: 'laser', title: 'Live laser pointer' },
+                  { id: 'torch', icon: 'torch', title: 'Spotlight torch' },
+                  { id: 'eraser', icon: 'eraser', title: 'Precision eraser' },
+                  { id: 'text', icon: 'text', title: 'Text label' },
+                ] as Array<{ id: string; icon: ToolIconId; title: string }>).map((t) => `
+                  <button class="wb-tool-btn ${this.wbTool === t.id ? 'active' : ''}" data-wbtool="${t.id}" title="${t.title}" aria-label="${t.title}"${this.wbTool === t.id ? ' aria-pressed="true"' : ''}>${icon(t.icon, 15)}</button>
+                `).join('')}
 
                 <div style="width:1px;height:12px;background:var(--border-subtle);margin:0 1px;"></div>
 
-                <!-- Drawer Toggles -->
-                <button class="wb-drawer-toggle ${this.wbShowShapesDrawer ? 'active' : ''}" id="nb-wb-toggle-shapes" style="font-size: var(--font-size-2xs);padding:2px 4px;border-radius:4px;border:1px solid var(--border-subtle);background:${this.wbShowShapesDrawer ? 'rgba(99,102,241,0.25)' : 'transparent'};color:${this.wbShowShapesDrawer ? '#fff' : 'var(--text-muted)'};cursor:pointer;">
-                  🔷 Shapes ${this.wbShowShapesDrawer ? '▲' : '▼'}
-                </button>
-
-                <button class="wb-drawer-toggle ${this.wbShowDsaDrawer ? 'active' : ''}" id="nb-wb-toggle-dsa" style="font-size: var(--font-size-2xs);padding:2px 4px;border-radius:4px;border:1px solid rgba(56,189,248,0.3);background:${this.wbShowDsaDrawer ? 'rgba(56,189,248,0.2)' : 'transparent'};color:${this.wbShowDsaDrawer ? '#38bdf8' : 'var(--text-muted)'};cursor:pointer;">
-                  🔲 DSA ${this.wbShowDsaDrawer ? '▲' : '▼'}
-                </button>
-
-                <button class="wb-drawer-toggle ${this.wbShowArchDrawer ? 'active' : ''}" id="nb-wb-toggle-arch" style="font-size: var(--font-size-2xs);padding:2px 4px;border-radius:4px;border:1px solid var(--border-subtle);background:${this.wbShowArchDrawer ? 'rgba(99,102,241,0.25)' : 'transparent'};color:${this.wbShowArchDrawer ? '#fff' : 'var(--text-muted)'};cursor:pointer;">
-                  🏛️ Arch ${this.wbShowArchDrawer ? '▲' : '▼'}
-                </button>
-
-                <button class="wb-drawer-toggle ${this.wbShowThemesDrawer ? 'active' : ''}" id="nb-wb-toggle-themes" style="font-size: var(--font-size-2xs);padding:2px 4px;border-radius:4px;border:1px solid var(--border-subtle);background:${this.wbShowThemesDrawer ? 'rgba(99,102,241,0.25)' : 'transparent'};color:${this.wbShowThemesDrawer ? '#fff' : 'var(--text-muted)'};cursor:pointer;">
-                  🎨 Style ${this.wbShowThemesDrawer ? '▲' : '▼'}
-                </button>
+                <!-- Drawer Toggles. aria-expanded replaces the ▲/▼ glyph as the machine
+                     readable open/closed state; the caret was purely visual and vanished
+                     along with the label when the panel narrowed. -->
+                ${([
+                  { id: 'nb-wb-toggle-shapes', icon: 'shapes', label: 'Shapes', open: this.wbShowShapesDrawer, tint: '' },
+                  { id: 'nb-wb-toggle-dsa', icon: 'array', label: 'DSA', open: this.wbShowDsaDrawer, tint: 'color:#38bdf8;' },
+                  { id: 'nb-wb-toggle-arch', icon: 'server', label: 'Arch', open: this.wbShowArchDrawer, tint: '' },
+                  { id: 'nb-wb-toggle-themes', icon: 'palette', label: 'Style', open: this.wbShowThemesDrawer, tint: '' },
+                ] as Array<{ id: string; icon: ToolIconId; label: string; open: boolean; tint: string }>).map((d) => `
+                  <button class="nb-tbtn wb-drawer-toggle ${d.open ? 'active' : ''}" id="${d.id}" title="${d.label} palette" aria-label="${d.label} palette" aria-expanded="${d.open ? 'true' : 'false'}" style="${d.tint}">${icon(d.icon)}<span class="nb-btn-label">${d.label}</span></button>
+                `).join('')}
               </div>
 
               <!-- Right Controls -->
               <div class="wb-tool-group">
                 <div style="display:flex;gap:2px;align-items:center;background:rgba(0,0,0,0.4);padding:2px 4px;border-radius:5px;border:1px solid var(--border-subtle);">
-                  <button class="wb-privacy-btn" data-wbprivacy="personal" style="font-size: var(--font-size-2xs);font-weight:700;padding:2px 5px;border-radius:3px;border:none;cursor:pointer;background:${this.wbPrivacyMode === 'personal' ? 'linear-gradient(135deg, #f59e0b, #f43f5e)' : 'transparent'};color:${this.wbPrivacyMode === 'personal' ? '#fff' : 'var(--text-muted)'};" title="🔒 Personal Private Scratchpad (Offline, Independent)">🔒 Private</button>
-                  <button class="wb-privacy-btn" data-wbprivacy="collaborative" style="font-size: var(--font-size-2xs);font-weight:700;padding:2px 5px;border-radius:3px;border:none;cursor:pointer;background:${this.wbPrivacyMode === 'collaborative' ? 'linear-gradient(135deg, #10b981, #06b6d4)' : 'transparent'};color:${this.wbPrivacyMode === 'collaborative' ? '#fff' : 'var(--text-muted)'};" title="👥 Collaborative Room Board (Synced across all peers)">👥 Collab</button>
+                  <!-- Which board you are drawing on decides whether strokes leave this
+                       device, so this control keeps its label at every width and uses
+                       aria-pressed rather than colour alone to convey the active mode. -->
+                  <button class="nb-tbtn wb-privacy-btn" data-wbprivacy="personal" aria-pressed="${this.wbPrivacyMode === 'personal'}" style="font-weight:700;border:none;background:${this.wbPrivacyMode === 'personal' ? 'linear-gradient(135deg, #f59e0b, #f43f5e)' : 'transparent'};color:${this.wbPrivacyMode === 'personal' ? '#fff' : 'var(--text-muted)'};" title="Private scratchpad — stays on this device, never sent to peers" aria-label="Private board">${icon('lock')}<span>Private</span></button>
+                  <button class="nb-tbtn wb-privacy-btn" data-wbprivacy="collaborative" aria-pressed="${this.wbPrivacyMode === 'collaborative'}" style="font-weight:700;border:none;background:${this.wbPrivacyMode === 'collaborative' ? 'linear-gradient(135deg, #10b981, #06b6d4)' : 'transparent'};color:${this.wbPrivacyMode === 'collaborative' ? '#fff' : 'var(--text-muted)'};" title="Shared room board — synced to every peer" aria-label="Shared board">${icon('users')}<span>Shared</span></button>
                 </div>
-                <button class="wb-tool-btn" id="nb-wb-undo" title="Undo">↩️</button>
-                <button class="wb-tool-btn" id="nb-wb-redo" title="Redo">↪️</button>
-                <button class="wb-tool-btn" id="nb-wb-clear" title="Clear Canvas" style="color:#f87171;">🗑️</button>
-                <button class="wb-tool-btn" id="nb-wb-save" title="Export PNG">💾</button>
-                <button class="wb-tool-btn" id="nb-wb-popout" title="Open Standalone Popup Window">↗️</button>
+                <button class="wb-tool-btn" id="nb-wb-undo" title="Undo" aria-label="Undo">${icon('undo', 15)}</button>
+                <button class="wb-tool-btn" id="nb-wb-redo" title="Redo" aria-label="Redo">${icon('redo', 15)}</button>
+                <button class="wb-tool-btn" id="nb-wb-clear" title="Clear Canvas" aria-label="Clear canvas" style="color:#f87171;">${icon('trash', 15)}</button>
+                <button class="wb-tool-btn" id="nb-wb-save" title="Export PNG" aria-label="Export as PNG">${icon('save', 15)}</button>
+                <button class="wb-tool-btn" id="nb-wb-popout" title="Open Standalone Popup Window" aria-label="Open in a separate window">${icon('popout', 15)}</button>
               </div>
             </div>
 
             <!-- Floating Selection Action Bar -->
-            <div id="nb-wb-selection-floating-bar" style="display:${this.wbSelectedStrokeIds.length > 0 ? 'flex' : 'none'};align-items:center;gap:4px;padding:3px 8px;background:rgba(15,23,42,0.95);border-bottom:1px solid #6366f1;box-shadow:0 4px 12px rgba(0,0,0,0.5);font-size: var(--font-size-xs);">
-              <span style="color:#818cf8;font-weight:700;margin-right:2px;">Selected (${this.wbSelectedStrokeIds.length}):</span>
-              <button id="nb-wb-sel-copy" style="background:rgba(99,102,241,0.2);border:1px solid rgba(99,102,241,0.4);color:#fff;border-radius:3px;padding:2px 6px;cursor:pointer;font-size: var(--font-size-xs);" title="Copy (Ctrl+C)">📋 Copy</button>
-              <button id="nb-wb-sel-dup" style="background:rgba(16,185,129,0.2);border:1px solid rgba(16,185,129,0.4);color:#fff;border-radius:3px;padding:2px 6px;cursor:pointer;font-size: var(--font-size-xs);" title="Duplicate (Ctrl+D)">✨ Dup</button>
-              <button id="nb-wb-sel-paste" style="background:rgba(56,189,248,0.2);border:1px solid rgba(56,189,248,0.4);color:#fff;border-radius:3px;padding:2px 6px;cursor:pointer;font-size: var(--font-size-xs);" title="Paste (Ctrl+V)">📥 Paste</button>
-              <button id="nb-wb-sel-del" style="background:rgba(239,68,68,0.2);border:1px solid rgba(239,68,68,0.4);color:#fca5a5;border-radius:3px;padding:2px 6px;cursor:pointer;font-size: var(--font-size-xs);" title="Delete (Del)">🗑️ Delete</button>
-              <button id="nb-wb-sel-clear" style="background:transparent;border:1px solid var(--border-subtle);color:var(--text-muted);border-radius:3px;padding:2px 6px;cursor:pointer;font-size: var(--font-size-xs);" title="Deselect (Esc)">✕</button>
+            <div id="nb-wb-selection-floating-bar" class="nb-toolstrip" style="display:${this.wbSelectedStrokeIds.length > 0 ? 'flex' : 'none'};align-items:center;gap:4px;padding:3px 8px;background:rgba(15,23,42,0.95);border-bottom:1px solid #6366f1;box-shadow:0 4px 12px rgba(0,0,0,0.5);font-size: var(--font-size-xs);">
+              <span id="nb-wb-sel-count" style="color:#818cf8;font-weight:700;margin-right:2px;flex:0 0 auto;">${this.wbSelectedStrokeIds.length} selected</span>
+              ${toolButton({ iconId: 'copy', label: 'Copy', title: 'Copy (Ctrl+C)', id: 'nb-wb-sel-copy', style: 'background:rgba(99,102,241,0.2);border-color:rgba(99,102,241,0.4);color:#fff;' })}
+              ${toolButton({ iconId: 'duplicate', label: 'Duplicate', title: 'Duplicate (Ctrl+D)', id: 'nb-wb-sel-dup', style: 'background:rgba(16,185,129,0.2);border-color:rgba(16,185,129,0.4);color:#fff;' })}
+              ${toolButton({ iconId: 'paste', label: 'Paste', title: 'Paste (Ctrl+V)', id: 'nb-wb-sel-paste', style: 'background:rgba(56,189,248,0.2);border-color:rgba(56,189,248,0.4);color:#fff;' })}
+              ${toolButton({ iconId: 'trash', label: 'Delete', title: 'Delete (Del)', id: 'nb-wb-sel-del', style: 'background:rgba(239,68,68,0.2);border-color:rgba(239,68,68,0.4);color:#fca5a5;' })}
+              ${toolButton({ iconId: 'close', label: 'Deselect', title: 'Deselect (Esc)', id: 'nb-wb-sel-clear', style: 'border-color:var(--border-subtle);' })}
             </div>
 
             <!-- Drawer: Shapes -->
-            <div id="nb-wb-drawer-shapes" style="display:${this.wbShowShapesDrawer ? 'flex' : 'none'};align-items:center;gap:3px;padding:3px 6px;background:rgba(0,0,0,0.85);border-bottom:1px solid var(--border-subtle);overflow-x:auto;">
-              <span style="font-size: var(--font-size-2xs);color:var(--text-muted);font-weight:600;">Shapes:</span>
-              ${[
-                { id: 'line', label: 'Line 📏' },
-                { id: 'arrow', label: 'Arrow ➡️' },
-                { id: 'arrow_bi', label: 'Bi-Arrow ↔️' },
-                { id: 'rect', label: 'Rect 🔲' },
-                { id: 'rounded_rect', label: 'Rounded ▢' },
-                { id: 'circle', label: 'Circle ⭕' },
-                { id: 'triangle', label: 'Triangle ▲' },
-                { id: 'star', label: 'Star ⭐' },
-                { id: 'decision_diamond', label: 'Diamond 💎' },
-                { id: 'sticky_note', label: 'Sticky 📝' },
-                { id: 'code_box', label: 'Code &lt;/&gt;' },
-              ].map((t) => `
-                <button class="wb-tool-btn ${this.wbTool === t.id ? 'active' : ''}" data-wbtool="${t.id}" style="font-size: var(--font-size-2xs);padding:2px 5px;white-space:nowrap;">${t.label}</button>
-              `).join('')}
+            <div id="nb-wb-drawer-shapes" class="nb-toolstrip" style="display:${this.wbShowShapesDrawer ? 'flex' : 'none'};align-items:center;gap:3px;padding:3px 6px;background:rgba(0,0,0,0.85);border-bottom:1px solid var(--border-subtle);overflow-x:auto;">
+              <span style="font-size: var(--font-size-2xs);color:var(--text-muted);font-weight:600;flex:0 0 auto;">Shapes</span>
+              ${([
+                { id: 'line', icon: 'line', label: 'Line' },
+                { id: 'arrow', icon: 'arrow', label: 'Arrow' },
+                { id: 'arrow_bi', icon: 'arrow-bi', label: 'Bi-Arrow' },
+                { id: 'rect', icon: 'rect', label: 'Rect' },
+                { id: 'rounded_rect', icon: 'rounded-rect', label: 'Rounded' },
+                { id: 'circle', icon: 'circle', label: 'Circle' },
+                { id: 'triangle', icon: 'triangle', label: 'Triangle' },
+                { id: 'star', icon: 'star', label: 'Star' },
+                { id: 'decision_diamond', icon: 'diamond', label: 'Diamond' },
+                { id: 'sticky_note', icon: 'sticky', label: 'Sticky' },
+                { id: 'code_box', icon: 'code', label: 'Code' },
+              ] as Array<{ id: string; icon: ToolIconId; label: string }>).map((t) =>
+                toolButton({
+                  iconId: t.icon,
+                  label: t.label,
+                  title: `${t.label} shape`,
+                  dataAttr: `data-wbtool="${t.id}"`,
+                  active: this.wbTool === t.id,
+                })
+              ).join('')}
             </div>
 
             <!-- Drawer: DSA Visualizers -->
-            <div id="nb-wb-drawer-dsa" style="display:${this.wbShowDsaDrawer ? 'flex' : 'none'};align-items:center;gap:3px;padding:3px 6px;background:rgba(8,28,44,0.95);border-bottom:1px solid rgba(56,189,248,0.3);overflow-x:auto;">
-              <span style="font-size: var(--font-size-2xs);color:#7dd3fc;font-weight:700;">🔲 DSA:</span>
-              ${[
-                { id: 'array_cells', label: 'Array [0..N]' },
-                { id: 'two_pointers', label: 'Two Pointers (L/R)' },
-                { id: 'stack_lifo', label: 'Stack (LIFO)' },
-                { id: 'queue_fifo', label: 'Queue (FIFO)' },
-                { id: 'tree_node', label: 'Tree Node' },
-                { id: 'hashmap_table', label: 'HashMap Bucket' },
-                { id: 'decision_diamond', label: 'Branch Diamond' },
-                { id: 'code_box', label: 'Pseudocode Box' },
-              ].map((t) => `
-                <button class="wb-tool-btn ${this.wbTool === t.id ? 'active' : ''}" data-wbtool="${t.id}" style="font-size: var(--font-size-2xs);padding:2px 5px;white-space:nowrap;color:#7dd3fc;">${t.label}</button>
-              `).join('')}
+            <div id="nb-wb-drawer-dsa" class="nb-toolstrip" style="display:${this.wbShowDsaDrawer ? 'flex' : 'none'};align-items:center;gap:3px;padding:3px 6px;background:rgba(8,28,44,0.95);border-bottom:1px solid rgba(56,189,248,0.3);overflow-x:auto;">
+              <span style="font-size: var(--font-size-2xs);color:#7dd3fc;font-weight:700;flex:0 0 auto;">DSA</span>
+              ${([
+                { id: 'array_cells', icon: 'array', label: 'Array', title: 'Array cells [0..N]' },
+                { id: 'two_pointers', icon: 'two-pointers', label: 'Pointers', title: 'Two pointers (L/R)' },
+                { id: 'stack_lifo', icon: 'stack', label: 'Stack', title: 'Stack (LIFO)' },
+                { id: 'queue_fifo', icon: 'queue', label: 'Queue', title: 'Queue (FIFO)' },
+                { id: 'tree_node', icon: 'tree', label: 'Tree', title: 'Tree node' },
+                { id: 'hashmap_table', icon: 'hashmap', label: 'HashMap', title: 'HashMap bucket' },
+                { id: 'decision_diamond', icon: 'diamond', label: 'Branch', title: 'Branch diamond' },
+                { id: 'code_box', icon: 'code', label: 'Pseudo', title: 'Pseudocode box' },
+              ] as Array<{ id: string; icon: ToolIconId; label: string; title: string }>).map((t) =>
+                toolButton({
+                  iconId: t.icon,
+                  label: t.label,
+                  title: t.title,
+                  dataAttr: `data-wbtool="${t.id}"`,
+                  active: this.wbTool === t.id,
+                  style: 'color:#7dd3fc;',
+                })
+              ).join('')}
             </div>
 
             <!-- Drawer: Architecture Shapes -->
-            <div id="nb-wb-drawer-arch" style="display:${this.wbShowArchDrawer ? 'flex' : 'none'};align-items:center;gap:3px;padding:3px 6px;background:rgba(0,0,0,0.9);border-bottom:1px solid var(--border-subtle);overflow-x:auto;">
-              <span style="font-size: var(--font-size-2xs);color:var(--text-muted);font-weight:600;">Arch:</span>
-              ${[
-                { id: 'db_cylinder', label: 'SQL DB' },
-                { id: 'db_nosql', label: 'NoSQL' },
-                { id: 'cache_mem', label: 'Redis' },
-                { id: 'message_queue', label: 'Kafka' },
-                { id: 'load_balancer', label: 'LB' },
-                { id: 'server_box', label: 'App Server' },
-                { id: 'cloud', label: 'API GW' },
-                { id: 'cdn_edge', label: 'CDN Edge' },
-                { id: 'object_storage', label: 'S3 Bucket' },
-                { id: 'auth_jwt', label: 'Auth Shield' },
-                { id: 'websocket_gw', label: 'WS Gateway' },
-                { id: 'elasticsearch', label: 'ES Search' },
-                { id: 'dns_router', label: 'DNS' },
-                { id: 'firewall', label: 'Firewall' },
-                { id: 'user_client', label: 'Client' },
-                { id: 'mobile_client', label: 'Mobile' },
-                { id: 'async_arrow', label: 'Async ⇢' },
-                { id: 'tradeoff_note', label: '⚖️ CAP Card' },
-              ].map((t) => `
-                <button class="wb-tool-btn ${this.wbTool === t.id ? 'active' : ''}" data-wbtool="${t.id}" style="font-size: var(--font-size-2xs);padding:2px 5px;white-space:nowrap;">${t.label}</button>
-              `).join('')}
+            <div id="nb-wb-drawer-arch" class="nb-toolstrip" style="display:${this.wbShowArchDrawer ? 'flex' : 'none'};align-items:center;gap:3px;padding:3px 6px;background:rgba(0,0,0,0.9);border-bottom:1px solid var(--border-subtle);overflow-x:auto;">
+              <span style="font-size: var(--font-size-2xs);color:var(--text-muted);font-weight:600;flex:0 0 auto;">Arch</span>
+              ${([
+                { id: 'db_cylinder', icon: 'database', label: 'SQL', title: 'SQL database' },
+                { id: 'db_nosql', icon: 'nosql', label: 'NoSQL', title: 'NoSQL store' },
+                { id: 'cache_mem', icon: 'cache', label: 'Cache', title: 'In-memory cache (Redis)' },
+                { id: 'message_queue', icon: 'queue-mq', label: 'Queue', title: 'Message queue (Kafka)' },
+                { id: 'load_balancer', icon: 'balancer', label: 'LB', title: 'Load balancer' },
+                { id: 'server_box', icon: 'server', label: 'Server', title: 'Application server' },
+                { id: 'cloud', icon: 'cloud', label: 'API GW', title: 'API gateway' },
+                { id: 'cdn_edge', icon: 'cdn', label: 'CDN', title: 'CDN edge node' },
+                { id: 'object_storage', icon: 'storage', label: 'Blob', title: 'Object storage (S3)' },
+                { id: 'auth_jwt', icon: 'shield', label: 'Auth', title: 'Auth / JWT shield' },
+                { id: 'websocket_gw', icon: 'socket', label: 'WS', title: 'WebSocket gateway' },
+                { id: 'elasticsearch', icon: 'search', label: 'Search', title: 'Search index (Elasticsearch)' },
+                { id: 'dns_router', icon: 'dns', label: 'DNS', title: 'DNS router' },
+                { id: 'firewall', icon: 'firewall', label: 'Firewall', title: 'Firewall' },
+                { id: 'user_client', icon: 'user', label: 'Client', title: 'User client' },
+                { id: 'mobile_client', icon: 'mobile', label: 'Mobile', title: 'Mobile client' },
+                { id: 'async_arrow', icon: 'async', label: 'Async', title: 'Asynchronous call' },
+                { id: 'tradeoff_note', icon: 'scales', label: 'CAP', title: 'CAP trade-off card' },
+              ] as Array<{ id: string; icon: ToolIconId; label: string; title: string }>).map((t) =>
+                toolButton({
+                  iconId: t.icon,
+                  label: t.label,
+                  title: t.title,
+                  dataAttr: `data-wbtool="${t.id}"`,
+                  active: this.wbTool === t.id,
+                })
+              ).join('')}
             </div>
 
             <!-- Drawer: Style & Themes -->
@@ -1370,7 +1602,7 @@ export class FloatingWidget {
                 <div style="font-size: var(--font-size-sm);max-width:220px;">Say hello or ask for a hint! Messages are synchronized P2P across all peers.</div>
               </div>
             ` : this.messages.map((m, idx) => `
-              <div class="chat-bubble ${m.isSelf ? 'self' : 'other'}" id="nb-msg-${m.id}">
+              <div class="chat-bubble ${m.isSelf ? 'self' : 'other'}" id="nb-msg-${this.escapeHtml(m.id)}">
                 ${m.replyPreview ? `
                   <div class="wa-quote-box">
                     <div style="font-weight:700;color:var(--primary);">${this.escapeHtml(m.replyPreview.split(':')[0] || 'Reply')}</div>
@@ -1381,12 +1613,16 @@ export class FloatingWidget {
                 ${!m.isSelf ? `
                   <div class="chat-header">
                     <div class="chat-author">
-                      <span>${m.from?.avatar || '👤'}</span>
-                      <span style="color:${m.from?.color || 'var(--primary)'};">
+                      <!-- from.avatar and from.color are as remote as from.nickname beside
+                           them: all three arrive on the sender's packet identity. Only the
+                           nickname was escaped, leaving avatar as an HTML sink and color as
+                           a CSS-declaration sink in the adjacent style attribute. -->
+                      <span>${this.escapeHtml(m.from?.avatar || '👤')}</span>
+                      <span style="color:${safeCssColor(m.from?.color, 'var(--primary)')};">
                         ${this.escapeHtml(m.from?.nickname || 'Buddy')}
                       </span>
                     </div>
-                    <button class="icon-btn nb-reply-trigger" data-id="${m.id}" data-text="${this.escapeHtml(m.text.slice(0, 35))}" data-nick="${this.escapeHtml(m.from?.nickname || 'Buddy')}" style="padding:0;width:18px;height:18px;" title="Reply">
+                    <button class="icon-btn nb-reply-trigger" data-id="${this.escapeHtml(m.id)}" data-text="${this.escapeHtml(m.text.slice(0, 35))}" data-nick="${this.escapeHtml(m.from?.nickname || 'Buddy')}" style="padding:0;width:18px;height:18px;" title="Reply">
                       ↩
                     </button>
                   </div>
@@ -1502,7 +1738,7 @@ export class FloatingWidget {
             </button>
             <button id="nb-timer-add-1m" style="flex:1;padding:10px 4px;border-radius:8px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.06);color:#f8fafc;font-size: var(--font-size-sm);font-weight:600;cursor:pointer;" title="Add 1 minute">+1m</button>
             <button id="nb-timer-add-5m" style="flex:1;padding:10px 4px;border-radius:8px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.06);color:#f8fafc;font-size: var(--font-size-sm);font-weight:600;cursor:pointer;" title="Add 5 minutes">+5m</button>
-            <button id="nb-timer-reset" style="padding:10px 12px;border-radius:8px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.06);color:#f8fafc;font-size: var(--font-size-md);font-weight:600;cursor:pointer;" title="Reset Timer">🔄</button>
+            <button id="nb-timer-reset" style="padding:10px 12px;border-radius:8px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.06);color:#f8fafc;font-size: var(--font-size-md);font-weight:600;cursor:pointer;" title="Reset Timer" aria-label="Reset timer">${icon('reset', 15)}</button>
           </div>
         </div>
       </div>
@@ -1532,7 +1768,7 @@ export class FloatingWidget {
           <span class="drag-grip">⠿</span>
           ${isLive ? `<span class="live-dot"></span>` : `<span>${fabIcon}</span>`}
           <span>${fabLabel}</span>
-          ${this.unreadCount > 0 ? `<span class="fab-badge">${this.unreadCount}</span>` : ''}
+          ${this.unreadCount > 0 ? `<span class="fab-badge" id="nb-fab-badge">${this.unreadCount}</span>` : ''}
         </button>
       </div>
     `;
@@ -1545,13 +1781,48 @@ export class FloatingWidget {
       styleNode.id = 'synqto-widget-style';
       styleNode.textContent = styleHtml.replace(/^\s*<style>/, '').replace(/<\/style>\s*$/, '');
       this.shadow.appendChild(styleNode);
-      this.lastStyleSignature = styleHtml.length + ':' + contentMode;
+      this.lastStyleSignature = styleHtml;
     } else {
-      const sig = styleHtml.length + ':' + contentMode;
-      if (sig !== this.lastStyleSignature) {
+      // Compare the FULL stylesheet, not its length.
+      //
+      // The signature used to be `styleHtml.length + ':' + contentMode`, which silently
+      // treated two different stylesheets as identical whenever the substituted values
+      // happened to be the same number of characters. That is not a rare coincidence — it
+      // is the normal case for a boolean toggle between two CSS keywords:
+      //
+      //   isOpen      'flex' (4)                 vs 'none' (4)                  COLLIDES
+      //   isNearTop   'top: 52px; bottom: auto;' vs 'bottom: 52px; top: auto;'  COLLIDES
+      //   isNearLeft  'left: 0; right: auto;'    vs 'right: 0; left: auto;'     COLLIDES
+      //
+      // Three of the four state variables interpolated into this stylesheet were invisible
+      // to the cache. The user-visible result was that the in-page popup could not be opened
+      // or closed — the click handler flipped `isOpen` correctly, but the CSS that decides
+      // whether the card is displayed was never re-injected — and that dragging the FAB to a
+      // different corner never flipped the popup to the opposite side, so it opened off-screen.
+      //
+      // A string compare on a ~50KB string is a few microseconds and is correct by
+      // construction; the length was only ever a proxy for it. The genuinely hot toggle
+      // (isOpen) no longer lives here at all — it is a class on the element — so this path
+      // now runs only on real theme and layout changes.
+      if (styleHtml !== this.lastStyleSignature) {
         styleNode.textContent = styleHtml.replace(/^\s*<style>/, '').replace(/<\/style>\s*$/, '');
-        this.lastStyleSignature = sig;
+        this.lastStyleSignature = styleHtml;
       }
+    }
+
+    // Inject the icon sprite once, as a sibling of the body rather than inside it.
+    //
+    // It MUST live outside bodyNode: the body's innerHTML is replaced on every render, and a
+    // sprite inside it would be destroyed and rebuilt each time — while every <use href="#…">
+    // in the new markup resolves against the document at parse time, so the icons would flash
+    // or fail to resolve. As a sibling it is parsed once and every render's <use> references
+    // stay valid.
+    if (!this.shadow.getElementById('synqto-icon-sprite')) {
+      const spriteHost = document.createElement('div');
+      spriteHost.id = 'synqto-icon-sprite';
+      spriteHost.setAttribute('aria-hidden', 'true');
+      spriteHost.innerHTML = renderIconSprite();
+      this.shadow.appendChild(spriteHost);
     }
 
     let bodyNode = this.shadow.getElementById('synqto-widget-body') as HTMLDivElement | null;
@@ -1560,12 +1831,83 @@ export class FloatingWidget {
       bodyNode.id = 'synqto-widget-body';
       this.shadow.appendChild(bodyNode);
     }
+    // Mirror the user's chosen panel size onto the body so the icon-only fallback applies in
+    // browsers without container-query support (see ICON_BUTTON_CSS).
+    bodyNode.classList.toggle('nb-compact', this.popupSize === 'compact');
+
+    // In style-only mode the markup is unchanged by construction, so replacing it would
+    // destroy the canvas, the chat scroll position, any focused input and ~50 listeners —
+    // and repaint the empty intermediate state, which is the blink.
+    if (mode === 'style-only') {
+      this.applyLightweightState();
+      return;
+    }
+
     bodyNode.innerHTML = bodyHtml;
 
     this.attachEventListeners();
     if (isWhiteboardTab) {
       this.initWhiteboardCanvas();
     }
+  }
+
+
+
+  /**
+   * Applies state that is expressible as a class or attribute, WITHOUT rebuilding the DOM.
+   *
+   * THE BLINK THIS REMOVES. render() ends in `bodyNode.innerHTML = bodyHtml` followed by
+   * attachEventListeners(). That tears down and recreates the entire subtree — the canvas,
+   * the chat scroll position, any focused input, every <img>, and ~50 event listeners — and
+   * the browser paints the intermediate empty state. Every one of those is a visible flash.
+   *
+   * Most of what triggered a full render did not need one:
+   *
+   *   opening/closing the popup   is now the .is-open class (see the .popup-card note)
+   *   changing the panel size     only alters width/height in the stylesheet
+   *
+   * Neither changes the STRUCTURE of the markup, so neither justifies rebuilding it. Tab
+   * switching is the genuine exception — the two tabs' contents are mutually exclusive in
+   * the markup — and is handled separately by renderContentRegion().
+   */
+  private applyLightweightState() {
+    if (!this.shadow) return;
+
+    const card = this.shadow.getElementById('nb-popup-card');
+    if (card) card.classList.toggle('is-open', this.isOpen);
+
+    const body = this.shadow.getElementById('synqto-widget-body');
+    if (body) body.classList.toggle('nb-compact', this.popupSize === 'compact');
+
+    // The unread badge is the only piece of FAB markup that changes when the popup opens,
+    // so it is updated in place rather than being the reason to rebuild the whole widget.
+    const badge = this.shadow.getElementById('nb-fab-badge');
+    if (badge) {
+      if (this.unreadCount > 0) {
+        badge.textContent = String(this.unreadCount);
+        badge.style.display = '';
+      } else {
+        badge.style.display = 'none';
+      }
+    }
+  }
+
+  /**
+   * Re-injects the stylesheet only.
+   *
+   * The panel-size pills change width/height, both of which live in the stylesheet. Calling
+   * full render() for that discarded and rebuilt the whole popup to change two CSS values.
+   */
+  private renderStyleOnly() {
+    // Reuses render()'s single stylesheet template rather than a second copy of it.
+    //
+    // Extracting the ~59KB template into a shared builder was the first thing I tried and it
+    // is the wrong trade here: the template is one contiguous literal interleaved with body
+    // markup, so splitting it risks a mis-split (it produced one on the first attempt), and
+    // a second copy could drift from the first — which would show up as the panel looking
+    // different depending on which path last rendered it, precisely the inconsistency this
+    // work is meant to remove. A render mode keeps exactly one definition.
+    this.render('style-only');
   }
 
   private attachEventListeners() {
@@ -1651,15 +1993,16 @@ export class FloatingWidget {
         if (this.dragMoved) return;
 
         if (this.settings.clickAction === 'open_extension') {
-          if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
-            chrome.runtime.sendMessage({ type: 'OPEN_SIDEPANEL' }).catch(() => {});
-          }
+          this.requestOpenSidePanel();
           return;
         }
 
         this.isOpen = !this.isOpen;
         this.unreadCount = 0;
-        this.render();
+        // Opening/closing is a class toggle plus a badge update — see applyLightweightState.
+        // The popup's content is already in the DOM (it is hidden, not absent), so there is
+        // nothing to build.
+        this.applyLightweightState();
         if (this.isOpen && this.activeTab === 'chat') {
           this.scrollToBottom();
         }
@@ -1694,7 +2037,8 @@ export class FloatingWidget {
         const sz = (e.currentTarget as HTMLElement).getAttribute('data-popsize') as any;
         if (sz) {
           this.popupSize = sz;
-          this.render();
+          // Width and height live in the stylesheet; the markup is identical at every size.
+          this.renderStyleOnly();
         }
       });
     });
@@ -1703,7 +2047,8 @@ export class FloatingWidget {
     const closeBtn = this.shadow.getElementById('nb-close-popup');
     closeBtn?.addEventListener('click', () => {
       this.isOpen = false;
-      this.render();
+      // Visibility is the .is-open class, so closing needs no rebuild at all.
+      this.applyLightweightState();
     });
 
     // Open Full Side Panel Button
@@ -1711,9 +2056,7 @@ export class FloatingWidget {
     openPanelBtn?.addEventListener('click', () => {
       this.isOpen = false;
       this.render();
-      if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
-        chrome.runtime.sendMessage({ type: 'OPEN_SIDEPANEL' }).catch(() => {});
-      }
+      this.requestOpenSidePanel();
     });
 
     // CoFocus: open the side panel with the launcher already up.
@@ -1724,9 +2067,7 @@ export class FloatingWidget {
     openCoFocusBtn?.addEventListener('click', () => {
       this.isOpen = false;
       this.render();
-      if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
-        chrome.runtime.sendMessage({ type: 'OPEN_SIDEPANEL', openCoFocus: true }).catch(() => {});
-      }
+      this.requestOpenSidePanel({ openCoFocus: true });
     });
 
     // Tab Switchers (Main Popup: Chat and Whiteboard only)
@@ -1779,9 +2120,7 @@ export class FloatingWidget {
     liveTuneIn?.addEventListener('click', () => {
       this.isOpen = false;
       this.render();
-      if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
-        chrome.runtime.sendMessage({ type: 'OPEN_SIDEPANEL' }).catch(() => {});
-      }
+      this.requestOpenSidePanel();
     });
 
     // Offline Notice Sidepanel Reconnect Button
@@ -1789,9 +2128,7 @@ export class FloatingWidget {
     offlineReconnect?.addEventListener('click', () => {
       this.isOpen = false;
       this.render();
-      if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
-        chrome.runtime.sendMessage({ type: 'OPEN_SIDEPANEL' }).catch(() => {});
-      }
+      this.requestOpenSidePanel();
     });
 
     // Quick Strategy Pills
@@ -1913,22 +2250,24 @@ export class FloatingWidget {
       if (drawers.arch) drawers.arch.style.display = this.wbShowArchDrawer ? 'flex' : 'none';
       if (drawers.themes) drawers.themes.style.display = this.wbShowThemesDrawer ? 'flex' : 'none';
 
-      if (btns.shapes) {
-        btns.shapes.classList.toggle('active', this.wbShowShapesDrawer);
-        btns.shapes.textContent = `🔷 Shapes ${this.wbShowShapesDrawer ? '▲' : '▼'}`;
-      }
-      if (btns.dsa) {
-        btns.dsa.classList.toggle('active', this.wbShowDsaDrawer);
-        btns.dsa.textContent = `🔲 DSA ${this.wbShowDsaDrawer ? '▲' : '▼'}`;
-      }
-      if (btns.arch) {
-        btns.arch.classList.toggle('active', this.wbShowArchDrawer);
-        btns.arch.textContent = `🏛️ Arch ${this.wbShowArchDrawer ? '▲' : '▼'}`;
-      }
-      if (btns.themes) {
-        btns.themes.classList.toggle('active', this.wbShowThemesDrawer);
-        btns.themes.textContent = `🎨 Style ${this.wbShowThemesDrawer ? '▲' : '▼'}`;
-      }
+      // Update the toggle's STATE ONLY — never its content.
+      //
+      // These lines used to rewrite textContent with the old "🔷 Shapes ▲" strings. Now that
+      // a toggle contains an <svg> plus a label span, assigning textContent replaces both
+      // with a text node: the icon disappears the first time a drawer is opened and never
+      // comes back until a full re-render. The open/closed state that the caret used to carry
+      // is on aria-expanded, which is both machine-readable and survives the label being
+      // hidden at narrow widths — so there is nothing left that needs rewriting here.
+      const applyToggleState = (el: HTMLElement | null | undefined, open: boolean) => {
+        if (!el) return;
+        el.classList.toggle('active', open);
+        el.setAttribute('aria-expanded', open ? 'true' : 'false');
+      };
+
+      applyToggleState(btns.shapes, this.wbShowShapesDrawer);
+      applyToggleState(btns.dsa, this.wbShowDsaDrawer);
+      applyToggleState(btns.arch, this.wbShowArchDrawer);
+      applyToggleState(btns.themes, this.wbShowThemesDrawer);
     };
 
     this.shadow.getElementById('nb-wb-toggle-shapes')?.addEventListener('click', () => toggleDrawer('shapes'));
@@ -1945,9 +2284,7 @@ export class FloatingWidget {
           width: 900,
           height: 650,
         });
-      } else if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
-        chrome.runtime.sendMessage({ type: 'OPEN_STANDALONE_WHITEBOARD' }).catch(() => {});
-      }
+      } else this.safeSendMessage({ type: 'OPEN_STANDALONE_WHITEBOARD' });
     });
 
     // Privacy Mode Selector (Collab vs Personal)
@@ -1984,9 +2321,7 @@ export class FloatingWidget {
             this.saveInPagePersonalBoard();
           } else {
             this.wbTheme = theme;
-            if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
-              chrome.runtime.sendMessage({ type: 'WHITEBOARD_BG_LOCAL', background: theme, bgColor: this.wbBgColor }).catch(() => {});
-            }
+            this.safeSendMessage({ type: 'WHITEBOARD_BG_LOCAL', background: theme, bgColor: this.wbBgColor });
           }
           themeBtns.forEach((b) => b.classList.toggle('active', b.getAttribute('data-wbtheme') === theme));
           this.drawWbCanvas();
@@ -2005,9 +2340,7 @@ export class FloatingWidget {
             this.saveInPagePersonalBoard();
           } else {
             this.wbBgColor = bg;
-            if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
-              chrome.runtime.sendMessage({ type: 'WHITEBOARD_BG_LOCAL', background: this.wbTheme, bgColor: bg }).catch(() => {});
-            }
+            this.safeSendMessage({ type: 'WHITEBOARD_BG_LOCAL', background: this.wbTheme, bgColor: bg });
           }
           bgDots.forEach((d) => {
             const colorVal = (d as HTMLElement).getAttribute('data-wbbg');
@@ -2070,9 +2403,7 @@ export class FloatingWidget {
         } else {
           this.wbStrokes.push(...duplicated);
           duplicated.forEach((s) => {
-            if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
-              chrome.runtime.sendMessage({ type: 'WHITEBOARD_STROKE_LOCAL', stroke: s }).catch(() => {});
-            }
+            this.safeSendMessage({ type: 'WHITEBOARD_STROKE_LOCAL', stroke: s });
           });
         }
         this.wbSelectedStrokeIds = duplicated.map((s) => s.id);
@@ -2093,9 +2424,7 @@ export class FloatingWidget {
         } else {
           this.wbStrokes.push(...pasted);
           pasted.forEach((s) => {
-            if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
-              chrome.runtime.sendMessage({ type: 'WHITEBOARD_STROKE_LOCAL', stroke: s }).catch(() => {});
-            }
+            this.safeSendMessage({ type: 'WHITEBOARD_STROKE_LOCAL', stroke: s });
           });
         }
         this.wbSelectedStrokeIds = pasted.map((s) => s.id);
@@ -2108,16 +2437,14 @@ export class FloatingWidget {
       if (this.wbSelectedStrokeIds.length > 0) {
         const activeList = this.wbPrivacyMode === 'personal' ? this.wbPersonalStrokes : this.wbStrokes;
         const deleted = activeList.filter((s) => this.wbSelectedStrokeIds.includes(s.id));
-        this.wbRedoStack.push(...deleted);
+        this.activeRedoStack().push(...deleted);
         if (this.wbPrivacyMode === 'personal') {
           this.wbPersonalStrokes = this.wbPersonalStrokes.filter((s) => !this.wbSelectedStrokeIds.includes(s.id));
           this.saveInPagePersonalBoard();
         } else {
           this.wbStrokes = this.wbStrokes.filter((s) => !this.wbSelectedStrokeIds.includes(s.id));
           deleted.forEach((d) => {
-            if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
-              chrome.runtime.sendMessage({ type: 'WHITEBOARD_UNDO_LOCAL', strokeId: d.id }).catch(() => {});
-            }
+            this.safeSendMessage({ type: 'WHITEBOARD_UNDO_LOCAL', strokeId: d.id });
           });
         }
         this.wbSelectedStrokeIds = [];
@@ -2135,30 +2462,24 @@ export class FloatingWidget {
     // Undo / Redo / Clear / Export
     this.shadow.getElementById('nb-wb-undo')?.addEventListener('click', () => {
       const activeList = this.wbPrivacyMode === 'personal' ? this.wbPersonalStrokes : this.wbStrokes;
-      if (activeList.length === 0 && this.wbRedoStack.length > 0) {
-        if (this.wbPrivacyMode === 'personal') {
-          this.wbPersonalStrokes = [...this.wbRedoStack];
-          this.saveInPagePersonalBoard();
-        } else {
-          this.wbStrokes = [...this.wbRedoStack];
-          this.wbStrokes.forEach((s) => {
-            if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
-              chrome.runtime.sendMessage({ type: 'WHITEBOARD_STROKE_LOCAL', stroke: s }).catch(() => {});
-            }
-          });
-        }
-        this.wbRedoStack = [];
-        this.drawWbCanvas();
-        return;
-      }
+
+      // The "board is empty, so restore the whole redo stack" branch that used to live here
+      // has been removed. It was written to undo a Clear, but its condition was "the board is
+      // empty AND there is redo history" — which is also true after simply undoing every
+      // stroke one at a time. Draw two strokes, press undo three times, and the third press
+      // put the whole drawing BACK. Undo is not supposed to be able to add strokes.
+      //
+      // Restoring after a Clear is now Redo's job, which is where it belongs and where it is
+      // symmetric: Clear moves the strokes onto the redo stack (see the clear handler), and
+      // Redo pops them back. Undo on an empty board correctly does nothing.
       if (activeList.length > 0) {
         const removed = activeList.pop();
         if (removed) {
-          this.wbRedoStack.push(removed);
+          this.activeRedoStack().push(removed);
           if (this.wbPrivacyMode === 'personal') {
             this.saveInPagePersonalBoard();
           } else if (this.wbPrivacyMode === 'collaborative' && typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
-            chrome.runtime.sendMessage({ type: 'WHITEBOARD_UNDO_LOCAL', strokeId: removed.id }).catch(() => {});
+            chrome.runtime.sendMessage({ type: 'WHITEBOARD_UNDO_LOCAL', strokeId: removed.id });
           }
           this.drawWbCanvas();
         }
@@ -2166,35 +2487,82 @@ export class FloatingWidget {
     });
 
     this.shadow.getElementById('nb-wb-redo')?.addEventListener('click', () => {
-      if (this.wbRedoStack.length > 0) {
-        const restored = this.wbRedoStack.pop();
+      const redoStack = this.activeRedoStack();
+      if (redoStack.length > 0) {
+        const restored = redoStack.pop();
         if (restored) {
           if (this.wbPrivacyMode === 'personal') {
             this.wbPersonalStrokes.push(restored);
             this.saveInPagePersonalBoard();
           } else {
             this.wbStrokes.push(restored);
-            if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
-              chrome.runtime.sendMessage({ type: 'WHITEBOARD_STROKE_LOCAL', stroke: restored }).catch(() => {});
-            }
+            this.safeSendMessage({ type: 'WHITEBOARD_STROKE_LOCAL', stroke: restored });
           }
           this.drawWbCanvas();
         }
       }
     });
 
-    this.shadow.getElementById('nb-wb-clear')?.addEventListener('click', () => {
+    this.shadow.getElementById('nb-wb-clear')?.addEventListener('click', (ev) => {
+      // Clearing the COLLABORATIVE board is destructive for other people and, for them,
+      // irreversible: WHITEBOARD_CLEAR_LOCAL empties every peer's stroke list and their redo
+      // stack with it, so the only participant who can undo a clear is the one who clicked
+      // it. That was one unguarded click on a small trash icon, next to the undo button.
+      //
+      // Two-step inline confirm rather than window.confirm(), matching the pattern and the
+      // reasoning already established for group deletion in GroupCard.tsx: a blocking native
+      // dialog over someone else's page is jarring and easy to mis-click through.
+      //
+      // Personal mode is exempt — nobody else is affected and redo restores it.
+      if (this.wbPrivacyMode === 'collaborative') {
+        const btn = ev.currentTarget as HTMLElement | null;
+        // Armed/disarmed state is expressed by swapping the icon and the accessible name.
+        // Note this uses innerHTML with an icon() result, NOT textContent: the button's
+        // content is now an <svg>, and assigning textContent would replace the element with
+        // a bare string, permanently emptying the button after the first click.
+        const disarmClear = () => {
+          this.wbClearArmed = false;
+          if (this.wbClearArmTimer) {
+            clearTimeout(this.wbClearArmTimer);
+            this.wbClearArmTimer = null;
+          }
+          if (btn) {
+            btn.innerHTML = icon('trash', 15);
+            btn.setAttribute('title', 'Clear Canvas');
+            btn.setAttribute('aria-label', 'Clear canvas');
+            btn.style.color = '#f87171';
+          }
+        };
+
+        if (!this.wbClearArmed) {
+          this.wbClearArmed = true;
+          if (btn) {
+            btn.innerHTML = icon('trash', 15);
+            btn.setAttribute('title', 'Click again to clear the board for everyone');
+            btn.setAttribute('aria-label', 'Confirm: clear the board for everyone');
+            // Colour alone must not be the only signal — the title and aria-label change
+            // too, so the armed state is perceivable without seeing the hue shift.
+            btn.style.color = '#fbbf24';
+          }
+          if (this.wbClearArmTimer) clearTimeout(this.wbClearArmTimer);
+          this.wbClearArmTimer = setTimeout(disarmClear, 4000);
+          return;
+        }
+        // Second click within the window — disarm and fall through to the actual clear.
+        disarmClear();
+      }
+
       const activeList = this.wbPrivacyMode === 'personal' ? this.wbPersonalStrokes : this.wbStrokes;
       if (activeList.length === 0) return;
-      this.wbRedoStack = [...activeList];
+      // Reversed, because Redo pops from the end: storing in draw order would restore the
+      // board back-to-front and silently invert the z-order of overlapping strokes.
+      this.setActiveRedoStack([...activeList].reverse());
       if (this.wbPrivacyMode === 'personal') {
         this.wbPersonalStrokes = [];
         this.saveInPagePersonalBoard();
       } else {
         this.wbStrokes = [];
-        if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
-          chrome.runtime.sendMessage({ type: 'WHITEBOARD_CLEAR_LOCAL' }).catch(() => {});
-        }
+        this.safeSendMessage({ type: 'WHITEBOARD_CLEAR_LOCAL' });
       }
       this.wbSelectedStrokeIds = [];
       this.updateSelectionBar();
@@ -2313,15 +2681,13 @@ export class FloatingWidget {
         const remaining = activeList.filter((s) => !isStrokeIntersecting(s, pt, radius));
         if (remaining.length !== activeList.length) {
           const deleted = activeList.filter((s) => isStrokeIntersecting(s, pt, radius));
-          this.wbRedoStack.push(...deleted);
+          this.activeRedoStack().push(...deleted);
           if (this.wbPrivacyMode === 'personal') {
             this.wbPersonalStrokes = remaining;
           } else {
             this.wbStrokes = remaining;
             deleted.forEach((d) => {
-              if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
-                chrome.runtime.sendMessage({ type: 'WHITEBOARD_UNDO_LOCAL', strokeId: d.id }).catch(() => {});
-              }
+              this.safeSendMessage({ type: 'WHITEBOARD_UNDO_LOCAL', strokeId: d.id });
             });
           }
         }
@@ -2389,15 +2755,13 @@ export class FloatingWidget {
           const remaining = activeList.filter((s) => !isStrokeIntersecting(s, pt, radius));
           if (remaining.length !== activeList.length) {
             const deleted = activeList.filter((s) => isStrokeIntersecting(s, pt, radius));
-            this.wbRedoStack.push(...deleted);
+            this.activeRedoStack().push(...deleted);
             if (this.wbPrivacyMode === 'personal') {
               this.wbPersonalStrokes = remaining;
             } else {
               this.wbStrokes = remaining;
               deleted.forEach((d) => {
-                if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
-                  chrome.runtime.sendMessage({ type: 'WHITEBOARD_UNDO_LOCAL', strokeId: d.id }).catch(() => {});
-                }
+                this.safeSendMessage({ type: 'WHITEBOARD_UNDO_LOCAL', strokeId: d.id });
               });
             }
           }
@@ -2440,10 +2804,10 @@ export class FloatingWidget {
         if (this.wbIsMovingSelection) {
           this.wbIsMovingSelection = false;
           this.wbDragStartCoords = null;
-          if (this.wbPrivacyMode === 'collaborative' && typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+          if (this.wbPrivacyMode === 'collaborative') {
             const updated = this.wbStrokes.filter((s) => this.wbSelectedStrokeIds.includes(s.id));
             if (updated.length > 0) {
-              chrome.runtime.sendMessage({ type: 'WHITEBOARD_UPDATE_STROKES_LOCAL', strokes: updated }).catch(() => {});
+              this.safeSendMessage({ type: 'WHITEBOARD_UPDATE_STROKES_LOCAL', strokes: updated });
             }
           }
         }
@@ -2499,12 +2863,12 @@ export class FloatingWidget {
         this.wbPersonalStrokes.push(stroke);
       } else {
         this.wbStrokes.push(stroke);
-        if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
-          chrome.runtime.sendMessage({ type: 'WHITEBOARD_STROKE_LOCAL', stroke }).catch(() => {});
-        }
+        this.safeSendMessage({ type: 'WHITEBOARD_STROKE_LOCAL', stroke });
       }
 
-      this.wbRedoStack = [];
+      // Drawing invalidates the redo branch — but only for the board just drawn on. Clearing
+      // both would silently discard the other board's undo history.
+      this.setActiveRedoStack([]);
       this.wbCurrentPoints = [];
       this.wbStartPoint = null;
       this.drawWbCanvas();
@@ -2521,8 +2885,17 @@ export class FloatingWidget {
     const count = this.wbSelectedStrokeIds.length;
     if (count > 0) {
       bar.style.display = 'flex';
-      const label = bar.querySelector('span');
-      if (label) label.textContent = `Selected (${count}):`;
+      // Targeted by id, not by querySelector('span').
+      //
+      // The positional lookup happened to work only while the caption was the sole span in
+      // the bar. Every action button now contains its own label span, so "the first span" is
+      // a coincidence of ordering rather than a reference to the caption — move one button
+      // above the caption and this would silently start rewriting a button's label instead.
+      //
+      // The string also has to match the one the initial render emits, or the caption flips
+      // wording ("3 selected" -> "Selected (3):") the moment the selection changes.
+      const label = bar.querySelector('#nb-wb-sel-count');
+      if (label) label.textContent = `${count} selected`;
     } else {
       bar.style.display = 'none';
     }
@@ -3411,6 +3784,9 @@ export class FloatingWidget {
           });
           if (this.activeTab === 'whiteboard') this.drawWbCanvas();
         } else if (msg.type === 'WHITEBOARD_CLEAR_LOCAL') {
+          // A REMOTE peer cleared the shared board. Only collaborative state may be touched:
+          // this previously also wiped the shared redo stack, so a peer clearing the group
+          // whiteboard destroyed this user's undo history for their own private board too.
           this.wbStrokes = [];
           this.wbRedoStack = [];
           if (this.activeTab === 'whiteboard') this.drawWbCanvas();
@@ -3434,8 +3810,17 @@ export class FloatingWidget {
     }
   }
 
-  private escapeHtml(text: string): string {
-    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  /**
+   * Delegates to the shared escaper rather than keeping a local copy.
+   *
+   * The local implementation escaped & < > " but not the single quote, and accepted only
+   * `string` while callers pass values straight off the wire (`s.broadcastType`,
+   * `p.nickname`) that can be any JSON type — a non-string argument threw inside a render,
+   * blanking the widget. The shared version handles both and is exercised by
+   * scripts/stress-security.mjs.
+   */
+  private escapeHtml(text: unknown): string {
+    return sharedEscapeHtml(text);
   }
 
   private formatTimestamp(ts: number): string {
@@ -3446,11 +3831,19 @@ export class FloatingWidget {
   private renderFormattedText(text: string, msgIdx: number, msgObj?: any): string {
     let output = '';
 
-    // If image attached
-    if (msgObj?.imageUrl) {
+    // If image attached.
+    //
+    // imageUrl arrives verbatim from a peer's chat packet (chat.service.ts copies
+    // payload.imageUrl with no validation) and this whole string is assigned via innerHTML.
+    // Interpolating it raw let a peer close the src attribute and add an event handler —
+    // arbitrary script in the content script's world. safeMediaUrl narrows it to a data:image
+    // or https: URL and returns '' for anything else, so a rejected value renders no image
+    // rather than rendering an attacker's markup.
+    const safeImage = msgObj?.imageUrl ? safeMediaUrl(msgObj.imageUrl) : '';
+    if (safeImage) {
       output += `
         <div style="margin:4px 0;border-radius:6px;overflow:hidden;border:1px solid rgba(255,255,255,0.1);">
-          <img src="${msgObj.imageUrl}" alt="Shared image" style="width:100%;max-height:180px;object-fit:cover;display:block;" />
+          <img src="${this.escapeHtml(safeImage)}" alt="Shared image" style="width:100%;max-height:180px;object-fit:cover;display:block;" />
         </div>
       `;
     }
@@ -3552,16 +3945,14 @@ export class FloatingWidget {
       } catch (e) {}
     }
 
-    if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
-      chrome.runtime.sendMessage({
+    this.safeSendMessage({
         type: 'SEND_PAGE_CHAT_MESSAGE',
         messageId,
         text: myMsg.text,
         replyTo: myMsg.replyTo,
         replyPreview: myMsg.replyPreview,
         roomId: this.currentProblem?.roomId,
-      }).catch(() => {});
-    }
+      });
   }
 
   private async loadMessages() {
@@ -3705,6 +4096,39 @@ export class FloatingWidget {
       this.serverToastMessage = null;
       this.render();
     }, 3200);
+  }
+
+  /**
+   * Requests the side panel open and surfaces the outcome.
+   *
+   * Every call site here used to be `chrome.runtime.sendMessage({type:'OPEN_SIDEPANEL'}).catch(() => {})`
+   * — a caught promise REJECTION, which `sendResponse({success:false, reason:...})` never
+   * produces, since responding is a successful resolution regardless of what it reports. The
+   * service worker's OPEN_SIDEPANEL handler was rewritten specifically to report a real
+   * success/failure (no user gesture, panel unsupported for this tab, older Chrome) instead of
+   * always claiming success — but nothing here ever read that response, so every failure was
+   * still silent: the user clicked the FAB and nothing happened, with no way to tell a slow
+   * panel from a permanently blocked one.
+   */
+  private requestOpenSidePanel(extra: Record<string, unknown> = {}) {
+    if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) return;
+
+    chrome.runtime
+      .sendMessage({ type: 'OPEN_SIDEPANEL', ...extra })
+      .then((res: any) => {
+        if (res && res.success === false) {
+          const hint =
+            res.reason === 'unsupported'
+              ? 'Side panel isn’t supported in this browser — update Chrome to use Synqto.'
+              : 'Couldn’t open the side panel — click the Synqto toolbar icon instead.';
+          this.showServerConnectedToast(`⚠️ ${hint}`);
+        }
+      })
+      .catch(() => {
+        // The message channel itself failed (extension reloaded, service worker not yet
+        // woken) rather than the panel refusing to open — same user-facing advice applies.
+        this.showServerConnectedToast('⚠️ Couldn’t reach the extension — try the Synqto toolbar icon.');
+      });
   }
 
   // ─── Pomodoro & Focus Timer Helpers ───

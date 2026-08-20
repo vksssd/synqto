@@ -21,12 +21,22 @@ if (!fs.existsSync(outputDir)) {
   fs.mkdirSync(outputDir, { recursive: true });
 }
 
-// Read version from manifest.json
+// Read version from the BUILT manifest — the artifact's own declaration, not the source's.
+//
+// This used to default to '0.2.0.0' when dist/manifest.json was missing or lacked a version,
+// which meant a broken or stale build produced a confidently mislabelled zip
+// (synqto-v0.2.0.0.zip) that looked like a real release. A packaging step must never invent
+// a version: the filename is how the artifact is identified after it leaves this machine.
 const manifestPath = path.resolve(distDir, 'manifest.json');
-let version = '0.2.0.0';
-if (fs.existsSync(manifestPath)) {
-  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-  version = manifest.version || '0.2.0.0';
+if (!fs.existsSync(manifestPath)) {
+  console.error(`\n✗ cannot package: ${manifestPath} not found — run the build first.\n`);
+  process.exit(1);
+}
+const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+const version = manifest.version;
+if (!version) {
+  console.error('\n✗ cannot package: dist/manifest.json has no "version" field.\n');
+  process.exit(1);
 }
 
 const vParts = version.split('.');

@@ -23,6 +23,8 @@ export class GamificationService {
   private badges: Record<BadgeId, Badge> = this.getDefaultBadges();
   private listeners: Set<(stats: StreakStats, badges: Badge[]) => void> = new Set();
   private initialized = false;
+  /** Handle for the focus heartbeat, so it can be stopped and cannot be started twice. */
+  private focusHeartbeat: ReturnType<typeof setInterval> | null = null;
 
   private constructor() {
     this.loadFromStorage();
@@ -252,23 +254,42 @@ export class GamificationService {
   }
 
   /**
+   * Returns today's activity entry, creating it at zero if absent.
+   *
+   * Replaces a `if (this.stats.activityMap[today]) { ...increment... }` pattern that appeared
+   * at every write site. That is a guard where an ensure was needed: when the entry did not
+   * exist the increment was silently skipped rather than the day being started. The focus
+   * heartbeat was the case that actually bit — it never calls touchStreak(), so on any day the
+   * user neither opened a problem nor sent a message, `minutesSpent` was dropped while
+   * `totalFocusMinutes` still incremented, leaving the daily map and the lifetime totals
+   * permanently disagreeing with no way to tell which was right.
+   */
+  private ensureToday(): { date: string; count: number; problemsVisited: number; minutesSpent: number; messagesSent: number } {
+    const today = this.getTodayDateString();
+    let entry = this.stats.activityMap[today];
+    if (!entry) {
+      entry = { date: today, count: 0, problemsVisited: 0, minutesSpent: 0, messagesSent: 0 };
+      this.stats.activityMap[today] = entry;
+    }
+    return entry;
+  }
+
+  /**
    * Evaluates streak continuation for today.
    */
   public touchStreak(): void {
     const today = this.getTodayDateString();
     const yesterday = this.getYesterdayDateString();
 
-    if (!this.stats.activityMap[today]) {
-      this.stats.activityMap[today] = {
-        date: today,
-        count: 1,
-        problemsVisited: 1,
-        minutesSpent: 1,
-        messagesSent: 0,
-      };
-    } else {
-      this.stats.activityMap[today].count += 1;
-    }
+    // Creation used to seed `count: 1, problemsVisited: 1, minutesSpent: 1` — non-zero
+    // counters for events that had not happened yet. Because recordProblemVisit() calls
+    // touchStreak() and THEN does `problemsVisited += 1`, the first problem of every day was
+    // counted twice, and `minutesSpent` started at 1 for zero elapsed time. Both inflated
+    // numbers feed evaluateBadges(), so badges unlocked early too.
+    //
+    // ensureToday() creates the entry at zero and returns it; the caller does its own
+    // increment. Exactly one increment per event, from one place.
+    this.ensureToday().count += 1;
 
     if (this.stats.lastActiveDate === today) {
       // Already active today — nothing to recalculate
@@ -294,13 +315,11 @@ export class GamificationService {
    * Records solving / visiting a problem.
    */
   public recordProblemVisit(problemSlug: string): void {
-    const today = this.getTodayDateString();
     this.touchStreak();
 
-    if (this.stats.activityMap[today]) {
-      this.stats.activityMap[today].problemsVisited += 1;
-      this.stats.activityMap[today].count += 2;
-    }
+    const entry = this.ensureToday();
+    entry.problemsVisited += 1;
+    entry.count += 2;
 
     this.stats.totalProblemsSolved += 1;
     this.evaluateBadges();
@@ -312,12 +331,8 @@ export class GamificationService {
    * Records sending a collaborative chat message.
    */
   public recordMessageSent(): void {
-    const today = this.getTodayDateString();
     this.touchStreak();
-
-    if (this.stats.activityMap[today]) {
-      this.stats.activityMap[today].messagesSent += 1;
-    }
+    this.ensureToday().messagesSent += 1;
     this.saveToStorage();
   }
 
@@ -363,16 +378,40 @@ export class GamificationService {
    * Background interval tracking 1 minute of active study focus.
    */
   private startFocusHeartbeat(): void {
-    setInterval(() => {
-      const today = this.getTodayDateString();
-      if (this.stats.activityMap[today]) {
-        this.stats.activityMap[today].minutesSpent += 1;
-      }
+    // Guarded against double-start. The handle was previously discarded, so there was no way
+    // to stop the timer and no way to notice a second one running: two heartbeats would have
+    // counted every minute twice, forever, with no symptom other than implausible stats.
+    if (this.focusHeartbeat !== null) return;
+
+    this.focusHeartbeat = setInterval(() => {
+      // Only credit a minute the user could plausibly have spent studying.
+      //
+      // This used to increment unconditionally, which meant "focus minutes" measured how long
+      // the extension had been loaded, not how long anyone was working: leave a tab open
+      // overnight and wake up to 480 minutes of focus and every time-based badge unlocked. A
+      // statistic the user cannot influence by working harder is not a statistic, and streak
+      // badges built on it are unearned.
+      //
+      // document.hidden is a deliberately weak proxy — it cannot detect someone staring out
+      // of a window — but it is honest about the one thing it does know: a backgrounded tab
+      // is definitely not being read. Chrome also throttles timers in hidden tabs, so the
+      // unguarded version was additionally miscounting elapsed time in exactly that state.
+      if (typeof document !== 'undefined' && document.hidden) return;
+
+      this.ensureToday().minutesSpent += 1;
       this.stats.totalFocusMinutes += 1;
       this.evaluateBadges();
       this.saveToStorage();
       this.emitChange();
     }, 60000);
+  }
+
+  /** Stops the focus heartbeat. Exists so the timer is releasable rather than immortal. */
+  public stopFocusHeartbeat(): void {
+    if (this.focusHeartbeat !== null) {
+      clearInterval(this.focusHeartbeat);
+      this.focusHeartbeat = null;
+    }
   }
 
   public getStats(): StreakStats {

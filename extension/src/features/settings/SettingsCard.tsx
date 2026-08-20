@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { Server, Trash2, Shield, Info, Check, MessageSquare, Plus, X, Sun, Layout, Palette, Sparkles, Clock, RefreshCw, CheckCircle, AlertTriangle, RotateCcw, Search, Type, Eye, SlidersHorizontal, ChevronDown, ChevronUp, ChevronsUpDown } from 'lucide-react';
 import { SignalingService } from '@/core/network/signaling.service';
+import { getAppVersion, getDisplayVersion } from '@/core/version';
 import {
   ThemeService,
   ThemeMode,
@@ -2221,7 +2222,7 @@ export const SettingsCard: React.FC = () => {
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', background: 'rgba(255,255,255,0.05)', padding: '1px 6px', borderRadius: '4px' }}>
-                v0.2.0
+                {getDisplayVersion()}
               </span>
               <div
                 style={{
@@ -2242,7 +2243,7 @@ export const SettingsCard: React.FC = () => {
 
           {isAboutExpanded && (
             <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
-              Version: <strong>{typeof chrome !== 'undefined' && chrome.runtime?.getManifest ? chrome.runtime.getManifest().version : '0.2.0'} (The Trinity Architecture)</strong><br />
+              Version: <strong>{getAppVersion()} (The Trinity Architecture)</strong><br />
               Network Protocol: <strong>Dual-Leader P2P Mesh with WebRTC DataChannels</strong><br />
               Signaling: <strong>Go / Gorilla WebSocket Broker</strong>
             </div>

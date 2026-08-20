@@ -1,5 +1,11 @@
 // ─── Live Synchronized Laser Pointer & Click Ripple Overlay (Synqme Stage) ───
 
+import { safeCssColor } from '@/core/security/sanitize';
+
+/** Fallbacks used whenever a peer's colour fails validation. Match the app's palette. */
+const DEFAULT_CURSOR_COLOR = '#6366f1';
+const TUTOR_CURSOR_COLOR = '#8b5cf6';
+
 interface RemoteCursorData {
   peerId: string;
   nickname: string;
@@ -169,25 +175,48 @@ export class CursorOverlay {
 
         if (msg.type === 'NERD_BUDDY_CURSOR_UPDATE' && msg.cursor) {
           const cursor = msg.cursor as RemoteCursorData;
-          // Render if sender is a tutor or marked as broadcaster
-          const isBroadcaster = cursor.isTutor ||
-            (this.liveStage && (this.liveStage.tutorIdentity?.peerId === cursor.peerId || this.liveStage.tutorPeerId === cursor.peerId || this.liveStage.guestSpeakers?.some((g: any) => g.peerId === cursor.peerId)));
-
-          if (isBroadcaster || !this.liveStage) {
+          if (this.mayBroadcast(cursor.peerId)) {
             this.renderCursor(cursor);
           }
         } else if (msg.type === 'NERD_BUDDY_CLICK_PULSE' && msg.click) {
           const click = msg.click as ClickPulseData;
-          // Render click ripple immediately if sender is tutor or broadcaster
-          const isBroadcaster = click.isTutor ||
-            (this.liveStage && (this.liveStage.tutorIdentity?.peerId === click.peerId || this.liveStage.tutorPeerId === click.peerId || this.liveStage.guestSpeakers?.some((g: any) => g.peerId === click.peerId)));
-
-          if (isBroadcaster || click.isTutor || !this.liveStage) {
+          if (this.mayBroadcast(click.peerId)) {
             this.renderClickPulse(click);
           }
         }
       });
     } catch {}
+  }
+
+  /**
+   * Decides whether a peer is allowed to draw on this viewport.
+   *
+   * THE BUG THIS CLOSES. The previous check was, in both branches:
+   *
+   *     const isBroadcaster = cursor.isTutor || (this.liveStage && <roster lookup>);
+   *
+   * `cursor.isTutor` is a field on the inbound packet — a claim made by the sender about
+   * itself. Leading the disjunction with it meant the roster lookup never ran for anyone who
+   * simply set the flag, so during a live stage (where cursors are supposed to be restricted
+   * to the tutor and invited guest speakers) any participant could paint a laser pointer and
+   * click ripples across every other participant's screen by asserting `isTutor: true`. The
+   * click branch made it doubly explicit by re-checking `|| click.isTutor` after already
+   * folding it into isBroadcaster.
+   *
+   * Authorisation must come from the stage roster, which is distributed by the stage owner,
+   * and never from the packet being authorised. The sender's own claim is now ignored
+   * entirely rather than merely deprioritised — an `||` with an attacker-controlled operand
+   * is not a check.
+   */
+  private mayBroadcast(peerId: string): boolean {
+    // No live stage means no restriction to enforce: ordinary rooms show everyone's cursor.
+    if (!this.liveStage) return true;
+    if (!peerId) return false;
+
+    const stage = this.liveStage;
+    if (stage.tutorIdentity?.peerId === peerId) return true;
+    if (stage.tutorPeerId === peerId) return true;
+    return Boolean(stage.guestSpeakers?.some((g: any) => g?.peerId === peerId));
   }
 
   private renderCursor(cursor: RemoteCursorData): void {
@@ -227,7 +256,14 @@ export class CursorOverlay {
     el.style.transform = `translate3d(${x}px, ${y}px, 0)`;
     el.style.opacity = '1';
 
-    const glowColor = cursor.isTutor ? '#8b5cf6' : cursor.color || '#6366f1';
+    // The peer's colour lands inside a cssText declaration list below, so it is narrowed to
+    // a colour literal first. Unvalidated, `red !important; width:100vw !important;
+    // height:100vh` would append declarations that override the width/height set earlier in
+    // the same string — letting any peer in the room paint over the victim's whole viewport —
+    // and `background:url(https://attacker/)` would turn the overlay into a tracking beacon.
+    const glowColor = cursor.isTutor
+      ? TUTOR_CURSOR_COLOR
+      : safeCssColor(cursor.color, DEFAULT_CURSOR_COLOR);
     const avatarEl = el.firstElementChild as HTMLElement;
     const labelEl = el.lastElementChild as HTMLElement;
 
@@ -282,7 +318,11 @@ export class CursorOverlay {
     const y = (click.yPct / 100) * window.innerHeight;
 
     const ripple = document.createElement('div');
-    const color = click.color || (click.isTutor ? '#8b5cf6' : '#6366f1');
+    // Same cssText injection sink as renderCursor — see the note there.
+    const color = safeCssColor(
+      click.color,
+      click.isTutor ? TUTOR_CURSOR_COLOR : DEFAULT_CURSOR_COLOR
+    );
 
     ripple.style.cssText = `
       position: fixed !important;

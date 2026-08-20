@@ -266,6 +266,15 @@ const MainApp: React.FC = () => {
           synqto_sidepanel_open: false,
           nerd_buddy_sidepanel_open: false,
         });
+        // Belt-and-suspenders for the synqto_cofocus_active flag (see
+        // room.service.ts's setCoFocusActiveFlag / offscreen.ts's resumeBackgroundMesh):
+        // the panel unmounting is the one signal that fires however the panel closed —
+        // deliberately by the user, a crash, or the extension reloading — whereas
+        // cofocus.service.ts's own clear runs only on its normal end-of-session paths. A
+        // flag stuck "on" after the panel that set it is gone would permanently block the
+        // offscreen document from ever resuming background mesh for anything, which is a
+        // worse failure than the one this flag exists to prevent.
+        chrome.storage.local.remove('synqto_cofocus_active');
         chrome.storage.onChanged.removeListener(handleStorageChange);
       };
     }
@@ -368,6 +377,18 @@ const MainApp: React.FC = () => {
 
   const handleManualReconnect = () => {
     if (isReconnecting) return;
+
+    // reconnect() with no room refuses to connect rather than inventing a placeholder room
+    // (see signaling.service.ts) — a real bug that room formerly caused: two unrelated
+    // browsers both hitting this fallback ended up registered together. Surface the
+    // specific reason here rather than letting it fall through to the generic 1800ms
+    // "unable to connect" toast below, which would blame the network for something that
+    // was never attempted.
+    if (!room?.roomId) {
+      showToast('ℹ️ No active room to reconnect to yet — open a problem page first.');
+      return;
+    }
+
     setIsReconnecting(true);
     showToast('🔄 Connecting to signaling server...');
     signalingService.reconnect(room?.roomId, identity?.peerId, identity?.nickname);

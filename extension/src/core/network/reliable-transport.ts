@@ -20,7 +20,14 @@ interface PendingMessage {
   lastSentAt: number;
   timer: any;
   resolve: (receipt: DeliveryReceipt) => void;
-  reject: (err: Error) => void;
+  // No `reject` field.
+  //
+  // It was stored and never called on any path. That is not an oversight to preserve: this
+  // transport's contract is that delivery outcome is DATA, not an exception —
+  // DeliveryReceipt.status carries 'delivered' | 'timeout' | 'rejected', so a caller handles
+  // failure by reading a field rather than by wrapping every send in try/catch. Keeping an
+  // unused reject alongside that invites a future edit to start throwing on one path only,
+  // which would make callers correct for some failures and not others.
 }
 
 export class ReliableTransport {
@@ -94,8 +101,20 @@ export class ReliableTransport {
       };
     }
 
-    return new Promise<DeliveryReceipt>((resolve, reject) => {
-      const sentTime = typeof packet.timestamp === 'number' ? packet.timestamp : Date.now();
+    return new Promise<DeliveryReceipt>((resolve) => {
+      // Measure RTT from TRANSMISSION, not from packet construction.
+      //
+      // This used to seed from `packet.timestamp`, which the application stamps when it
+      // builds the packet. Between that moment and the actual send the packet can sit in
+      // TransportRouter's pendingP2P queue, wait out WebRTC negotiation, or be chunked and
+      // queued — and all of that local latency was being attributed to the network.
+      //
+      // The header comment invokes Karn's algorithm, and the `attempts === 1` gate does
+      // implement it correctly. But Karn's assumes the sample measures the path. Seeding from
+      // creation time meant srtt tracked "how busy this client is" rather than "how far away
+      // this peer is", so the derived RTO was inflated by a quantity that never shrinks when
+      // the network improves — making every retransmission below it sluggish.
+      const sentTime = Date.now();
       const pendingItem: PendingMessage = {
         packet,
         targetPeerId,
@@ -105,7 +124,6 @@ export class ReliableTransport {
         lastSentAt: sentTime,
         timer: null,
         resolve,
-        reject,
       };
 
       this.pending.set(packet.id, pendingItem);
@@ -358,8 +376,24 @@ export class ReliableTransport {
   }
 
   public clear(): void {
+    // SETTLE every in-flight promise before dropping it.
+    //
+    // This previously cleared the timers and the map and walked away, leaving each
+    // PendingMessage's `resolve` uncalled. Every promise returned by sendReliable for those
+    // messages would then never settle: an `await sendReliable(...)` hangs forever, and the
+    // async frame holding it is retained for the lifetime of the page.
+    //
+    // Nothing awaits today, which is exactly why this was survivable and exactly why it was
+    // worth fixing — it is a trap armed for whoever writes the first `await`. clear() is
+    // called on room change, so that await would hang on an ordinary user action.
     this.pending.forEach((item) => {
       if (item.timer) clearTimeout(item.timer);
+      item.resolve({
+        messageId: item.packet.id,
+        status: 'rejected',
+        attempts: item.attempts,
+        error: 'Transport cleared before delivery was confirmed (room change or teardown)',
+      });
     });
     this.pending.clear();
     this.receivedMessageIds.clear();

@@ -183,6 +183,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
     };
 
+    // Guarantee the panel is ENABLED for this tab before opening it.
+    //
+    // sidePanel.open() rejects if the panel is disabled for the target tab, and a tab can end
+    // up disabled without anyone asking for it — setOptions({enabled:false}) elsewhere, or a
+    // tab restored from a session where it was. The manifest's default_path only establishes
+    // a global default; it does not re-enable a tab that was explicitly turned off.
+    //
+    // setOptions is fire-and-forget on purpose: awaiting it would move open() out of the
+    // synchronous window that Chrome requires for a user-gesture-initiated call, which is the
+    // one thing that must not happen here.
+    try {
+      sidePanel.setOptions?.({ tabId, path: 'sidepanel.html', enabled: true });
+    } catch {
+      /* older Chrome without setOptions — open() below is still worth attempting */
+    }
+
     const attempt = tabId ? sidePanel.open({ tabId }) : (windowId ? sidePanel.open({ windowId }) : Promise.reject(new Error('no target')));
 
     Promise.resolve(attempt)

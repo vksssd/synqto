@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { StudyGroup } from './group.types';
 import { Lock, Globe, Share2, Trash2, ArrowRight, LogOut, ExternalLink } from 'lucide-react';
 import { getPlatformColor } from '@/features/room/room-utils';
+import { OwnedTimeouts } from '@/shared/owned-timeouts';
 
 interface GroupCardProps {
   group: StudyGroup;
@@ -32,19 +33,27 @@ export const GroupCard: React.FC<GroupCardProps> = ({
   // mis-click through.
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const confirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const timeoutsRef = useRef<OwnedTimeouts | null>(null);
+  if (timeoutsRef.current === null) timeoutsRef.current = new OwnedTimeouts();
+  const timeouts = timeoutsRef.current;
 
   useEffect(() => () => {
-    if (confirmTimer.current) clearTimeout(confirmTimer.current);
-  }, []);
+    timeouts.clearAll();
+    confirmTimer.current = null;
+  }, [timeouts]);
 
   const handleDeleteClick = () => {
     if (!confirmingDelete) {
       setConfirmingDelete(true);
       // Auto-revert so the card does not sit in a scary armed state indefinitely.
-      confirmTimer.current = setTimeout(() => setConfirmingDelete(false), 4000);
+      confirmTimer.current = timeouts.replace(confirmTimer.current, () => {
+        confirmTimer.current = null;
+        setConfirmingDelete(false);
+      }, 4000);
       return;
     }
-    if (confirmTimer.current) clearTimeout(confirmTimer.current);
+    timeouts.cancel(confirmTimer.current);
+    confirmTimer.current = null;
     setConfirmingDelete(false);
     onDelete(group.id);
   };

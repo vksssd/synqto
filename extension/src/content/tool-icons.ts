@@ -187,16 +187,88 @@ function escapeText(s: string): string {
  * precisely where they do not fit.
  */
 export const ICON_BUTTON_CSS = `
+  /* ── Sizing scale ──
+     Every control dimension below derives from these, so changing one value rescales the
+     whole toolbar consistently instead of requiring a hunt through inline styles.
+
+     --nb-ctl  the square target size for an icon control
+     --nb-ico  the glyph inside it; a fixed ratio of the control so the optical weight of a
+               button is identical at every scale
+     --nb-gap / --nb-pad  rhythm between and around controls, also expressed against --nb-ctl
+
+     They are declared on :host by the widget, so a future density setting (or a parent that
+     wants denser chrome) can override one variable rather than restyling every control. */
+  .nb-toolstrip,
+  .nb-navstrip {
+    --nb-ctl: 30px;
+    --nb-ico: calc(var(--nb-ctl) * 0.5);
+    --nb-gap: calc(var(--nb-ctl) * 0.13);
+    --nb-pad: calc(var(--nb-ctl) * 0.2);
+  }
+
+  /* Uniform drawer geometry.
+     The three tool drawers looked different heights because each is overflow-x:auto and a
+     horizontal scrollbar only materialises when the content overflows — 18 architecture
+     tools overflowed and gained a scrollbar, 8 DSA tools did not, so the two strips sat at
+     different heights and the toolbar jumped as you switched between them.
+
+     Height is now derived from the control size rather than left to the content, and the
+     scrollbar is overlaid instead of taking layout space, so a drawer is the same height
+     whether or not it scrolls. */
+  .nb-toolstrip {
+    min-height: calc(var(--nb-ctl) + var(--nb-pad) * 2);
+    box-sizing: border-box;
+    gap: var(--nb-gap);
+    padding: var(--nb-pad) calc(var(--nb-pad) * 2);
+    scrollbar-width: none;
+  }
+  .nb-toolstrip::-webkit-scrollbar { height: 0; width: 0; }
+
+  /* Colour / background swatches.
+     These were 12px colour blocks with no accessible name — unusable to a screen reader,
+     and a target roughly a third of the comfortable minimum. The TARGET is now the shared
+     control size while the visible colour stays a small inset dot, so the control is easy
+     to hit without the palette looking heavy. */
+  .nb-swatch {
+    --nb-swatch-size: calc(var(--nb-ctl, 30px) * 0.45);
+    width: var(--nb-ctl, 30px);
+    height: var(--nb-ctl, 30px);
+    min-width: var(--nb-ctl, 30px);
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: calc(var(--nb-ctl, 30px) * 0.2);
+    background:
+      radial-gradient(
+        circle at center,
+        var(--nb-swatch-color) 0,
+        var(--nb-swatch-color) calc(var(--nb-swatch-size) / 2),
+        transparent calc(var(--nb-swatch-size) / 2)
+      );
+    cursor: pointer;
+    flex: 0 0 auto;
+    box-sizing: border-box;
+  }
+  .nb-swatch:hover { background-color: rgba(255, 255, 255, 0.08); }
+  .nb-swatch:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+  /* Selection is a ring, not just a colour change — colour alone cannot indicate "selected"
+     on a control whose entire purpose is to display a colour. */
+  .nb-swatch[aria-checked="true"],
+  .nb-swatch.active {
+    border-color: var(--primary);
+    background-color: rgba(99, 102, 241, 0.18);
+  }
+
   .nb-tbtn {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    /* Sized against the ~24px comfortable minimum for a pointer target rather than the
-       smallest box the glyph fits in. The previous 4px/7px padding produced ~22px controls
-       that were fiddly to hit and read as cramped next to the panel's other chrome. */
-    padding: 7px 10px;
-    min-height: 30px;
-    border-radius: 6px;
+    gap: var(--nb-gap, 4px);
+    /* Geometry derives from --nb-ctl, so the whole toolbar rescales from one value. Sized
+       against the comfortable minimum for a pointer target rather than the smallest box the
+       glyph fits in — the previous 4px/7px padding produced ~22px controls that were fiddly
+       to hit and read as cramped beside the panel's other chrome. */
+    padding: calc(var(--nb-ctl, 30px) * 0.23) calc(var(--nb-ctl, 30px) * 0.33);
+    min-height: var(--nb-ctl, 30px);
+    border-radius: calc(var(--nb-ctl, 30px) * 0.2);
     border: 1px solid transparent;
     background: transparent;
     color: var(--text-muted);
@@ -231,21 +303,32 @@ export const ICON_BUTTON_CSS = `
     .nb-tbtn .nb-btn-label { display: none; }
     /* Square when icon-only: equal padding keeps the glyph optically centred, and the
        min-width stops a 1-glyph button collapsing narrower than its neighbours. */
-    .nb-tbtn { padding: 7px; gap: 0; min-width: 30px; justify-content: center; }
+    .nb-tbtn {
+      padding: calc(var(--nb-ctl, 30px) * 0.23);
+      gap: 0;
+      min-width: var(--nb-ctl, 30px);
+      justify-content: center;
+    }
   }
 
   /* Browsers without container-query support still get a usable toolbar via the explicit
      compact class the widget sets from its own popupSize state. */
   .nb-compact .nb-tbtn .nb-btn-label { display: none; }
-  .nb-compact .nb-tbtn { padding: 7px; gap: 0; min-width: 30px; justify-content: center; }
+  .nb-compact .nb-tbtn {
+    padding: calc(var(--nb-ctl, 30px) * 0.23);
+    gap: 0;
+    min-width: var(--nb-ctl, 30px);
+    justify-content: center;
+  }
 
   /* ── Primary whiteboard tools and header actions ──
      These are icon-only at every width, so they are sized as square targets rather than
      inheriting the label-bearing geometry above. */
   .wb-tool-btn {
-    min-width: 30px;
-    min-height: 30px;
-    padding: 6px;
+    min-width: var(--nb-ctl, 30px);
+    min-height: var(--nb-ctl, 30px);
+    padding: calc(var(--nb-ctl, 30px) * 0.2);
+    box-sizing: border-box;
   }
 
   /* ── Tab bar and header: icon-first below the same breakpoint ──

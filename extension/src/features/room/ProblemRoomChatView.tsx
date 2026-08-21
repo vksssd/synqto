@@ -11,6 +11,7 @@ import { TutorService } from '@/features/tutor/tutor.service';
 import { VoiceRoom } from '@/features/voice/VoiceRoom';
 import { VoiceService } from '@/features/voice/voice.service';
 import { RoomService } from './room.service';
+import { messageBelongsToRoom } from '@/core/runtime/tab-room-context';
 import { ArrowRight, Mic, MicOff, Tv } from 'lucide-react';
 
 interface ProblemRoomChatViewProps {
@@ -64,6 +65,12 @@ export const ProblemRoomChatView: React.FC<ProblemRoomChatViewProps> = ({
     if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
       const handleMsg = (msg: any) => {
         if (!room) return;
+        if (
+          (msg.type === 'LOCAL_CURSOR_MOVE' || msg.type === 'LOCAL_CLICK_PULSE') &&
+          !messageBelongsToRoom(msg.roomId, room.roomId)
+        ) {
+          return;
+        }
         if (msg.type === 'LOCAL_CURSOR_MOVE') {
           tutorService.broadcastCursor(msg.xPct, msg.yPct, room.roomId);
         } else if (msg.type === 'LOCAL_CLICK_PULSE') {
@@ -129,6 +136,8 @@ export const ProblemRoomChatView: React.FC<ProblemRoomChatViewProps> = ({
             <button
               type="submit"
               className="btn btn-primary btn-sm"
+              aria-label="Join custom room"
+              title="Join custom room"
               disabled={!customRoomInput.trim()}
               style={{ fontSize: 'var(--font-size-sm)', padding: '6px 10px' }}
             >

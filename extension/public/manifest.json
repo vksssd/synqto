@@ -11,7 +11,8 @@
     "activeTab",
     "alarms",
     "notifications",
-    "offscreen"
+    "offscreen",
+    "system.display"
   ],
   "host_permissions": [
     "<all_urls>",

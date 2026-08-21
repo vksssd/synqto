@@ -16,6 +16,8 @@ import {
   CodeRunPayload,
   CodeRunResultPayload,
 } from '@/core/network/packet';
+import { messageBelongsToRoom } from '@/core/runtime/tab-room-context';
+import { uuid } from '@/shared/utils';
 
 const DEFAULT_TEMPLATES: Record<CodeLanguage, string> = {
   python: `class Solution:
@@ -181,12 +183,8 @@ LIMIT 10;
 `,
 };
 
-export class CodeService {
-  private static instance: CodeService | null = null;
-  private network: NetworkService;
-  private identityService: IdentityService;
-
-  private state: CodeSessionState = {
+function createInitialCodeState(): CodeSessionState {
+  return {
     code: DEFAULT_TEMPLATES.python,
     language: 'python',
     version: 1,
@@ -196,9 +194,47 @@ export class CodeService {
     isRunning: false,
     lastResult: null,
   };
+}
+
+export class CodeService {
+  private static instance: CodeService | null = null;
+  private network: NetworkService;
+  private identityService: IdentityService;
+
+  private state: CodeSessionState = createInitialCodeState();
+  private currentRoomId = '';
+  private roomGeneration = 0;
+  private runGeneration = 0;
+  private latestRemoteRunIds = new Map<string, string>();
 
   private listeners: Set<(state: CodeSessionState) => void> = new Set();
   private cursorCleanInterval: any = null;
+  private networkUnsubscribers: Array<() => void> = [];
+  private destroyed = false;
+  private readonly handleRuntimeMessage = (
+    message: any,
+    _sender: any,
+    sendResponse: (response?: any) => void
+  ): void => {
+    if (this.destroyed) return;
+    const isRoomScopedMessage =
+      message.type === 'CODE_DELTA_LOCAL' ||
+      message.type === 'CODE_CURSOR_LOCAL' ||
+      message.type === 'CODE_GET_STATE';
+    if (
+      isRoomScopedMessage &&
+      !messageBelongsToRoom(message.roomId, this.currentRoomId)
+    ) {
+      return;
+    }
+    if (message.type === 'CODE_DELTA_LOCAL') {
+      this.updateCode(message.payload.code, message.payload.cursorLine, message.payload.cursorCol);
+    } else if (message.type === 'CODE_CURSOR_LOCAL') {
+      this.updateMyCursor(message.payload.line, message.payload.ch);
+    } else if (message.type === 'CODE_GET_STATE') {
+      sendResponse(this.state);
+    }
+  };
 
   private constructor() {
     this.network = NetworkService.getInstance();
@@ -217,11 +253,14 @@ export class CodeService {
   }
 
   private broadcastToContentTabs(message: any) {
+    const routedMessage = this.currentRoomId
+      ? { ...message, roomId: this.currentRoomId }
+      : message;
     if (typeof chrome !== 'undefined' && chrome.tabs?.query) {
       chrome.tabs.query({}, (tabs) => {
         tabs.forEach((tab) => {
           if (tab.id) {
-            chrome.tabs.sendMessage(tab.id, message).catch(() => {});
+            chrome.tabs.sendMessage(tab.id, routedMessage).catch(() => {});
           }
         });
       });
@@ -230,21 +269,29 @@ export class CodeService {
 
   private setupContentScriptRelay(): void {
     if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
-      chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-        if (message.type === 'CODE_DELTA_LOCAL') {
-          this.updateCode(message.payload.code, message.payload.cursorLine, message.payload.cursorCol);
-        } else if (message.type === 'CODE_CURSOR_LOCAL') {
-          this.updateMyCursor(message.payload.line, message.payload.ch);
-        } else if (message.type === 'CODE_GET_STATE') {
-          sendResponse(this.state);
-        }
-      });
+      chrome.runtime.onMessage.addListener(this.handleRuntimeMessage);
+    }
+  }
+
+  /** Resets collaboration state when room ownership changes so code never crosses rooms. */
+  public setRoom(roomId: string): void {
+    if (this.destroyed) return;
+    if (this.currentRoomId === roomId) return;
+    this.roomGeneration++;
+    this.runGeneration++;
+    this.latestRemoteRunIds.clear();
+    this.currentRoomId = roomId;
+    this.state = createInitialCodeState();
+    this.emitState();
+    if (roomId) {
+      this.broadcastToContentTabs({ type: 'CODE_SYNC_REMOTE', payload: this.state });
     }
   }
 
   private setupNetworkListeners(): void {
     // 1. Full code synchronization (e.g. from new peer join or major change)
-    this.network.on<CodeSyncPayload>('code:sync', (payload, packet) => {
+    this.networkUnsubscribers.push(this.network.on<CodeSyncPayload>('code:sync', (payload, packet) => {
+      if (this.destroyed || !this.currentRoomId || packet.roomId !== this.currentRoomId) return;
       if (payload.version > this.state.version) {
         this.state = {
           ...this.state,
@@ -260,10 +307,11 @@ export class CodeService {
         // Lagging peer sent stale sync; heal with our current state
         this.broadcastFullSync();
       }
-    });
+    }));
 
     // 2. Incremental delta update with deterministic tie-breaking & anti-entropy
-    this.network.on<CodeDeltaPayload>('code:delta', (payload, packet) => {
+    this.networkUnsubscribers.push(this.network.on<CodeDeltaPayload>('code:delta', (payload, packet) => {
+      if (this.destroyed || !this.currentRoomId || packet.roomId !== this.currentRoomId) return;
       const myPeerId = this.identityService.getMyIdentity().peerId;
       const isNewer = payload.version > this.state.version;
       const isSameVersion = payload.version === this.state.version;
@@ -312,10 +360,11 @@ export class CodeService {
         // Remote peer is behind or lost conflict tie-break; heal with our authoritative state
         this.broadcastFullSync();
       }
-    });
+    }));
 
     // 3. Live Cursor coordinates
-    this.network.on<CodeCursorPayload>('code:cursor', (payload, packet) => {
+    this.networkUnsubscribers.push(this.network.on<CodeCursorPayload>('code:cursor', (payload, packet) => {
+      if (this.destroyed || !this.currentRoomId || packet.roomId !== this.currentRoomId) return;
       this.updateRemoteCursor({
         peerId: payload.peerId || packet.from.peerId,
         nickname: payload.nickname || packet.from.nickname,
@@ -336,16 +385,23 @@ export class CodeService {
         },
       });
       this.emitState();
-    });
+    }));
 
     // 4. Remote code execution trigger
-    this.network.on<CodeRunPayload>('code:run', (payload) => {
+    this.networkUnsubscribers.push(this.network.on<CodeRunPayload>('code:run', (payload, packet) => {
+      if (this.destroyed || !this.currentRoomId || packet.roomId !== this.currentRoomId) return;
+      if (payload.runId) this.latestRemoteRunIds.set(packet.from.peerId, payload.runId);
+      else this.latestRemoteRunIds.delete(packet.from.peerId);
       this.state.isRunning = true;
       this.emitState();
-    });
+    }));
 
     // 5. Code run results broadcast
-    this.network.on<CodeRunResultPayload>('code:run_result', (payload) => {
+    this.networkUnsubscribers.push(this.network.on<CodeRunResultPayload>('code:run_result', (payload, packet) => {
+      if (this.destroyed || !this.currentRoomId || packet.roomId !== this.currentRoomId) return;
+      const expectedRunId = this.latestRemoteRunIds.get(packet.from.peerId);
+      if (expectedRunId && payload.runId !== expectedRunId) return;
+      if (expectedRunId) this.latestRemoteRunIds.delete(packet.from.peerId);
       this.state.isRunning = false;
       this.state.lastResult = {
         stdout: payload.stdout,
@@ -355,14 +411,15 @@ export class CodeService {
         executedAt: Date.now(),
       };
       this.emitState();
-    });
+    }));
 
     // 6. Peer joins: broadcast our current code state so new peer is instantly in sync
-    this.network.on('presence:join', () => {
+    this.networkUnsubscribers.push(this.network.on('presence:join', (_payload, packet) => {
+      if (this.destroyed || !this.currentRoomId || packet.roomId !== this.currentRoomId) return;
       if (this.state.code.trim().length > 0) {
         this.broadcastFullSync();
       }
-    });
+    }));
   }
 
   private updateRemoteCursor(cursor: CodeCursor) {
@@ -375,9 +432,11 @@ export class CodeService {
   }
 
   private startCursorCleanup() {
-    if (this.cursorCleanInterval) clearInterval(this.cursorCleanInterval);
+    if (this.destroyed) return;
+    if (this.cursorCleanInterval !== null) clearInterval(this.cursorCleanInterval);
     // Remove stale cursors older than 15 seconds
     this.cursorCleanInterval = setInterval(() => {
+      if (this.destroyed) return;
       const now = Date.now();
       const active = this.state.activeCursors.filter((c) => now - c.lastActive < 15000);
       if (active.length !== this.state.activeCursors.length) {
@@ -492,23 +551,30 @@ export class CodeService {
    */
   public async runCode(): Promise<CodeExecutionResult> {
     const startTime = performance.now();
+    const roomId = this.currentRoomId;
+    const roomGeneration = this.roomGeneration;
+    const runGeneration = ++this.runGeneration;
+    const runId = uuid();
+    const code = this.state.code;
+    const language = this.state.language;
     this.state.isRunning = true;
     this.emitState();
 
     const my = this.identityService.getMyIdentity();
     this.network.broadcast<CodeRunPayload>('code:run', {
-      code: this.state.code,
-      language: this.state.language,
+      runId,
+      code,
+      language,
       initiatedBy: my.nickname,
     });
 
     let result: CodeExecutionResult;
 
     try {
-      if (this.state.language === 'javascript' || this.state.language === 'typescript') {
-        result = await this.runJavaScriptSandbox(this.state.code);
+      if (language === 'javascript' || language === 'typescript') {
+        result = await this.runJavaScriptSandbox(code);
       } else {
-        result = await this.simulateLanguageExecution(this.state.language, this.state.code);
+        result = await this.simulateLanguageExecution(language, code);
       }
     } catch (err: any) {
       result = {
@@ -520,12 +586,21 @@ export class CodeService {
       };
     }
 
+    if (
+      this.currentRoomId !== roomId ||
+      this.roomGeneration !== roomGeneration ||
+      this.runGeneration !== runGeneration
+    ) {
+      return result;
+    }
+
     this.state.isRunning = false;
     this.state.lastResult = result;
     this.emitState();
 
     // Broadcast result to peers
     this.network.broadcast<CodeRunResultPayload>('code:run_result', {
+      runId,
       stdout: result.stdout,
       stderr: result.stderr,
       executionTimeMs: result.executionTimeMs,
@@ -625,6 +700,7 @@ export class CodeService {
   }
 
   public onStateChange(handler: (state: CodeSessionState) => void): () => void {
+    if (this.destroyed) return () => {};
     this.listeners.add(handler);
     handler(this.getState());
     return () => {
@@ -633,6 +709,7 @@ export class CodeService {
   }
 
   private emitState(): void {
+    if (this.destroyed) return;
     const s = this.getState();
     this.listeners.forEach((fn) => {
       try {
@@ -641,5 +718,28 @@ export class CodeService {
         console.error('[CodeService] Error in listener:', err);
       }
     });
+  }
+
+  public destroy(): void {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    this.roomGeneration++;
+    this.runGeneration++;
+    if (this.cursorCleanInterval !== null) {
+      clearInterval(this.cursorCleanInterval);
+      this.cursorCleanInterval = null;
+    }
+    this.networkUnsubscribers.splice(0).forEach((unsubscribe) => {
+      try {
+        unsubscribe();
+      } catch {}
+    });
+    if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
+      chrome.runtime.onMessage.removeListener(this.handleRuntimeMessage);
+    }
+    this.latestRemoteRunIds.clear();
+    this.listeners.clear();
+    this.currentRoomId = '';
+    if (CodeService.instance === this) CodeService.instance = null;
   }
 }

@@ -19,19 +19,6 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(tutorService.getActiveRemoteStream());
   const [isStarting, setIsStarting] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
-  const [isWatchingStream, setIsWatchingStream] = useState(true);
-  /**
-   * Whether the viewer DELIBERATELY left the stream.
-   *
-   * isWatchingStream alone was not enough: the stage state listener re-set it to true on
-   * every update where a stream was active, and stage state updates on any change at all
-   * (a hand raised, a guest added, a stream re-announced). So leaving the stream lasted
-   * only until the next unrelated event and then silently snapped back to watching. This
-   * records the viewer's intent so it survives those updates, and is cleared only when a
-   * genuinely new broadcast starts — which is a fair moment to re-offer.
-   */
-  const [hasLeftStream, setHasLeftStream] = useState(false);
-  const lastStreamKeyRef = useRef<string>('');
   const [showStartModal, setShowStartModal] = useState(false);
   const [streamTitleInput, setStreamTitleInput] = useState('');
   const [selectedBroadcastType, setSelectedBroadcastType] = useState<BroadcastType>('screen');
@@ -66,30 +53,15 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
   useEffect(() => {
     const unsubState = tutorService.onStateChange((state) => {
       setStageState(state);
-
-      // A different set of live broadcasts means a genuinely new stream to offer, so the
-      // previous "I left" decision no longer applies.
-      const streamKey = (state.activeStreams || []).map((x) => x.streamId).sort().join('|');
-      if (streamKey && streamKey !== lastStreamKeyRef.current) {
-        lastStreamKeyRef.current = streamKey;
-        setHasLeftStream(false);
-        setIsWatchingStream(true);
-        return;
-      }
-      if (!streamKey) lastStreamKeyRef.current = '';
-
-      // Never drag a viewer back in who chose to leave.
-      if (state.myRole === 'tutor') {
-        setIsWatchingStream(true);
-      }
+      setIsStarting(
+        state.broadcasterState === 'REQUESTING_PERMISSION' ||
+          state.broadcasterState === 'REQUESTING_ADMISSION'
+      );
     });
 
     const unsubStream = tutorService.onRemoteStreamChange((stream, peerId) => {
       setRemoteStream(stream);
       setSelectedPeerId(peerId);
-      if (stream && !hasLeftStream) {
-        setIsWatchingStream(true);
-      }
     });
 
     return () => {
@@ -108,7 +80,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
           videoRef.current.muted = true; // Mute self preview to prevent audio feedback
           videoRef.current.play().catch(() => {});
         }
-      } else if (remoteStream) {
+      } else if (stageState.viewerState === 'WATCHING' && remoteStream) {
         videoRef.current.srcObject = remoteStream;
         videoRef.current.muted = isAudienceAudioMuted;
         videoRef.current.play().catch(() => {
@@ -119,9 +91,12 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
             videoRef.current.play().catch(() => {});
           }
         });
+      } else {
+        videoRef.current.pause();
+        videoRef.current.srcObject = null;
       }
     }
-  }, [stageState.isActive, stageState.myRole, remoteStream, isWatchingStream, selectedPeerId, isAudienceAudioMuted]);
+  }, [stageState.isActive, stageState.myRole, stageState.viewerState, remoteStream, selectedPeerId, isAudienceAudioMuted]);
 
   // Track Native Video Dimensions for Auto Aspect Ratio Calculation
   const handleLoadedMetadata = () => {
@@ -175,17 +150,14 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
     } catch (e) {}
   };
 
-  const handlePopoutWindow = () => {
+  const handlePopoutWindow = async () => {
     try {
-      if (typeof chrome !== 'undefined' && chrome.windows) {
-        chrome.windows.create({
-          url: chrome.runtime.getURL('sidepanel.html?popout=stream'),
-          type: 'popup',
-          width: 960,
-          height: 640,
-        });
-      } else {
-        window.open('sidepanel.html?popout=stream', 'SynqtoStreamPopout', 'width=960,height=640,menubar=no,toolbar=no');
+      // A second sidepanel.html is a second JavaScript realm and therefore a second signaling
+      // singleton for the same peer ID. Native Picture-in-Picture keeps this video element,
+      // MediaStream and network ownership in the current realm while still providing a real
+      // always-on-top viewer window.
+      if (videoRef.current && document.pictureInPictureElement !== videoRef.current) {
+        await videoRef.current.requestPictureInPicture();
       }
     } catch (e) {}
   };
@@ -213,7 +185,6 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
     setIsStarting(true);
     setShowStartModal(false);
     await tutorService.startTutorStage(selectedBroadcastType, currentRoomId, streamTitleInput, withMicInput);
-    setIsWatchingStream(true);
     setIsStarting(false);
   };
 
@@ -223,13 +194,14 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
 
   const handleStopStage = () => {
     tutorService.stopTutorStage(currentRoomId);
-    setIsWatchingStream(false);
   };
 
   const handleSelectStream = (stream: ActiveStreamInfo) => {
     tutorService.setSelectedStream(stream.broadcasterPeerId);
     setSelectedPeerId(stream.broadcasterPeerId);
-    setIsWatchingStream(true);
+    if (stageState.viewerState === 'WATCHING') {
+      tutorService.joinStream(stream.broadcasterPeerId);
+    }
   };
 
   const handleRaiseHand = () => {
@@ -249,6 +221,7 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
   const isTutor = stageState.myRole === 'tutor';
   const isSpeaker = stageState.myRole === 'speaker';
   const activeStreams = stageState.activeStreams || [];
+  const isWatchingStream = stageState.viewerState === 'WATCHING';
 
   // Active stream currently displayed
   const currentStreamInfo = activeStreams.find((s) => s.broadcasterPeerId === selectedPeerId) || activeStreams[0];
@@ -529,17 +502,18 @@ export const TutorStage: React.FC<TutorStageProps> = ({ currentRoomId }) => {
                     <button
                       type="button"
                       className="btn btn-primary btn-sm"
-                      onClick={() => { setHasLeftStream(false); setIsWatchingStream(true); }}
+                      onClick={() => tutorService.joinStream(currentStreamInfo?.broadcasterPeerId)}
                       style={{ fontSize: 'var(--font-size-xs)', padding: '2px 8px' }}
                       aria-label="Join the live stream as audience"
+                      disabled={stageState.viewerState === 'REQUESTING'}
                     >
-                      Join Stream 📺
+                      {stageState.viewerState === 'REQUESTING' ? 'Joining…' : 'Join Stream 📺'}
                     </button>
                   ) : (
                     <button
                       type="button"
                       className="btn btn-ghost btn-sm"
-                      onClick={() => { setHasLeftStream(true); setIsWatchingStream(false); }}
+                      onClick={() => tutorService.leaveStream()}
                       style={{ fontSize: 'var(--font-size-xs)', padding: '2px 6px', color: '#fca5a5' }}
                       aria-label="Leave the live stream"
                     >

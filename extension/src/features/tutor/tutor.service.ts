@@ -13,15 +13,18 @@ import {
   StageRole,
   BroadcastType,
 } from './tutor.types';
+import { NotificationService, describeMediaError } from '@/core/notify/notification.service';
+import { MediaSessionCoordinator } from '@/core/media/media-session-coordinator';
+import { NetworkPacket, PacketType, PeerIdentity } from '@/core/network/packet';
+import {
+  SignalingService,
+  StreamAdmissionResponse,
+} from '@/core/network/signaling.service';
 
-export class TutorService {
-  private static instance: TutorService | null = null;
-  private network: NetworkService;
-  private webrtc: WebRTCService;
-  private identityService: IdentityService;
-  private gamificationService: GamificationService;
-
-  private state: TutorStageState = {
+function createInitialStageState(): TutorStageState {
+  return {
+    viewerState: 'NOT_WATCHING',
+    broadcasterState: 'IDLE',
     isActive: false,
     tutorPeerId: null,
     tutorIdentity: null,
@@ -34,6 +37,31 @@ export class TutorService {
     broadcastType: 'audio',
     activeStreams: [],
   };
+}
+
+interface AcquiredBroadcastMedia {
+  stream: MediaStream;
+  sourceStreams: MediaStream[];
+  audioContext: AudioContext | null;
+  hasMicrophone: boolean;
+  warning?: string;
+}
+
+interface BroadcastAdmissionResult {
+  granted: boolean;
+  reason?: string;
+}
+
+export class TutorService {
+  private static instance: TutorService | null = null;
+  private network: NetworkService;
+  private webrtc: WebRTCService;
+  private identityService: IdentityService;
+  private gamificationService: GamificationService;
+  private mediaCoordinator: MediaSessionCoordinator;
+  private signaling: SignalingService;
+
+  private state: TutorStageState = createInitialStageState();
 
   private remoteCursors: Map<string, CursorPosition> = new Map();
   private cursorListeners: Set<(cursors: CursorPosition[]) => void> = new Set();
@@ -42,17 +70,49 @@ export class TutorService {
 
   private lastCursorSentTime = 0;
   private localStream: MediaStream | null = null;
+  private localSourceStreams: MediaStream[] = [];
+  private mixAudioContext: AudioContext | null = null;
   private remoteStreams: Map<string, MediaStream> = new Map();
   private selectedStreamPeerId: string | null = null;
+  private currentRoomId = '';
+  private startPromise: Promise<boolean> | null = null;
+  private speakerMediaPromise: Promise<void> | null = null;
+  private operationGeneration = 0;
+  private admissionHeld = false;
+  private admissionRequestPromise: Promise<BroadcastAdmissionResult> | null = null;
+  private ownedUnsubscribers: Array<() => void> = [];
+  private admissionTimeouts = new Set<ReturnType<typeof setTimeout>>();
+  private admissionCancellers = new Set<() => void>();
+  private destroyed = false;
 
   private constructor() {
     this.network = NetworkService.getInstance();
     this.webrtc = WebRTCService.getInstance();
     this.identityService = IdentityService.getInstance();
     this.gamificationService = GamificationService.getInstance();
-
+    this.mediaCoordinator = MediaSessionCoordinator.getInstance();
+    this.signaling = SignalingService.getInstance();
+    this.setupOwnershipListeners();
     this.setupNetworkListeners();
     this.setupWebRTCListeners();
+  }
+
+  private setupOwnershipListeners(): void {
+    this.ownedUnsubscribers.push(
+      this.mediaCoordinator.register('live', () => {
+        if (!this.destroyed) this.handleLiveMediaReplaced();
+      })
+    );
+    this.ownedUnsubscribers.push(this.signaling.on('connection:change', (event: { connected?: boolean }) => {
+      if (this.destroyed) return;
+      if (!event.connected) this.admissionHeld = false;
+    }));
+    this.ownedUnsubscribers.push(this.signaling.on('room:registered', () => {
+      if (this.destroyed) return;
+      if (this.state.broadcasterState === 'LIVE' && !this.admissionHeld) {
+        void this.revalidateBroadcastAdmission();
+      }
+    }));
   }
 
   public static getInstance(): TutorService {
@@ -64,72 +124,149 @@ export class TutorService {
 
   private setupNetworkListeners(): void {
     // 1. Mouse cursor synchronization
-    this.network.on<CursorPosition>('canvas:cursor', (payload) => {
-      this.handleIncomingCursor(payload);
+    this.onNetwork<CursorPosition>('canvas:cursor', (payload, packet) => {
+      this.handleIncomingCursor({
+        ...payload,
+        peerId: packet.from.peerId,
+        nickname: packet.from.nickname,
+        avatar: packet.from.avatar,
+        color: packet.from.color,
+      });
     });
 
     // 2. Click ripple synchronization
-    this.network.on<ClickPulse>('canvas:click', (payload) => {
-      this.handleIncomingClick(payload);
+    this.onNetwork<ClickPulse>('canvas:click', (payload, packet) => {
+      this.handleIncomingClick({
+        ...payload,
+        peerId: packet.from.peerId,
+        nickname: packet.from.nickname,
+        color: packet.from.color,
+      });
     });
 
     // 3. Multi-stream announcement
-    this.network.on<ActiveStreamInfo>('stream:announce', (streamInfo) => {
-      this.handleIncomingStreamAnnounce(streamInfo);
+    this.onNetwork<ActiveStreamInfo>('stream:announce', (streamInfo, packet) => {
+      this.handleIncomingStreamAnnounce(streamInfo, packet.from);
     });
 
     // 4. Stream stopped announcement
-    this.network.on<{ broadcasterPeerId: string }>('stream:stopped', (payload) => {
-      this.handleIncomingStreamStopped(payload);
+    this.onNetwork<{ broadcasterPeerId: string }>('stream:stopped', (_payload, packet) => {
+      this.handleIncomingStreamStopped({ broadcasterPeerId: packet.from.peerId });
     });
 
     // 5. Stage state sync (backward compatibility)
-    this.network.on<TutorStageState>('stage:state', (payload) => {
-      this.handleIncomingStageState(payload);
+    this.onNetwork<TutorStageState>('stage:state', (payload, packet) => {
+      if (payload?.tutorPeerId !== packet.from.peerId) return;
+      this.handleIncomingStageState({
+        ...payload,
+        tutorPeerId: packet.from.peerId,
+        tutorIdentity: packet.from,
+        // Stream ownership is learned from each broadcaster's own signed/canonicalized
+        // announcement, never from a third party's aggregate stage snapshot.
+        activeStreams: this.state.activeStreams,
+        handRaises: this.state.handRaises,
+        lastMediaError: this.state.lastMediaError,
+        guestSpeakers: Array.isArray(payload.guestSpeakers)
+          ? payload.guestSpeakers.slice(0, TutorService.MAX_GUEST_SPEAKERS)
+          : [],
+      });
     });
 
     // 6. Hand raise requests
-    this.network.on<HandRaiseRequest>('stage:hand_raise', (payload) => {
-      this.handleIncomingHandRaise(payload);
+    this.onNetwork<HandRaiseRequest>('stage:hand_raise', (payload, packet) => {
+      this.handleIncomingHandRaise({
+        ...payload,
+        peerId: packet.from.peerId,
+        nickname: packet.from.nickname,
+        avatar: packet.from.avatar,
+      });
     });
 
     // 7. Hand response
-    this.network.on<{ targetPeerId: string; accepted: boolean }>('stage:hand_response', (payload) => {
+    this.onNetwork<{ targetPeerId: string; accepted: boolean }>('stage:hand_response', (payload, packet) => {
+      if (packet.from.peerId !== this.state.tutorPeerId) return;
       this.handleIncomingHandResponse(payload);
     });
 
     // 8. Hand withdrawn — keeps the tutor's queue from showing stale requests.
-    this.network.on<{ peerId: string }>('stage:hand_lower', (payload) => {
-      this.handleIncomingHandLower(payload);
+    this.onNetwork<{ peerId: string }>('stage:hand_lower', (_payload, packet) => {
+      this.handleIncomingHandLower({ peerId: packet.from.peerId });
     });
   }
 
+  private onNetwork<T = unknown>(
+    type: PacketType,
+    handler: (payload: T, packet: NetworkPacket) => void
+  ): void {
+    const unsubscribe = this.network.on<T>(type, (payload, packet) => {
+      if (
+        this.destroyed ||
+        !this.currentRoomId ||
+        packet.roomId !== this.currentRoomId
+      ) {
+        return;
+      }
+      handler(payload, packet);
+    });
+    this.ownedUnsubscribers.push(unsubscribe);
+  }
+
   private setupWebRTCListeners(): void {
-    this.webrtc.onRemoteStream((peerId, stream) => {
+    this.ownedUnsubscribers.push(this.webrtc.onRemoteStream((peerId, stream) => {
+      if (this.destroyed) return;
       this.remoteStreams.set(peerId, stream);
+      // WebRTCService carries voice and live media over the same peer connection. Do not
+      // disable or select an audio-only voice stream merely because TutorService observed it;
+      // live ownership is established by stream:announce or the guest-speaker roster.
+      if (!this.isExpectedLivePeer(peerId)) return;
       if (!this.selectedStreamPeerId || !this.remoteStreams.has(this.selectedStreamPeerId)) {
         this.selectedStreamPeerId = peerId;
       }
+      if (
+        this.state.viewerState === 'REQUESTING' &&
+        this.selectedStreamPeerId === peerId
+      ) {
+        this.setRemoteStreamEnabled(stream, true);
+        this.state.viewerState = 'WATCHING';
+        this.emitState();
+      } else if (this.state.viewerState !== 'WATCHING' || this.selectedStreamPeerId !== peerId) {
+        this.setRemoteStreamEnabled(stream, false);
+      }
       this.notifyStreamListeners();
-    });
+    }));
 
-    this.webrtc.onRemoteStreamRemoved((peerId) => {
+    this.ownedUnsubscribers.push(this.webrtc.onRemoteStreamRemoved((peerId) => {
+      if (this.destroyed) return;
       this.remoteStreams.delete(peerId);
       if (this.selectedStreamPeerId === peerId) {
         const remaining = Array.from(this.remoteStreams.keys());
         this.selectedStreamPeerId = remaining.length > 0 ? remaining[0] : null;
       }
       this.notifyStreamListeners();
-    });
+    }));
   }
 
   private notifyStreamListeners(): void {
+    if (this.destroyed) return;
     const stream = this.getActiveRemoteStream();
     this.remoteStreamListeners.forEach((fn) => fn(stream, this.selectedStreamPeerId));
   }
 
   public setSelectedStream(peerId: string): void {
+    const previousPeerId = this.selectedStreamPeerId;
     this.selectedStreamPeerId = peerId;
+    if (previousPeerId && previousPeerId !== peerId) {
+      const previous = this.remoteStreams.get(previousPeerId);
+      if (previous) this.setRemoteStreamEnabled(previous, false);
+    }
+    if (this.state.viewerState === 'WATCHING') {
+      const selected = this.remoteStreams.get(peerId);
+      if (selected) this.setRemoteStreamEnabled(selected, true);
+      else {
+        this.state.viewerState = 'REQUESTING';
+        this.webrtc.initiateConnection(peerId);
+      }
+    }
     this.notifyStreamListeners();
     this.emitState();
   }
@@ -139,17 +276,79 @@ export class TutorService {
   }
 
   public getActiveRemoteStream(): MediaStream | null {
+    if (this.state.viewerState !== 'WATCHING') return null;
     if (this.selectedStreamPeerId && this.remoteStreams.has(this.selectedStreamPeerId)) {
       return this.remoteStreams.get(this.selectedStreamPeerId)!;
     }
-    return this.remoteStreams.values().next().value || null;
+    return null;
   }
 
   public getRemoteStreamByPeerId(peerId: string): MediaStream | null {
     return this.remoteStreams.get(peerId) || null;
   }
 
+  public joinStream(peerId?: string): boolean {
+    if (this.destroyed || !this.currentRoomId) return false;
+    if (this.state.myRole === 'tutor') return true;
+    const targetPeerId =
+      peerId || this.selectedStreamPeerId || this.state.activeStreams[0]?.broadcasterPeerId;
+    if (!targetPeerId) return false;
+
+    this.selectedStreamPeerId = targetPeerId;
+    this.state.viewerState = 'REQUESTING';
+    const stream = this.remoteStreams.get(targetPeerId);
+    if (stream) {
+      this.setRemoteStreamEnabled(stream, true);
+      this.state.viewerState = 'WATCHING';
+    } else {
+      this.webrtc.initiateConnection(targetPeerId);
+    }
+    this.notifyStreamListeners();
+    this.emitState();
+    return true;
+  }
+
+  public leaveStream(): void {
+    if (this.state.viewerState === 'NOT_WATCHING' || this.state.viewerState === 'LEAVING') {
+      return;
+    }
+    this.state.viewerState = 'LEAVING';
+    this.remoteStreams.forEach((stream) => this.setRemoteStreamEnabled(stream, false));
+    this.state.viewerState = 'NOT_WATCHING';
+    this.notifyStreamListeners();
+    this.emitState();
+  }
+
+  private setRemoteStreamEnabled(stream: MediaStream, enabled: boolean): void {
+    stream.getTracks().forEach((track) => {
+      track.enabled = enabled;
+    });
+  }
+
+  private isExpectedLivePeer(peerId: string): boolean {
+    return (
+      this.state.activeStreams.some((stream) => stream.broadcasterPeerId === peerId) ||
+      this.state.guestSpeakers.some((speaker) => speaker.peerId === peerId)
+    );
+  }
+
+  private handleLiveMediaReplaced(): void {
+    if (this.state.broadcasterState !== 'IDLE' || this.state.myRole === 'tutor') {
+      this.stopTutorStage(this.currentRoomId);
+      return;
+    }
+    if (this.state.myRole === 'speaker' && this.localStream) {
+      ++this.operationGeneration;
+      this.releaseLocalMedia();
+      this.state.isAudioLive = false;
+      this.state.isVideoLive = false;
+      this.state.lastMediaError = 'Speaker media stopped because voice chat took microphone ownership.';
+      this.emitState();
+    }
+  }
+
   public broadcastCursor(xPct: number, yPct: number, currentRoomId: string): void {
+    if (this.destroyed || !currentRoomId || currentRoomId !== this.currentRoomId) return;
     const now = Date.now();
     // 40ms was 25 packets/sec/peer, and each one fans out to EVERY peer in the room — so a
     // 20-peer room with five people moving the mouse generated ~2,500 packets/sec of pure
@@ -159,7 +358,7 @@ export class TutorService {
     this.lastCursorSentTime = now;
 
     const myIdentity = this.identityService.getCachedIdentity();
-    if (!myIdentity || !currentRoomId) return;
+    if (!myIdentity) return;
 
     const isLiveBroadcaster = this.state.myRole === 'tutor' || this.state.myRole === 'speaker' || this.state.activeStreams.some((s) => s.broadcasterPeerId === myIdentity.peerId);
 
@@ -179,8 +378,9 @@ export class TutorService {
   }
 
   public broadcastClick(xPct: number, yPct: number, currentRoomId: string): void {
+    if (this.destroyed || !currentRoomId || currentRoomId !== this.currentRoomId) return;
     const myIdentity = this.identityService.getCachedIdentity();
-    if (!myIdentity || !currentRoomId) return;
+    if (!myIdentity) return;
 
     const isLiveBroadcaster = this.state.myRole === 'tutor' || this.state.myRole === 'speaker' || this.state.activeStreams.some((s) => s.broadcasterPeerId === myIdentity.peerId);
 
@@ -199,7 +399,16 @@ export class TutorService {
   }
 
   private handleIncomingCursor(cursor: CursorPosition): void {
-    if (!cursor || !cursor.peerId) return;
+    if (
+      !cursor ||
+      !cursor.peerId ||
+      !Number.isFinite(cursor.xPct) ||
+      !Number.isFinite(cursor.yPct) ||
+      cursor.xPct < 0 ||
+      cursor.xPct > 100 ||
+      cursor.yPct < 0 ||
+      cursor.yPct > 100
+    ) return;
     const myIdentity = this.identityService.getCachedIdentity();
     if (myIdentity && cursor.peerId === myIdentity.peerId) return;
     this.remoteCursors.set(cursor.peerId, cursor);
@@ -210,21 +419,33 @@ export class TutorService {
   }
 
   private handleIncomingClick(click: ClickPulse): void {
-    if (!click || !click.peerId) return;
+    if (
+      !click ||
+      !click.peerId ||
+      !Number.isFinite(click.xPct) ||
+      !Number.isFinite(click.yPct) ||
+      click.xPct < 0 ||
+      click.xPct > 100 ||
+      click.yPct < 0 ||
+      click.yPct > 100
+    ) return;
     const myIdentity = this.identityService.getCachedIdentity();
     if (myIdentity && click.peerId === myIdentity.peerId) return;
     this.forwardClickToContentScript(click);
   }
 
   private forwardCursorToContentScript(cursor: CursorPosition): void {
+    if (this.destroyed) return;
     if (typeof chrome !== 'undefined' && chrome.tabs) {
       try {
         chrome.tabs.query({}, (tabs) => {
+          if (this.destroyed) return;
           if (!Array.isArray(tabs)) return;
           tabs.forEach((tab) => {
             if (tab.id && tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('chrome-extension://')) {
               chrome.tabs.sendMessage(tab.id, {
                 type: 'NERD_BUDDY_CURSOR_UPDATE',
+                roomId: this.network.getCurrentRoomId(),
                 cursor,
               }).catch(() => {});
             }
@@ -235,14 +456,17 @@ export class TutorService {
   }
 
   private forwardClickToContentScript(click: ClickPulse): void {
+    if (this.destroyed) return;
     if (typeof chrome !== 'undefined' && chrome.tabs) {
       try {
         chrome.tabs.query({}, (tabs) => {
+          if (this.destroyed) return;
           if (!Array.isArray(tabs)) return;
           tabs.forEach((tab) => {
             if (tab.id && tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('chrome-extension://')) {
               chrome.tabs.sendMessage(tab.id, {
                 type: 'NERD_BUDDY_CLICK_PULSE',
+                roomId: this.network.getCurrentRoomId(),
                 click,
               }).catch(() => {});
             }
@@ -255,72 +479,163 @@ export class TutorService {
   /**
    * Starts live broadcasting with chosen media mode and custom stream title
    */
-  public async startTutorStage(
+  public startTutorStage(
     broadcastType: BroadcastType,
     currentRoomId: string,
     customTitle?: string,
     withMic = true
   ): Promise<boolean> {
-    const myIdentity = await this.identityService.getOrCreateIdentity();
+    if (this.destroyed || !currentRoomId || currentRoomId !== this.currentRoomId) {
+      this.state.lastMediaError = 'Join a room before starting a live stream.';
+      this.emitState();
+      return Promise.resolve(false);
+    }
+    if (this.state.broadcasterState === 'LIVE' && this.localStream) {
+      return Promise.resolve(true);
+    }
+    if (this.startPromise) return this.startPromise;
+
+    const generation = ++this.operationGeneration;
+    this.state.broadcasterState = 'REQUESTING_PERMISSION';
+    this.state.lastMediaError = undefined;
+    this.emitState();
+
+    const attempt = this.performStartTutorStage(
+      generation,
+      broadcastType,
+      currentRoomId,
+      customTitle,
+      withMic
+    );
+    this.startPromise = attempt;
+    void attempt.finally(() => {
+      if (this.startPromise === attempt) this.startPromise = null;
+    });
+    return attempt;
+  }
+
+  private async performStartTutorStage(
+    generation: number,
+    broadcastType: BroadcastType,
+    currentRoomId: string,
+    customTitle?: string,
+    withMic = true
+  ): Promise<boolean> {
+    let acquired: AcquiredBroadcastMedia | null = null;
 
     try {
-      if (broadcastType === 'screen') {
-        const screenStream = await navigator.mediaDevices.getDisplayMedia({
-          video: true,
-          audio: true,
-        });
+      const myIdentity = await this.identityService.getOrCreateIdentity();
+      acquired = await this.acquireBroadcastMedia(broadcastType, withMic);
 
-        let finalStream = screenStream;
-        if (withMic && navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function') {
-          try {
-            const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-            const ctx = new AudioCtx();
-            const dest = ctx.createMediaStreamDestination();
-
-            if (screenStream.getAudioTracks().length > 0) {
-              const screenSource = ctx.createMediaStreamSource(screenStream);
-              screenSource.connect(dest);
-            }
-            const micSource = ctx.createMediaStreamSource(micStream);
-            micSource.connect(dest);
-
-            const mixedAudioTrack = dest.stream.getAudioTracks()[0];
-            const videoTrack = screenStream.getVideoTracks()[0];
-            finalStream = new MediaStream([
-              ...(videoTrack ? [videoTrack] : []),
-              ...(mixedAudioTrack ? [mixedAudioTrack] : []),
-            ]);
-          } catch (e) {
-            console.debug('[TutorService] Screen share operating with system audio only');
-          }
-        }
-
-        this.localStream = finalStream;
-      } else if (broadcastType === 'camera') {
-        this.localStream = await navigator.mediaDevices.getUserMedia({
-          video: { width: { ideal: 1280 }, height: { ideal: 720 } },
-          audio: withMic,
-        });
-      } else {
-        this.localStream = await navigator.mediaDevices.getUserMedia({
-          audio: true,
-          video: false,
-        });
+      if (
+        generation !== this.operationGeneration ||
+        currentRoomId !== this.currentRoomId ||
+        this.state.broadcasterState !== 'REQUESTING_PERMISSION'
+      ) {
+        this.releaseAcquiredMedia(acquired);
+        return false;
       }
 
-      const videoTrack = this.localStream.getVideoTracks()[0] || null;
-      const audioTrack = this.localStream.getAudioTracks()[0] || null;
+      this.state.broadcasterState = 'REQUESTING_ADMISSION';
+      this.emitState();
+
+      const otherStreams = this.state.activeStreams.filter(
+        (stream) => stream.broadcasterPeerId !== myIdentity.peerId
+      );
+      if (otherStreams.length >= TutorService.MAX_ACTIVE_BROADCASTERS) {
+        this.releaseAcquiredMedia(acquired);
+        this.state.broadcasterState = 'IDLE';
+        this.state.lastMediaError = `Live stage is full — ${TutorService.MAX_ACTIVE_BROADCASTERS} broadcasters max.`;
+        NotificationService.getInstance().warn('Live stage is full', this.state.lastMediaError);
+        this.emitState();
+        return false;
+      }
+
+      const admission = await this.requestBroadcastAdmission(generation);
+      if (
+        generation !== this.operationGeneration ||
+        currentRoomId !== this.currentRoomId ||
+        this.state.broadcasterState !== 'REQUESTING_ADMISSION'
+      ) {
+        if (admission.granted) this.signaling.releaseStreamAdmission();
+        this.releaseAcquiredMedia(acquired);
+        return false;
+      }
+      if (!admission.granted) {
+        this.releaseAcquiredMedia(acquired);
+        this.state.broadcasterState = 'IDLE';
+        this.state.lastMediaError =
+          admission.reason === 'stage-full'
+            ? `Live stage is full — ${TutorService.MAX_ACTIVE_BROADCASTERS} broadcasters max.`
+            : admission.reason === 'unsupported-server'
+              ? 'The signaling server must be updated before this extension can start a live stream.'
+              : 'Live admission could not be confirmed by the server. Check the connection and try again.';
+        NotificationService.getInstance().warn('Could not go live', this.state.lastMediaError);
+        this.emitState();
+        return false;
+      }
+      this.admissionHeld = true;
+
+      if (generation !== this.operationGeneration || currentRoomId !== this.currentRoomId) {
+        this.releaseBroadcastAdmission();
+        this.releaseAcquiredMedia(acquired);
+        return false;
+      }
+
+      this.localStream = acquired.stream;
+      this.localSourceStreams = acquired.sourceStreams;
+      this.mixAudioContext = acquired.audioContext;
+      const replacedOwner = this.mediaCoordinator.claim('live');
+      if (replacedOwner === 'voice') {
+        NotificationService.getInstance().warn(
+          'Voice chat left',
+          'Starting a live broadcast uses the same microphone sender, so voice chat was left.'
+        );
+      }
+      const videoTrack = acquired.stream.getVideoTracks()[0] || null;
+      const audioTrack = acquired.stream.getAudioTracks()[0] || null;
 
       if (videoTrack) {
-        this.webrtc.setLocalVideoTrack(videoTrack);
         videoTrack.onended = () => {
-          this.stopTutorStage(currentRoomId);
+          if (
+            generation === this.operationGeneration &&
+            this.state.broadcasterState === 'LIVE' &&
+            this.localStream?.getVideoTracks().includes(videoTrack)
+          ) {
+            NotificationService.getInstance().warn(
+              'Live video ended',
+              'The shared screen or camera track was stopped, so the live stream ended.'
+            );
+            this.stopTutorStage(currentRoomId);
+          }
         };
       }
       if (audioTrack) {
-        this.webrtc.setLocalAudioTrack(audioTrack);
+        audioTrack.onended = () => {
+          if (
+            generation !== this.operationGeneration ||
+            this.state.broadcasterState !== 'LIVE' ||
+            !this.localStream?.getAudioTracks().includes(audioTrack)
+          ) {
+            return;
+          }
+          if (broadcastType === 'audio') {
+            this.stopTutorStage(currentRoomId);
+            return;
+          }
+          this.webrtc.setLocalAudioTrack(null);
+          this.state.isAudioLive = false;
+          this.state.isMicMuted = true;
+          this.updateOwnStreamInfo({ withMic: false, isMicMuted: true });
+          NotificationService.getInstance().warn(
+            'Live microphone ended',
+            'Video is still live, but microphone audio stopped.'
+          );
+          this.broadcastStageState(currentRoomId);
+          this.emitState();
+        };
       }
+      this.webrtc.setLocalMediaStream(acquired.stream);
 
       // Connect with all room peers for direct streaming
       const topology = this.network.getTopologyState();
@@ -334,28 +649,28 @@ export class TutorService {
         customTitle?.trim() ||
         `${myIdentity.nickname}'s ${broadcastType === 'screen' ? 'Screen Walkthrough' : broadcastType === 'camera' ? 'Video Stream' : 'Live Walkthrough'}`;
 
+      const effectiveWithMic = acquired.hasMicrophone;
       const streamInfo: ActiveStreamInfo = {
         streamId: `stream-${myIdentity.peerId}-${Date.now()}`,
         broadcasterPeerId: myIdentity.peerId,
         broadcasterIdentity: myIdentity,
         title: streamTitle,
         broadcastType,
-        withMic,
+        withMic: effectiveWithMic,
         isMicMuted: false,
         startedAt: Date.now(),
       };
 
-      const otherStreams = this.state.activeStreams.filter((s) => s.broadcasterPeerId !== myIdentity.peerId);
-
       this.state = {
         ...this.state,
+        broadcasterState: 'LIVE',
         isActive: true,
         tutorPeerId: myIdentity.peerId,
         tutorIdentity: myIdentity,
         myRole: 'tutor',
-        isAudioLive: withMic,
+        isAudioLive: Boolean(audioTrack),
         isVideoLive: broadcastType !== 'audio',
-        withMic,
+        withMic: effectiveWithMic,
         isMicMuted: false,
         broadcastType,
         streamTitle,
@@ -367,19 +682,306 @@ export class TutorService {
       // Announce stream to all room peers
       this.network.broadcast('stream:announce', streamInfo);
       this.broadcastStageState(currentRoomId);
+      if (acquired.warning) {
+        this.state.lastMediaError = acquired.warning;
+        NotificationService.getInstance().warn('Microphone not included', acquired.warning);
+      }
       this.emitState();
       return true;
-    } catch (err) {
+    } catch (err: any) {
+      if (acquired) {
+        if (this.localStream === acquired.stream) this.releaseLocalMedia();
+        else this.releaseAcquiredMedia(acquired);
+      }
+      this.releaseBroadcastAdmission();
+      if (generation !== this.operationGeneration) return false;
+      this.state.broadcasterState = 'IDLE';
+      this.state.myRole = 'audience';
+      this.state.isAudioLive = false;
+      this.state.isVideoLive = false;
+      const device = broadcastType === 'camera' ? 'camera' : 'microphone';
+      const described = describeMediaError(err, device);
+      const isScreenCancelled =
+        broadcastType === 'screen' &&
+        ['NotAllowedError', 'AbortError'].includes(String(err?.name || ''));
+      this.state.lastMediaError = isScreenCancelled
+        ? 'Screen sharing was cancelled before the stream started.'
+        : described.detail;
+      if (isScreenCancelled) {
+        NotificationService.getInstance().warn('Screen sharing cancelled', this.state.lastMediaError);
+      } else {
+        NotificationService.getInstance().error(described.title, described.detail);
+      }
+      this.emitState();
       console.error('[TutorService] Failed to start stage stream:', err);
       return false;
     }
+  }
+
+  public static readonly MAX_ACTIVE_BROADCASTERS = 2;
+
+  private scheduleAdmissionTimeout(callback: () => void, delayMs: number): ReturnType<typeof setTimeout> {
+    let timeout!: ReturnType<typeof setTimeout>;
+    timeout = setTimeout(() => {
+      this.admissionTimeouts.delete(timeout);
+      callback();
+    }, delayMs);
+    this.admissionTimeouts.add(timeout);
+    return timeout;
+  }
+
+  private clearAdmissionTimeout(timeout: ReturnType<typeof setTimeout>): void {
+    clearTimeout(timeout);
+    this.admissionTimeouts.delete(timeout);
+  }
+
+  private requestBroadcastAdmission(generation: number): Promise<BroadcastAdmissionResult> {
+    if (this.destroyed) {
+      return Promise.resolve({ granted: false, reason: 'stale-operation' });
+    }
+    if (this.admissionRequestPromise) return this.admissionRequestPromise;
+
+    const attempt = (async (): Promise<BroadcastAdmissionResult> => {
+      if (!this.signaling.getIsRoomRegistered()) {
+        const registered = await new Promise<boolean>((resolve) => {
+          let settled = false;
+          const finish = (value: boolean) => {
+            if (settled) return;
+            settled = true;
+            this.clearAdmissionTimeout(timeout);
+            unsubscribe();
+            this.admissionCancellers.delete(cancel);
+            resolve(value);
+          };
+          const cancel = () => finish(false);
+          this.admissionCancellers.add(cancel);
+          const unsubscribe = this.signaling.on('room:registered', () => finish(true));
+          const timeout = this.scheduleAdmissionTimeout(() => finish(false), 10_000);
+        });
+        if (!registered) return { granted: false, reason: 'server-not-ready' };
+      }
+      if (!this.signaling.supportsStreamAdmission()) {
+        return { granted: false, reason: 'unsupported-server' };
+      }
+      if (generation !== this.operationGeneration || !this.currentRoomId) {
+        return { granted: false, reason: 'stale-operation' };
+      }
+
+      const requestId = `admit-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+      return await new Promise<BroadcastAdmissionResult>((resolve) => {
+        let settled = false;
+        let sent = false;
+          const finish = (result: BroadcastAdmissionResult) => {
+            if (settled) return;
+            settled = true;
+            this.clearAdmissionTimeout(timeout);
+            unsubscribe();
+            this.admissionCancellers.delete(cancel);
+            if ((!result.granted || generation !== this.operationGeneration) && sent) {
+              this.signaling.releaseStreamAdmission();
+            }
+            resolve(result);
+          };
+          const cancel = () => finish({ granted: false, reason: 'stale-operation' });
+          this.admissionCancellers.add(cancel);
+        const unsubscribe = this.signaling.on(
+          'stream:admission_response',
+          (response: StreamAdmissionResponse) => {
+            if (response?.requestId !== requestId) return;
+            finish({ granted: response.granted === true, reason: response.reason });
+          }
+        );
+        const timeout = this.scheduleAdmissionTimeout(
+          () => finish({ granted: false, reason: 'admission-timeout' }),
+          5_000
+        );
+        sent = this.signaling.requestStreamAdmission(requestId);
+        if (!sent) finish({ granted: false, reason: 'server-not-ready' });
+      });
+    })();
+
+    this.admissionRequestPromise = attempt;
+    void attempt.finally(() => {
+      if (this.admissionRequestPromise === attempt) this.admissionRequestPromise = null;
+    });
+    return attempt;
+  }
+
+  private async revalidateBroadcastAdmission(): Promise<void> {
+    const generation = this.operationGeneration;
+    const result = await this.requestBroadcastAdmission(generation);
+    if (generation !== this.operationGeneration || this.state.broadcasterState !== 'LIVE') {
+      if (result.granted) this.signaling.releaseStreamAdmission();
+      return;
+    }
+    if (result.granted) {
+      this.admissionHeld = true;
+      this.reannounceStream(this.currentRoomId);
+      return;
+    }
+
+    NotificationService.getInstance().error(
+      'Live admission lost',
+      result.reason === 'stage-full'
+        ? 'The live stage filled while reconnecting, so this broadcast was stopped.'
+        : 'The server could not restore the live slot after reconnecting.'
+    );
+    this.stopTutorStage(this.currentRoomId);
+  }
+
+  private releaseBroadcastAdmission(): void {
+    if (this.admissionHeld) this.signaling.releaseStreamAdmission();
+    this.admissionHeld = false;
+  }
+
+  private async acquireBroadcastMedia(
+    broadcastType: BroadcastType,
+    withMic: boolean
+  ): Promise<AcquiredBroadcastMedia> {
+    if (broadcastType === 'camera') {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: withMic,
+      });
+      return {
+        stream,
+        sourceStreams: [stream],
+        audioContext: null,
+        hasMicrophone: withMic && stream.getAudioTracks().length > 0,
+      };
+    }
+
+    if (broadcastType === 'audio') {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      return { stream, sourceStreams: [stream], audioContext: null, hasMicrophone: true };
+    }
+
+    const screenStream = await navigator.mediaDevices.getDisplayMedia({
+      video: true,
+      audio: true,
+    });
+    if (!withMic || !navigator.mediaDevices?.getUserMedia) {
+      return {
+        stream: screenStream,
+        sourceStreams: [screenStream],
+        audioContext: null,
+        hasMicrophone: false,
+      };
+    }
+
+    let micStream: MediaStream;
+    try {
+      micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    } catch (err) {
+      return {
+        stream: screenStream,
+        sourceStreams: [screenStream],
+        audioContext: null,
+        hasMicrophone: false,
+        warning: 'Screen sharing is live with system audio only because the microphone was unavailable.',
+      };
+    }
+
+    const videoTrack = screenStream.getVideoTracks()[0];
+    const micTrack = micStream.getAudioTracks()[0];
+    if (!screenStream.getAudioTracks().length) {
+      return {
+        stream: new MediaStream([
+          ...(videoTrack ? [videoTrack] : []),
+          ...(micTrack ? [micTrack] : []),
+        ]),
+        sourceStreams: [screenStream, micStream],
+        audioContext: null,
+        hasMicrophone: Boolean(micTrack),
+      };
+    }
+
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      const audioContext = new AudioCtx();
+      const destination = audioContext.createMediaStreamDestination();
+      audioContext.createMediaStreamSource(screenStream).connect(destination);
+      audioContext.createMediaStreamSource(micStream).connect(destination);
+      const mixedAudioTrack = destination.stream.getAudioTracks()[0];
+      return {
+        stream: new MediaStream([
+          ...(videoTrack ? [videoTrack] : []),
+          ...(mixedAudioTrack ? [mixedAudioTrack] : []),
+        ]),
+        sourceStreams: [screenStream, micStream],
+        audioContext,
+        hasMicrophone: Boolean(micTrack),
+      };
+    } catch (err) {
+      micStream.getTracks().forEach((track) => track.stop());
+      return {
+        stream: screenStream,
+        sourceStreams: [screenStream],
+        audioContext: null,
+        hasMicrophone: false,
+        warning: 'Screen sharing is live with system audio only because microphone mixing failed.',
+      };
+    }
+  }
+
+  private releaseAcquiredMedia(media: AcquiredBroadcastMedia): void {
+    const tracks = new Set<MediaStreamTrack>();
+    media.stream.getTracks().forEach((track) => tracks.add(track));
+    media.sourceStreams.forEach((stream) => {
+      stream.getTracks().forEach((track) => tracks.add(track));
+    });
+    tracks.forEach((track) => {
+      track.onended = null;
+      track.stop();
+    });
+    if (media.audioContext && media.audioContext.state !== 'closed') {
+      void media.audioContext.close().catch(() => {});
+    }
+  }
+
+  private releaseLocalMedia(): void {
+    const hadLocalMedia = Boolean(
+      this.localStream || this.localSourceStreams.length || this.mixAudioContext
+    );
+    if (hadLocalMedia) {
+      this.releaseAcquiredMedia({
+        stream: this.localStream || new MediaStream(),
+        sourceStreams: this.localSourceStreams,
+        audioContext: this.mixAudioContext,
+        hasMicrophone: false,
+      });
+    }
+    this.localStream = null;
+    this.localSourceStreams = [];
+    this.mixAudioContext = null;
+    if (hadLocalMedia) this.webrtc.setLocalMediaStream(null);
+    this.mediaCoordinator.release('live');
+  }
+
+  private updateOwnStreamInfo(update: Partial<ActiveStreamInfo>): void {
+    const myPeerId = this.identityService.getCachedIdentity()?.peerId;
+    if (!myPeerId) return;
+    this.state.activeStreams = this.state.activeStreams.map((stream) =>
+      stream.broadcasterPeerId === myPeerId ? { ...stream, ...update } : stream
+    );
+    const ownStream = this.state.activeStreams.find(
+      (stream) => stream.broadcasterPeerId === myPeerId
+    );
+    if (ownStream) this.network.broadcast('stream:announce', ownStream);
   }
 
   /**
    * Switches media source on-the-fly (e.g. Screen to Webcam or Webcam to Screen)
    */
   public async switchMediaSource(newType: 'screen' | 'camera', currentRoomId: string): Promise<boolean> {
-    if (!this.localStream || this.state.myRole !== 'tutor') return false;
+    if (
+      this.destroyed ||
+      !this.localStream ||
+      this.state.myRole !== 'tutor' ||
+      this.state.broadcasterState !== 'LIVE' ||
+      currentRoomId !== this.currentRoomId
+    ) return false;
+    const generation = this.operationGeneration;
 
     try {
       let newStream: MediaStream;
@@ -393,27 +995,48 @@ export class TutorService {
       }
 
       const newVideoTrack = newStream.getVideoTracks()[0];
-      if (!newVideoTrack) return false;
+      if (
+        !newVideoTrack ||
+        generation !== this.operationGeneration ||
+        currentRoomId !== this.currentRoomId
+      ) {
+        newStream.getTracks().forEach((track) => track.stop());
+        return false;
+      }
+      newStream.getAudioTracks().forEach((track) => track.stop());
 
       // Stop old video track
       const oldVideoTrack = this.localStream.getVideoTracks()[0];
       if (oldVideoTrack) {
+        oldVideoTrack.onended = null;
         oldVideoTrack.stop();
         this.localStream.removeTrack(oldVideoTrack);
       }
 
       this.localStream.addTrack(newVideoTrack);
+      this.localSourceStreams.push(newStream);
       this.webrtc.setLocalVideoTrack(newVideoTrack);
 
       newVideoTrack.onended = () => {
-        this.stopTutorStage(currentRoomId);
+        if (
+          generation === this.operationGeneration &&
+          this.state.broadcasterState === 'LIVE' &&
+          this.localStream?.getVideoTracks().includes(newVideoTrack)
+        ) {
+          this.stopTutorStage(currentRoomId);
+        }
       };
 
       this.state.broadcastType = newType;
+      this.updateOwnStreamInfo({ broadcastType: newType });
       this.broadcastStageState(currentRoomId);
       this.emitState();
       return true;
-    } catch (err) {
+    } catch (err: any) {
+      const described = describeMediaError(err, 'camera');
+      this.state.lastMediaError = described.detail;
+      NotificationService.getInstance().error(described.title, described.detail);
+      this.emitState();
       console.error('[TutorService] Error switching media source:', err);
       return false;
     }
@@ -423,11 +1046,12 @@ export class TutorService {
    * Toggles microphone mute during live broadcast
    */
   public toggleMic(isMuted: boolean): void {
-    if (this.localStream) {
-      const audioTracks = this.localStream.getAudioTracks();
-      audioTracks.forEach((t) => (t.enabled = !isMuted));
-    }
-    this.state.isMicMuted = isMuted;
+    const audioTracks = this.localStream?.getAudioTracks() || [];
+    if (!audioTracks.length) return;
+    audioTracks.forEach((track) => (track.enabled = !isMuted));
+    this.state.isMicMuted = audioTracks.every((track) => !track.enabled);
+    this.updateOwnStreamInfo({ isMicMuted: this.state.isMicMuted });
+    this.broadcastStageState(this.currentRoomId);
     this.emitState();
   }
 
@@ -471,12 +1095,16 @@ export class TutorService {
 
   public stopTutorStage(currentRoomId: string): void {
     const myIdentity = this.identityService.getCachedIdentity();
-    if (this.localStream) {
-      this.localStream.getTracks().forEach((t) => t.stop());
-      this.localStream = null;
-    }
-
-    this.webrtc.setLocalVideoTrack(null);
+    const hadAnnouncedStream = Boolean(
+      myIdentity &&
+        this.state.activeStreams.some(
+          (stream) => stream.broadcasterPeerId === myIdentity.peerId
+        )
+    );
+    ++this.operationGeneration;
+    this.releaseBroadcastAdmission();
+    this.state.broadcasterState = 'STOPPING';
+    this.releaseLocalMedia();
 
     const remainingStreams = this.state.activeStreams.filter(
       (s) => s.broadcasterPeerId !== (myIdentity?.peerId || '')
@@ -484,6 +1112,7 @@ export class TutorService {
 
     this.state = {
       ...this.state,
+      broadcasterState: 'IDLE',
       isActive: remainingStreams.length > 0,
       tutorPeerId: remainingStreams[0]?.broadcasterPeerId || null,
       tutorIdentity: remainingStreams[0]?.broadcasterIdentity || null,
@@ -495,40 +1124,69 @@ export class TutorService {
       activeStreams: remainingStreams,
     };
 
-    if (myIdentity) {
+    if (hadAnnouncedStream && myIdentity && currentRoomId === this.currentRoomId) {
       this.network.broadcast('stream:stopped', { broadcasterPeerId: myIdentity.peerId });
     }
 
-    this.broadcastStageState(currentRoomId);
+    if (currentRoomId === this.currentRoomId) this.broadcastStageState(currentRoomId);
     this.emitState();
   }
 
-  private handleIncomingStreamAnnounce(streamInfo: ActiveStreamInfo): void {
-    if (!streamInfo || !streamInfo.broadcasterPeerId) return;
+  private handleIncomingStreamAnnounce(
+    streamInfo: ActiveStreamInfo,
+    senderIdentity: PeerIdentity
+  ): void {
+    if (
+      !streamInfo ||
+      typeof streamInfo.streamId !== 'string' ||
+      streamInfo.streamId.length < 1 ||
+      streamInfo.streamId.length > 160 ||
+      !['audio', 'camera', 'screen'].includes(streamInfo.broadcastType)
+    ) return;
 
-    const myIdentity = this.identityService.getCachedIdentity();
-    const otherStreams = this.state.activeStreams.filter((s) => s.broadcasterPeerId !== streamInfo.broadcasterPeerId);
-    const updatedStreams = [...otherStreams, streamInfo];
+    const canonicalStream: ActiveStreamInfo = {
+      streamId: streamInfo.streamId,
+      broadcasterPeerId: senderIdentity.peerId,
+      broadcasterIdentity: senderIdentity,
+      title:
+        typeof streamInfo.title === 'string' && streamInfo.title.trim()
+          ? streamInfo.title.trim().slice(0, 160)
+          : `${senderIdentity.nickname}'s live stream`,
+      broadcastType: streamInfo.broadcastType,
+      withMic: streamInfo.withMic === true,
+      isMicMuted: streamInfo.isMicMuted === true,
+      startedAt:
+        Number.isFinite(streamInfo.startedAt) && streamInfo.startedAt > 0
+          ? streamInfo.startedAt
+          : Date.now(),
+    };
+
+    const otherStreams = this.state.activeStreams.filter(
+      (stream) => stream.broadcasterPeerId !== canonicalStream.broadcasterPeerId
+    );
+    const updatedStreams = [...otherStreams, canonicalStream];
 
     this.state = {
       ...this.state,
       isActive: true,
-      tutorPeerId: this.state.tutorPeerId || streamInfo.broadcasterPeerId,
-      tutorIdentity: this.state.tutorIdentity || streamInfo.broadcasterIdentity,
-      broadcastType: this.state.broadcastType || streamInfo.broadcastType,
+      tutorPeerId: this.state.tutorPeerId || canonicalStream.broadcasterPeerId,
+      tutorIdentity: this.state.tutorIdentity || canonicalStream.broadcasterIdentity,
+      broadcastType: this.state.broadcastType || canonicalStream.broadcastType,
       activeStreams: updatedStreams,
     };
 
     // Auto-select stream if none selected yet
     if (!this.selectedStreamPeerId || !this.remoteStreams.has(this.selectedStreamPeerId)) {
-      this.selectedStreamPeerId = streamInfo.broadcasterPeerId;
+      this.selectedStreamPeerId = canonicalStream.broadcasterPeerId;
     }
 
-    // Ensure connection to broadcaster
-    if (streamInfo.broadcasterPeerId !== myIdentity?.peerId) {
-      if (!this.webrtc.isConnected(streamInfo.broadcasterPeerId)) {
-        this.webrtc.initiateConnection(streamInfo.broadcasterPeerId);
-      }
+    const pendingStream = this.remoteStreams.get(canonicalStream.broadcasterPeerId);
+    if (pendingStream) {
+      const shouldEnable =
+        this.state.viewerState === 'WATCHING' &&
+        this.selectedStreamPeerId === canonicalStream.broadcasterPeerId;
+      this.setRemoteStreamEnabled(pendingStream, shouldEnable);
+      this.notifyStreamListeners();
     }
 
     this.emitState();
@@ -542,6 +1200,7 @@ export class TutorService {
 
     if (this.selectedStreamPeerId === payload.broadcasterPeerId) {
       this.selectedStreamPeerId = remainingStreams[0]?.broadcasterPeerId || null;
+      this.state.viewerState = 'NOT_WATCHING';
     }
 
     this.state = {
@@ -633,6 +1292,9 @@ export class TutorService {
   private handleIncomingStageState(remoteState: TutorStageState): void {
     if (!remoteState) return;
     const myIdentity = this.identityService.getCachedIdentity();
+    const previousRole = this.state.myRole;
+    const localViewerState = this.state.viewerState;
+    const localBroadcasterState = this.state.broadcasterState;
     let myRole: StageRole = 'audience';
 
     if (myIdentity?.peerId === remoteState.tutorPeerId) {
@@ -644,12 +1306,32 @@ export class TutorService {
 
     this.state = {
       ...remoteState,
+      viewerState: localViewerState,
+      broadcasterState: localBroadcasterState,
       myRole,
       isMyHandRaised: this.state.isMyHandRaised && myRole === 'audience',
       activeStreams: remoteState.activeStreams || this.state.activeStreams,
     };
 
-    if (remoteState.isActive && remoteState.tutorPeerId && remoteState.tutorPeerId !== myIdentity?.peerId) {
+    if (previousRole === 'speaker' && myRole === 'audience') {
+      this.releaseLocalMedia();
+      this.state.isAudioLive = false;
+      this.state.isVideoLive = false;
+    }
+    this.remoteStreams.forEach((stream, peerId) => {
+      if (!this.isExpectedLivePeer(peerId)) return;
+      this.setRemoteStreamEnabled(
+        stream,
+        localViewerState === 'WATCHING' && this.selectedStreamPeerId === peerId
+      );
+    });
+
+    if (
+      remoteState.isActive &&
+      remoteState.tutorPeerId &&
+      remoteState.tutorPeerId !== myIdentity?.peerId &&
+      (myRole === 'speaker' || localViewerState === 'REQUESTING' || localViewerState === 'WATCHING')
+    ) {
       if (!this.webrtc.isConnected(remoteState.tutorPeerId)) {
         this.webrtc.initiateConnection(remoteState.tutorPeerId);
       }
@@ -665,19 +1347,70 @@ export class TutorService {
    * their camera the instant a tutor accepts them would be a privacy surprise. Video is
    * therefore opt-in via setSpeakerVideoEnabled() once they are already on stage.
    */
-  private async enableSpeakerAudio(): Promise<void> {
-    if (!this.localStream && navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function') {
+  private enableSpeakerAudio(): Promise<void> {
+    if (this.localStream || this.speakerMediaPromise) {
+      return this.speakerMediaPromise || Promise.resolve();
+    }
+    if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
+      return Promise.resolve();
+    }
+
+    const generation = this.operationGeneration;
+    const attempt = (async () => {
+      let stream: MediaStream | null = null;
       try {
-        this.localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        this.webrtc.setLocalMediaStream(this.localStream);
-        this.state.isAudioLive = true;
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        if (
+          generation !== this.operationGeneration ||
+          this.state.myRole !== 'speaker' ||
+          !this.currentRoomId
+        ) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+
+        const replacedOwner = this.mediaCoordinator.claim('live');
+        if (replacedOwner === 'voice') {
+          NotificationService.getInstance().warn(
+            'Voice chat left',
+            'Joining the live stage as a speaker uses the same microphone sender.'
+          );
+        }
+        this.localStream = stream;
+        this.localSourceStreams = [stream];
+        const audioTrack = stream.getAudioTracks()[0];
+        if (audioTrack) {
+          audioTrack.onended = () => {
+            if (
+              generation === this.operationGeneration &&
+              this.state.myRole === 'speaker' &&
+              this.localStream?.getAudioTracks().includes(audioTrack)
+            ) {
+              this.releaseLocalMedia();
+              this.state.isAudioLive = false;
+              this.state.lastMediaError = 'Microphone ended while you were a stage speaker.';
+              this.emitState();
+            }
+          };
+        }
+        this.webrtc.setLocalMediaStream(stream);
+        this.state.isAudioLive = Boolean(audioTrack);
+        this.state.lastMediaError = undefined;
         this.emitState();
-      } catch (e) {
-        console.debug('[TutorService] Speaker mic track bypassed:', e);
-        this.state.lastMediaError = 'Microphone unavailable — check the site permission and try again.';
+      } catch (e: any) {
+        stream?.getTracks().forEach((track) => track.stop());
+        if (generation !== this.operationGeneration) return;
+        const described = describeMediaError(e, 'microphone');
+        NotificationService.getInstance().error(described.title, described.detail);
+        this.state.lastMediaError = described.detail;
         this.emitState();
       }
-    }
+    })();
+    this.speakerMediaPromise = attempt;
+    void attempt.finally(() => {
+      if (this.speakerMediaPromise === attempt) this.speakerMediaPromise = null;
+    });
+    return attempt;
   }
 
   /**
@@ -700,6 +1433,7 @@ export class TutorService {
     if (!enabled) {
       const existing = this.localStream?.getVideoTracks() ?? [];
       existing.forEach((t) => {
+        t.onended = null;
         t.stop();
         this.localStream?.removeTrack(t);
       });
@@ -713,12 +1447,30 @@ export class TutorService {
       return { ok: false, error: 'Camera not available in this context' };
     }
 
+    const generation = this.operationGeneration;
+    const roomId = this.currentRoomId;
     try {
       const camStream = await navigator.mediaDevices.getUserMedia({
         video: { width: { ideal: 640 }, height: { ideal: 360 }, frameRate: { ideal: 24 } },
       });
       const track = camStream.getVideoTracks()[0];
-      if (!track) return { ok: false, error: 'No camera track produced' };
+      if (
+        !track ||
+        generation !== this.operationGeneration ||
+        roomId !== this.currentRoomId ||
+        (this.state.myRole !== 'speaker' && this.state.myRole !== 'tutor')
+      ) {
+        camStream.getTracks().forEach((mediaTrack) => mediaTrack.stop());
+        return { ok: false, error: 'Stage changed before the camera was ready' };
+      }
+
+      const replacedOwner = this.mediaCoordinator.claim('live');
+      if (replacedOwner === 'voice') {
+        NotificationService.getInstance().warn(
+          'Voice chat left',
+          'Stage camera uses the live media sender, so voice chat was left.'
+        );
+      }
 
       // Reuse the live stream so existing senders pick the track up in place.
       if (!this.localStream) {
@@ -730,12 +1482,20 @@ export class TutorService {
         });
         this.localStream.addTrack(track);
       }
+      this.localSourceStreams.push(camStream);
 
       // A guest can stop sharing from the browser's own UI; keep our state honest.
-      track.addEventListener('ended', () => {
-        this.state.isVideoLive = false;
-        this.emitState();
-      });
+      track.onended = () => {
+        if (
+          generation === this.operationGeneration &&
+          roomId === this.currentRoomId &&
+          this.localStream?.getVideoTracks().includes(track)
+        ) {
+          this.state.isVideoLive = false;
+          this.webrtc.setLocalVideoTrack(null);
+          this.emitState();
+        }
+      };
 
       this.webrtc.setLocalMediaStream(this.localStream);
       this.state.isVideoLive = true;
@@ -748,6 +1508,7 @@ export class TutorService {
         ? 'Camera permission denied — grant access and try again.'
         : 'Could not start the camera.';
       this.state.lastMediaError = msg;
+      NotificationService.getInstance().error('Camera unavailable', msg);
       this.emitState();
       return { ok: false, error: msg };
     }
@@ -786,7 +1547,7 @@ export class TutorService {
   }
 
   private broadcastStageState(currentRoomId: string): void {
-    if (!currentRoomId) return;
+    if (this.destroyed || !currentRoomId || currentRoomId !== this.currentRoomId) return;
     this.network.broadcast('stage:state', this.state);
   }
 
@@ -799,6 +1560,7 @@ export class TutorService {
   }
 
   public onStateChange(listener: (state: TutorStageState) => void): () => void {
+    if (this.destroyed) return () => {};
     this.stateListeners.add(listener);
     listener(this.state);
     return () => {
@@ -809,6 +1571,7 @@ export class TutorService {
   public onRemoteStreamChange(
     listener: (stream: MediaStream | null, peerId: string | null) => void
   ): () => void {
+    if (this.destroyed) return () => {};
     this.remoteStreamListeners.add(listener);
     listener(this.getActiveRemoteStream(), this.selectedStreamPeerId);
     return () => {
@@ -817,39 +1580,46 @@ export class TutorService {
   }
 
   public onCursorsChange(listener: (cursors: CursorPosition[]) => void): () => void {
+    if (this.destroyed) return () => {};
     this.cursorListeners.add(listener);
     return () => {
       this.cursorListeners.delete(listener);
     };
   }
 
-  public resetStage(): void {
-    if (this.localStream) {
-      this.localStream.getTracks().forEach((t) => t.stop());
-      this.localStream = null;
-    }
-    this.webrtc.setLocalMediaStream(null);
+  /** Binds all live media and announcements to one room lifecycle. */
+  public setRoom(roomId: string): void {
+    if (this.destroyed) return;
+    if (roomId === this.currentRoomId) return;
+    ++this.operationGeneration;
+    this.releaseBroadcastAdmission();
+    this.releaseLocalMedia();
+    this.remoteStreams.forEach((stream) => this.setRemoteStreamEnabled(stream, false));
     this.remoteStreams.clear();
     this.selectedStreamPeerId = null;
     this.remoteCursors.clear();
-    this.state = {
-      isActive: false,
-      tutorPeerId: null,
-      tutorIdentity: null,
-      guestSpeakers: [],
-      handRaises: [],
-      isMyHandRaised: false,
-      myRole: 'audience',
-      isAudioLive: false,
-      isVideoLive: false,
-      broadcastType: 'audio',
-      activeStreams: [],
-    };
+    this.currentRoomId = roomId;
+    this.state = createInitialStageState();
+    this.emitState();
+    this.notifyStreamListeners();
+  }
+
+  public resetStage(): void {
+    if (this.destroyed) return;
+    ++this.operationGeneration;
+    this.releaseBroadcastAdmission();
+    this.releaseLocalMedia();
+    this.remoteStreams.forEach((stream) => this.setRemoteStreamEnabled(stream, false));
+    this.remoteStreams.clear();
+    this.selectedStreamPeerId = null;
+    this.remoteCursors.clear();
+    this.state = createInitialStageState();
     this.emitState();
     this.notifyStreamListeners();
   }
 
   private emitState(): void {
+    if (this.destroyed) return;
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       chrome.storage.local.set({
         synqto_live_stage: this.state,
@@ -857,5 +1627,39 @@ export class TutorService {
       });
     }
     this.stateListeners.forEach((fn) => fn(this.state));
+  }
+
+  public destroy(): void {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    ++this.operationGeneration;
+    [...this.admissionCancellers].forEach((cancel) => {
+      try {
+        cancel();
+      } catch {}
+    });
+    this.admissionCancellers.clear();
+    this.admissionTimeouts.forEach((timeout) => clearTimeout(timeout));
+    this.admissionTimeouts.clear();
+    this.releaseBroadcastAdmission();
+    this.releaseLocalMedia();
+    this.remoteStreams.forEach((stream) => this.setRemoteStreamEnabled(stream, false));
+    this.remoteStreams.clear();
+    this.remoteCursors.clear();
+    this.selectedStreamPeerId = null;
+    this.ownedUnsubscribers.splice(0).forEach((unsubscribe) => {
+      try {
+        unsubscribe();
+      } catch {}
+    });
+    this.cursorListeners.clear();
+    this.stateListeners.clear();
+    this.remoteStreamListeners.clear();
+    this.currentRoomId = '';
+    this.state = createInitialStageState();
+    this.startPromise = null;
+    this.speakerMediaPromise = null;
+    this.admissionRequestPromise = null;
+    if (TutorService.instance === this) TutorService.instance = null;
   }
 }

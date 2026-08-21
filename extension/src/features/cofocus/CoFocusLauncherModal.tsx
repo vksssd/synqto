@@ -1,6 +1,6 @@
 // ─── CoFocus Launcher (Mode Picker & Matchmaking Queue) ───
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useModalA11y } from '@/shared/useModalA11y';
 import { CoFocusService } from './cofocus.service';
 import {
@@ -10,6 +10,7 @@ import {
   SessionLengthPreset,
 } from './cofocus.types';
 import { X, Eye, Users, Link2, Loader2, Copy, Check, AlertTriangle } from 'lucide-react';
+import { OwnedTimeouts } from '@/shared/owned-timeouts';
 
 interface CoFocusLauncherModalProps {
   isOpen: boolean;
@@ -28,6 +29,24 @@ export const CoFocusLauncherModal: React.FC<CoFocusLauncherModalProps> = ({ isOp
   const [generatedCode, setGeneratedCode] = useState('');
   const [copied, setCopied] = useState(false);
   const [session, setSession] = useState<CoFocusSessionState>(cofocus.getState());
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isOpenRef = useRef(isOpen);
+  const timeoutsRef = useRef<OwnedTimeouts | null>(null);
+  if (timeoutsRef.current === null) timeoutsRef.current = new OwnedTimeouts();
+  const timeouts = timeoutsRef.current;
+  isOpenRef.current = isOpen;
+
+  useEffect(() => () => {
+    timeouts.clearAll();
+    copiedTimerRef.current = null;
+  }, [timeouts]);
+
+  useEffect(() => {
+    if (isOpen) return;
+    timeouts.cancel(copiedTimerRef.current);
+    copiedTimerRef.current = null;
+    setCopied(false);
+  }, [isOpen, timeouts]);
 
   const isBusy = session.phase === 'queued' || session.phase === 'matched';
 
@@ -86,8 +105,12 @@ export const CoFocusLauncherModal: React.FC<CoFocusLauncherModalProps> = ({ isOp
   const handleCopyInvite = async () => {
     try {
       await navigator.clipboard.writeText(generatedCode);
+      if (!isOpenRef.current) return;
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      copiedTimerRef.current = timeouts.replace(copiedTimerRef.current, () => {
+        copiedTimerRef.current = null;
+        setCopied(false);
+      }, 2000);
     } catch {
       /* clipboard unavailable — the code is visible on screen to copy manually */
     }

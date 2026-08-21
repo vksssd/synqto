@@ -29,6 +29,7 @@ import { InMemoryStorageAdapter } from '../src/core/replication/storage-adapter.
 import { HybridClock, compareHLC, MAX_CLOCK_DRIFT_MS, globalClock } from '../src/core/network/hybrid-clock.ts';
 import { TopologyService } from '../src/core/network/topology.service.ts';
 import { NetworkService } from '../src/core/network/network.service.ts';
+import { LinkMonitor } from '../src/core/network/link-monitor.ts';
 
 let passed = 0;
 let total = 0;
@@ -201,6 +202,30 @@ test('LeaderMesh assigns primary and secondary leaders evenly', () => {
   assert.strictEqual(assignments.get('p2').secondaryLeader, 'peer-L3');
 });
 
+test('LeaderMesh and LinkMonitor release interval id zero', () => {
+  const realSetInterval = globalThis.setInterval;
+  const realClearInterval = globalThis.clearInterval;
+  const cleared = [];
+  let nextId = 0;
+  globalThis.setInterval = () => nextId++;
+  globalThis.clearInterval = (id) => cleared.push(id);
+
+  try {
+    const mesh = new LeaderMesh('peer-L1', 'room-1', () => ({}), () => 0);
+    mesh.start(1);
+    mesh.stop();
+
+    const monitor = new LinkMonitor(() => [], () => true, () => {});
+    monitor.start();
+    monitor.stop();
+
+    assert.deepStrictEqual(cleared, [0, 1, 2]);
+  } finally {
+    globalThis.setInterval = realSetInterval;
+    globalThis.clearInterval = realClearInterval;
+  }
+});
+
 // ─── 5. Tier Coordinator & Hysteresis ───
 console.log('\n📦 Section 5: TierCoordinator Hysteresis State Machine');
 
@@ -227,6 +252,25 @@ test('TierCoordinator starts evaluating at the TIER1 promote threshold and cance
   assert.strictEqual(coordinator.getLifecycleState(), 'STABLE_TIER1');
   assert.strictEqual(coordinator.getCurrentTier(), 'TIER1_FULL_MESH');
   assert.strictEqual(coordinator.getActiveTransaction().phase, 'ABORTED');
+});
+
+test('TierCoordinator reset cancels transition timer id zero', () => {
+  const realSetTimeout = globalThis.setTimeout;
+  const realClearTimeout = globalThis.clearTimeout;
+  const cleared = [];
+  globalThis.setTimeout = () => 0;
+  globalThis.clearTimeout = (id) => cleared.push(id);
+
+  try {
+    const coordinator = new TierCoordinator();
+    coordinator.updatePeerCount(TOPOLOGY_THRESHOLDS.TIER1_PROMOTE_AT);
+    coordinator.reset();
+    assert.deepStrictEqual(cleared, [0]);
+    assert.strictEqual(coordinator.getActiveTransaction(), null);
+  } finally {
+    globalThis.setTimeout = realSetTimeout;
+    globalThis.clearTimeout = realClearTimeout;
+  }
 });
 
 test('Tier thresholds keep a real hysteresis margin so boundary churn cannot flap topology', () => {
@@ -346,6 +390,7 @@ test('An ADAPTIVE coordinator still promotes — proving the guard is policy-dri
   assert.strictEqual(coordinator.getLifecycleState(), 'TIER1_EVALUATING');
   assert.ok(coordinator.getActiveTransaction(), 'adaptive room must still open a transaction');
   assert.strictEqual(coordinator.getActiveTransaction().toTier, 'TIER2_MULTI_LEADER');
+  coordinator.reset();
 });
 
 // ─── 6. TopologyView & Monotonic Ordering ───
@@ -796,6 +841,7 @@ test('TIER1/TIER2 never silently relay app traffic when the P2P path is not up y
   // because a newer one supersedes them within milliseconds.
   assert.strictEqual(stats.pending, 1, 'reliable traffic should be deferred, not relayed');
   assert.strictEqual(stats.droppedBestEffort, 2, 'best-effort traffic should be dropped locally');
+  router.reset();
 });
 
 test('Deferred traffic flushes once the P2P path comes up, without touching the relay', () => {
@@ -832,6 +878,57 @@ test('Deferred traffic flushes once the P2P path comes up, without touching the 
   assert.strictEqual(router.getDeferralStats().pending, 0, 'queue should drain once P2P is usable');
   assert.deepStrictEqual(sent, ['chat:message'], 'the deferred chat message should be delivered over P2P');
   assert.strictEqual(relayCalls, 0, 'flushing must never fall back to the server relay');
+  router.reset();
+});
+
+test('TransportRouter reset cancels timer id zero and drops prior-room deferred traffic', () => {
+  const realSetTimeout = globalThis.setTimeout;
+  const realClearTimeout = globalThis.clearTimeout;
+  let scheduled;
+  const cleared = [];
+  globalThis.setTimeout = (fn) => {
+    scheduled = fn;
+    return 0;
+  };
+  globalThis.clearTimeout = (id) => cleared.push(id);
+
+  try {
+    const router = new TransportRouter({
+      broadcast: () => true,
+      sendTo: () => true,
+      onPacket: () => () => {},
+      getHealth: () => ({}),
+    });
+    router.updateView({
+      roomId: 'room:old', tier: 'TIER1_FULL_MESH', phase: 'STABLE', epoch: 1,
+      generation: 1, membershipVersion: 1, leaders: [], relayAvailable: true, timestamp: Date.now(),
+    });
+    const sent = [];
+    router.bindP2PSender((packet) => {
+      sent.push(packet.roomId);
+      return false;
+    });
+    router.broadcast(createPacket(
+      'chat:message',
+      { peerId: 'a', nickname: 'A', avatar: '', color: '' },
+      'room:old',
+      { text: 'must not cross rooms' }
+    ));
+    assert.strictEqual(router.getDeferralStats().pending, 1);
+
+    router.reset();
+    assert.deepStrictEqual(cleared, [0]);
+    assert.strictEqual(router.getDeferralStats().pending, 0);
+
+    // Model an already-delivered callback: cancellation alone is not enough; the queue must
+    // also be empty so stale work cannot submit an old-room packet through the new sender.
+    sent.length = 0;
+    scheduled();
+    assert.deepStrictEqual(sent, []);
+  } finally {
+    globalThis.setTimeout = realSetTimeout;
+    globalThis.clearTimeout = realClearTimeout;
+  }
 });
 
 console.log('\n📦 Section 13: Dual-Path Draining Deduplication & Failure Resilience');
@@ -979,6 +1076,34 @@ test('ReliableTransport enforces No ACK-of-ACK invariant', () => {
   assert.strictEqual(rt.isAckable(chatPkt), true, 'Chat packets must be ackable');
 });
 
+await testAsync('ReliableTransport clear releases timer id zero and settles the send', async () => {
+  const realSetTimeout = globalThis.setTimeout;
+  const realClearTimeout = globalThis.clearTimeout;
+  const cleared = [];
+  globalThis.setTimeout = () => 0;
+  globalThis.clearTimeout = (id) => cleared.push(id);
+
+  try {
+    const rt = new ReliableTransport();
+    rt.bindSender(() => true);
+    const packet = createPacket(
+      'chat:message',
+      { peerId: 'A', nickname: 'A', avatar: '', color: '' },
+      'room-1',
+      { text: 'pending' }
+    );
+    const receiptPromise = rt.sendReliable(packet);
+    rt.clear();
+    const receipt = await receiptPromise;
+    assert.deepStrictEqual(cleared, [0]);
+    assert.strictEqual(receipt.status, 'rejected');
+    assert.strictEqual(rt.hasPending(), false);
+  } finally {
+    globalThis.setTimeout = realSetTimeout;
+    globalThis.clearTimeout = realClearTimeout;
+  }
+});
+
 // ─── 15. Stream-Scoped Ordering & Gap Recovery ───
 console.log('\n📦 Section 15: Stream-Scoped Ordering & Gap Recovery');
 
@@ -1013,6 +1138,118 @@ test('OrderingBuffer drains out-of-order sequence and isolates streams', () => {
   assert.strictEqual(chatDelivered.length, 3, 'Delivering missing seq 2 must drain seq 3');
   assert.strictEqual(chatDelivered[1].payload.text, 'msg2');
   assert.strictEqual(chatDelivered[2].payload.text, 'msg3');
+});
+
+test('OrderingBuffer clear releases gap timer id zero', () => {
+  const realSetTimeout = globalThis.setTimeout;
+  const realClearTimeout = globalThis.clearTimeout;
+  const cleared = [];
+  globalThis.setTimeout = () => 0;
+  globalThis.clearTimeout = (id) => cleared.push(id);
+
+  try {
+    const buffer = new OrderingBuffer();
+    const packet = createPacket(
+      'chat:message',
+      { peerId: 'peer-1', nickname: 'Peer', avatar: '', color: '' },
+      'room-1',
+      { text: 'seq 2' },
+      undefined,
+      { streamId: 'chat', seq: 2 }
+    );
+    buffer.inflow(packet, () => {});
+    assert.strictEqual(buffer.hasPending(), true);
+    buffer.clear();
+    assert.deepStrictEqual(cleared, [0]);
+    assert.strictEqual(buffer.hasPending(), false);
+  } finally {
+    globalThis.setTimeout = realSetTimeout;
+    globalThis.clearTimeout = realClearTimeout;
+  }
+});
+
+test('TopologyService room-loop cleanup accepts timer id zero', () => {
+  const realClearTimeout = globalThis.clearTimeout;
+  const realClearInterval = globalThis.clearInterval;
+  const clearedTimeouts = [];
+  const clearedIntervals = [];
+  globalThis.clearTimeout = (id) => clearedTimeouts.push(id);
+  globalThis.clearInterval = (id) => clearedIntervals.push(id);
+
+  const topology = TopologyService.getInstance();
+  try {
+    topology.reconciliationTimer = 0;
+    topology.snapshotTimer = 0;
+    topology.routerTimer = 0;
+    topology.repairGraceTimers.set('peer-zero', 0);
+
+    topology.stopReconciliationLoop();
+    topology.stopSnapshotLoop();
+    topology.stopRoutingLoop();
+    topology.clearRepairGrace('peer-zero');
+
+    assert.deepStrictEqual(clearedIntervals, [0, 0, 0]);
+    assert.deepStrictEqual(clearedTimeouts, [0]);
+    assert.strictEqual(topology.repairGraceTimers.has('peer-zero'), false);
+  } finally {
+    globalThis.clearTimeout = realClearTimeout;
+    globalThis.clearInterval = realClearInterval;
+  }
+});
+
+await testAsync('TopologyService leave retires identity and fences a pending old-room warm start', async () => {
+  const topology = TopologyService.getInstance();
+  const originalGetRoomSnapshot = topology.identityStore.getRoomSnapshot;
+  const originalLoadRelayHints = topology.webrtc.loadRelayHints;
+  let resolveSnapshot;
+  const snapshotPending = new Promise((resolve) => { resolveSnapshot = resolve; });
+  let loadedHints = 0;
+
+  topology.identityStore.getRoomSnapshot = () => snapshotPending;
+  topology.webrtc.loadRelayHints = async () => { loadedHints++; };
+  topology.currentRoomId = 'room:old';
+  topology.myIdentity = { peerId: 'local', nickname: 'Local', avatar: '', color: '' };
+  topology.roomGeneration = 40;
+
+  try {
+    const warming = topology.warmStartFromSnapshot('room:old', 40);
+    topology.leave();
+    resolveSnapshot({ roomId: 'room:old', members: ['peer:old'], topology: [] });
+    await warming;
+
+    assert.strictEqual(loadedHints, 0, 'retired room loaded relay hints after leave');
+    assert.strictEqual(topology.currentRoomId, '');
+    assert.strictEqual(topology.myIdentity, null);
+  } finally {
+    topology.identityStore.getRoomSnapshot = originalGetRoomSnapshot;
+    topology.webrtc.loadRelayHints = originalLoadRelayHints;
+  }
+});
+
+await testAsync('WebRTC relay-hint hydration checks ownership after each awaited lookup', async () => {
+  const topology = TopologyService.getInstance();
+  const webrtc = topology.webrtc;
+  const originalShouldForceRelay = webrtc.identityStore.shouldForceRelay;
+  let resolveHint;
+  let current = true;
+  const uniquePeer = 'peer:retired-hint';
+  webrtc.forceRelayPeers.delete(uniquePeer);
+  webrtc.identityStore.shouldForceRelay = () => new Promise((resolve) => { resolveHint = resolve; });
+
+  try {
+    const loading = webrtc.loadRelayHints([uniquePeer], () => current);
+    current = false;
+    resolveHint(true);
+    await loading;
+    assert.strictEqual(
+      webrtc.forceRelayPeers.has(uniquePeer),
+      false,
+      'a retired asynchronous hint mutated the current WebRTC owner'
+    );
+  } finally {
+    webrtc.forceRelayPeers.delete(uniquePeer);
+    webrtc.identityStore.shouldForceRelay = originalShouldForceRelay;
+  }
 });
 
 // ─── 16. Payload Chunker, CRC32 Integrity & Memory Bounds ───
@@ -1112,6 +1349,50 @@ test('PacketPipeline delivers reliable packets and auto-generates ACKs', async (
   assert.strictEqual(outbound[0].target, 'node-remote');
   assert.strictEqual(outbound[0].p.type, 'transport:ack');
   assert.strictEqual(outbound[0].p.payload.ackFor, incomingChat.id);
+});
+
+test('PacketPipeline rejects late old-room ingress before transport or app state changes', () => {
+  const outbound = [];
+  const mockRouter = {
+    broadcast: (packet) => { outbound.push(packet); return true; },
+    sendTo: (_target, packet) => { outbound.push(packet); return true; },
+    onPacket: (handler) => { mockRouter.incomingHandler = handler; return () => {}; },
+  };
+  const pipeline = new PacketPipeline(mockRouter);
+  pipeline.init(
+    { peerId: 'local', nickname: 'Local', avatar: '', color: '' },
+    'room:new'
+  );
+  const delivered = [];
+  pipeline.onDeliver((packet) => delivered.push(packet));
+
+  mockRouter.incomingHandler(createPacket(
+    'chat:message',
+    { peerId: 'remote', nickname: 'Remote', avatar: '', color: '' },
+    'room:old',
+    { text: 'stale' }
+  ));
+  assert.deepStrictEqual(delivered, []);
+  assert.deepStrictEqual(outbound, [], 'stale ingress generated an ACK in the new room');
+
+  mockRouter.incomingHandler(createPacket(
+    'chat:message',
+    { peerId: 'remote', nickname: 'Remote', avatar: '', color: '' },
+    'room:new',
+    { text: 'current' }
+  ));
+  assert.deepStrictEqual(delivered.map((packet) => packet.payload.text), ['current']);
+  assert.strictEqual(outbound.length, 1, 'current-room ingress was not acknowledged');
+
+  pipeline.clear();
+  mockRouter.incomingHandler(createPacket(
+    'chat:message',
+    { peerId: 'remote', nickname: 'Remote', avatar: '', color: '' },
+    'room:new',
+    { text: 'after leave' }
+  ));
+  assert.deepStrictEqual(delivered.map((packet) => packet.payload.text), ['current']);
+  assert.strictEqual(outbound.length, 1, 'leave did not make the pipeline fail closed');
 });
 
 // ─── 18. Adversarial & Deduplication Invariant Testing ───
@@ -2050,6 +2331,10 @@ test('packets arriving over P2P reach application handlers', () => {
   // deliberately enters one level lower, at topology's delivery boundary.
   const topology = TopologyService.getInstance();
   const network = NetworkService.getInstance();
+  network.packetPipeline.init(
+    { peerId: 'local-peer', nickname: 'Local', avatar: '', color: '#fff' },
+    'room-ingress'
+  );
 
   assert.ok(
     topology['packetListeners'].size > 0,
@@ -2074,12 +2359,17 @@ test('packets arriving over P2P reach application handlers', () => {
 
   off();
   assert.deepStrictEqual(received, { text: 'delivered over p2p' });
+  network.packetPipeline.clear();
 });
 
 test('inbound packets advance the local hybrid clock before handlers run', () => {
   // A handler may reply to the packet it just received; that reply must sort after it.
   const topology = TopologyService.getInstance();
   const network = NetworkService.getInstance();
+  network.packetPipeline.init(
+    { peerId: 'local-peer', nickname: 'Local', avatar: '', color: '#fff' },
+    'room-ingress'
+  );
 
   const farFuture = Date.now() + 30_000;
   let stampSeenByHandler = null;
@@ -2106,6 +2396,7 @@ test('inbound packets advance the local hybrid clock before handlers run', () =>
     compareHLC({ hlc: stampSeenByHandler }, { hlc: { w: farFuture, c: 3 } }) >= 0,
     'local clock was not advanced before handlers ran'
   );
+  network.packetPipeline.clear();
 });
 
 
@@ -2147,5 +2438,3 @@ console.log(`========================================\n`);
 if (passed !== total) {
   process.exit(1);
 }
-
-

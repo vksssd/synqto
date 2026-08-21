@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Mic, MicOff, PhoneCall, PhoneOff, Volume2 } from 'lucide-react';
-import { VoiceService } from './voice.service';
+import { VoiceLifecycleState, VoiceService } from './voice.service';
 import { OnlinePeer } from '@/features/discovery/discovery.service';
 
 interface VoiceRoomProps {
@@ -20,6 +20,9 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({
   const [isInVoice, setIsInVoice] = useState(voiceService.getIsInVoice());
   const [isMuted, setIsMuted] = useState(voiceService.getIsMuted());
   const [permissionNeeded, setPermissionNeeded] = useState(voiceService.getPermissionNeeded());
+  const [lifecycleState, setLifecycleState] = useState<VoiceLifecycleState>(
+    voiceService.getLifecycleState()
+  );
   const [speakingPeers, setSpeakingPeers] = useState<Set<string>>(voiceService.getSpeakingPeers());
 
   useEffect(() => {
@@ -27,6 +30,7 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({
       setIsInVoice(inVoice);
       setIsMuted(muted);
       setPermissionNeeded(permNeeded);
+      setLifecycleState(voiceService.getLifecycleState());
     });
 
     const unsubSpeaking = voiceService.onSpeakingChange((speaking) => {
@@ -139,9 +143,14 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({
               </button>
             </>
           ) : (
-            <button className="btn btn-primary btn-sm" onClick={handleToggleVoice}>
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={handleToggleVoice}
+              disabled={lifecycleState === 'JOINING' || lifecycleState === 'LEAVING'}
+              aria-busy={lifecycleState === 'JOINING'}
+            >
               <PhoneCall size={13} />
-              <span>Join Voice</span>
+              <span>{lifecycleState === 'JOINING' ? 'Joining…' : 'Join Voice'}</span>
             </button>
           )}
         </div>

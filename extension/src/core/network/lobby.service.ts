@@ -22,7 +22,8 @@ export function toWireMode(mode: CoFocusMode): string {
 
 /** Converts a lowercase wire mode to the domain type. Returns null if unrecognised. */
 export function fromWireMode(raw: string | undefined): CoFocusMode | null {
-  switch ((raw || '').toLowerCase()) {
+  if (typeof raw !== 'string') return null;
+  switch (raw.toLowerCase()) {
     case 'watcher':
       return 'WATCHER';
     case 'together':
@@ -30,6 +31,12 @@ export function fromWireMode(raw: string | undefined): CoFocusMode | null {
     default:
       return null;
   }
+}
+
+const COFOCUS_ROOM_ID_RE = /^cofocus:[A-Za-z0-9._:-]{8,128}$/;
+
+function isBoundedLobbyToken(value: unknown, max = 128): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= max;
 }
 
 export interface LobbyMatchedData {
@@ -139,6 +146,7 @@ export class LobbyService {
     this.ws = socket;
 
     socket.onopen = () => {
+      if (this.ws !== socket) return;
       socket.send(
         JSON.stringify({
           type: 'lobby:join',
@@ -158,6 +166,7 @@ export class LobbyService {
     };
 
     socket.onmessage = (event) => {
+      if (this.ws !== socket) return;
       let msg: any;
       try {
         msg = JSON.parse(event.data);
@@ -168,10 +177,12 @@ export class LobbyService {
     };
 
     socket.onerror = () => {
+      if (this.ws !== socket) return;
       this.emit('error', { reason: 'socket_error', message: 'Lost connection to the matchmaking server.' });
     };
 
     socket.onclose = () => {
+      if (this.ws !== socket) return;
       // A close AFTER a match is the normal, expected end of a lobby connection — the server
       // closes it once both peers have their room ID. Only an unexpected close is an error.
       if (!this.matched) {
@@ -182,11 +193,47 @@ export class LobbyService {
   }
 
   private handleMessage(msg: any) {
-    const payload = msg?.payload || {};
+    // Matchmaking frames are untrusted protocol input. Fail closed before a malformed match
+    // can navigate this client into an empty/attacker-chosen room or silently change modes.
+    if (
+      !msg ||
+      msg.from !== 'server' ||
+      msg.roomId !== 'lobby' ||
+      typeof msg.payload !== 'object' ||
+      msg.payload === null ||
+      Array.isArray(msg.payload)
+    ) return;
+
+    const payload = msg.payload;
 
     switch (msg?.type) {
       case 'lobby:matched': {
-        const mode = fromWireMode(payload.mode) || this.currentRequest?.mode || 'WATCHER';
+        const mode = fromWireMode(payload.mode);
+        const request = this.currentRequest;
+        if (
+          !request ||
+          !mode ||
+          mode !== request.mode ||
+          !isBoundedLobbyToken(payload.roomId) ||
+          !COFOCUS_ROOM_ID_RE.test(payload.roomId) ||
+          !isBoundedLobbyToken(payload.partnerPeerId) ||
+          payload.partnerPeerId === request.peerId ||
+          (payload.partnerNickname !== undefined &&
+            (typeof payload.partnerNickname !== 'string' || payload.partnerNickname.length > 120)) ||
+          (payload.subjectTag !== undefined &&
+            (typeof payload.subjectTag !== 'string' || payload.subjectTag.length > 120)) ||
+          (payload.sessionLengthSec !== undefined &&
+            (!Number.isInteger(payload.sessionLengthSec) ||
+              payload.sessionLengthSec < 0 ||
+              payload.sessionLengthSec > 86_400))
+        ) {
+          this.emit('error', {
+            reason: 'invalid_match',
+            message: 'The matchmaking server returned an invalid match.',
+          } as LobbyErrorData);
+          this.close();
+          break;
+        }
         this.matched = true;
         this.emit('matched', {
           roomId: payload.roomId,
@@ -201,14 +248,26 @@ export class LobbyService {
         break;
       }
 
-      case 'lobby:waiting':
+      case 'lobby:waiting': {
+        const mode = fromWireMode(payload.mode);
+        if (
+          !mode ||
+          mode !== this.currentRequest?.mode ||
+          (payload.subjectTag !== undefined &&
+            (typeof payload.subjectTag !== 'string' || payload.subjectTag.length > 120)) ||
+          (payload.queuePosition !== undefined &&
+            (!Number.isInteger(payload.queuePosition) || payload.queuePosition < 1 || payload.queuePosition > 100_000)) ||
+          (payload.timeoutSec !== undefined &&
+            (!Number.isInteger(payload.timeoutSec) || payload.timeoutSec < 1 || payload.timeoutSec > 86_400))
+        ) return;
         this.emit('waiting', {
-          mode: fromWireMode(payload.mode),
+          mode,
           subjectTag: payload.subjectTag,
           queuePosition: payload.queuePosition,
           timeoutSec: payload.timeoutSec,
         } as LobbyWaitingData);
         break;
+      }
 
       case 'lobby:timeout':
         this.emit('timeout', {});
@@ -216,8 +275,13 @@ export class LobbyService {
         break;
 
       case 'lobby:error':
+        if (
+          !isBoundedLobbyToken(payload.reason, 80) ||
+          (payload.message !== undefined &&
+            (typeof payload.message !== 'string' || payload.message.length > 300))
+        ) return;
         this.emit('error', {
-          reason: payload.reason || 'unknown',
+          reason: payload.reason,
           message: payload.message,
         } as LobbyErrorData);
         this.close();

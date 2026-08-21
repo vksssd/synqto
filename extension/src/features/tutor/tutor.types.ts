@@ -4,6 +4,13 @@ import { PeerIdentity } from '@/core/network/packet';
 
 export type StageRole = 'audience' | 'speaker' | 'tutor';
 export type BroadcastType = 'audio' | 'camera' | 'screen';
+export type LiveViewerState = 'NOT_WATCHING' | 'REQUESTING' | 'WATCHING' | 'LEAVING';
+export type LiveBroadcasterState =
+  | 'IDLE'
+  | 'REQUESTING_PERMISSION'
+  | 'REQUESTING_ADMISSION'
+  | 'LIVE'
+  | 'STOPPING';
 
 export interface CursorPosition {
   peerId: string;
@@ -45,6 +52,8 @@ export interface ActiveStreamInfo {
 }
 
 export interface TutorStageState {
+  viewerState: LiveViewerState;
+  broadcasterState: LiveBroadcasterState;
   isActive: boolean;
   tutorPeerId: string | null;
   tutorIdentity: PeerIdentity | null;

@@ -1,7 +1,13 @@
 // ─── Hierarchical Topology Service (Dual-Leader Standby & Resilient Mesh Router) ───
 
 import { NetworkPacket, PeerIdentity, createPacket } from './packet';
-import { SignalingService, RosterData, PromoteData, DemoteData } from './signaling.service';
+import {
+  SignalingService,
+  SIGNALING_PROTOCOL_VERSION,
+  RosterData,
+  PromoteData,
+  DemoteData,
+} from './signaling.service';
 import { WebRTCService } from './webrtc.service';
 import { TopologyEpoch, PeerId } from '../types/identifiers';
 import { TierCoordinator } from '../topology/tier-coordinator';
@@ -47,19 +53,30 @@ export class TopologyService {
   private peerSignaling: PeerSignaling;
   private linkMonitor: LinkMonitor;
   private router: LinkStateRouter;
-  private routerTimer: any = null;
+  private routerTimer: ReturnType<typeof setInterval> | null = null;
   private affinity: LinkAffinity = new LinkAffinity();
   private identityStore = PeerIdentityStore.getInstance();
-  private snapshotTimer: any = null;
+  private snapshotTimer: ReturnType<typeof setInterval> | null = null;
   private joinTracker = new JoinTracker();
+  /** Peers whose first application-level delivery has already been traced this room. */
+  private applicationTracePeers: Set<string> = new Set();
+  /** Last PC generation on which the application hello was sent to each peer. */
+  private applicationHandshakeGenerations: Map<string, number> = new Map();
+  /** PC generations whose inbound hello has already proven application readiness. */
+  private applicationReadyGenerations: Set<string> = new Set();
+  /** Candidate milestones already reported, bounded so trickle ICE cannot flood diagnostics. */
+  private outboundSignalTraceMilestones: Set<string> = new Set();
+  private static readonly MAX_OUTBOUND_SIGNAL_TRACE_MILESTONES = 2_000;
   /**
    * Pending repairs held during the disconnect grace period, so a link that recovers on its
    * own is never torn down by a repair it did not need.
    */
-  private repairGraceTimers: Map<string, any> = new Map();
+  private repairGraceTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
 
   private myIdentity: PeerIdentity | null = null;
   private currentRoomId = '';
+  /** Invalidates asynchronous room bootstrap work across leave and A→B→A transitions. */
+  private roomGeneration = 0;
   private isLeader = false;
   private assignedLeader: string | null = null;
   private assignedStandbyLeader: string | null = null;
@@ -77,8 +94,8 @@ export class TopologyService {
   private readonly MAX_SEEN_PACKETS = 1500;
 
   // Active connection reconciliation loop & retry tracking
-  private reconciliationTimer: any = null;
-  private retryTimers: Map<string, any> = new Map();
+  private reconciliationTimer: ReturnType<typeof setInterval> | null = null;
+  private retryTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
   private retryAttempts: Map<string, number> = new Map();
 
   // Listeners for UI state and packet routing
@@ -145,6 +162,17 @@ export class TopologyService {
 
     this.setupSignalingListeners();
     this.setupWebRTCListeners();
+    this.webrtc.onDiagnostic((event) => {
+      this.signaling.sendConnectionTrace(event);
+    });
+    this.joinTracker.onChange((snapshot) => {
+      this.signaling.sendConnectionTrace({
+        kind: 'join-stage',
+        state: snapshot.stage,
+        connectedLinks: snapshot.connectedLinks,
+        requiredLinks: snapshot.requiredLinks,
+      });
+    });
   }
 
   /**
@@ -193,11 +221,21 @@ export class TopologyService {
    * both forbids tier promotion and skips leader-mesh construction entirely.
    */
   public init(identity: PeerIdentity, roomId: string, policy: TopologyPolicy = ADAPTIVE_POLICY) {
+    // TopologyService is public and must be safe even if a caller bypasses NetworkService's
+    // normal leave/init sequence. In particular, replacing leaderMesh without stopping it
+    // would strand its heartbeat and health-check intervals.
+    if (this.currentRoomId || this.myIdentity) this.leave();
+
+    const generation = ++this.roomGeneration;
     this.myIdentity = identity;
     this.currentRoomId = roomId;
     this.activePolicy = policy;
     this.seenPacketIds.clear();
     this.packetIdOrder = [];
+    this.applicationTracePeers.clear();
+    this.applicationHandshakeGenerations.clear();
+    this.applicationReadyGenerations.clear();
+    this.outboundSignalTraceMilestones.clear();
     this.retryAttempts.clear();
     this.clearAllRetryTimers();
 
@@ -241,7 +279,7 @@ export class TopologyService {
     // because blocking room entry on IndexedDB would be a poor trade — a connection built
     // before it resolves simply uses an ephemeral identity.
     void this.webrtc.prewarmIdentity();
-    void this.warmStartFromSnapshot(roomId);
+    void this.warmStartFromSnapshot(roomId, generation);
 
     this.peerSignaling.setMyPeerId(identity.peerId);
     this.peerSignaling.reset();
@@ -262,6 +300,7 @@ export class TopologyService {
   }
 
   public leave() {
+    this.roomGeneration++;
     this.stopReconciliationLoop();
     this.linkMonitor.stop();
     this.linkMonitor.reset();
@@ -288,7 +327,97 @@ export class TopologyService {
     this.backboneLeaders.clear();
     this.allPeers.clear();
     this.retryAttempts.clear();
+    this.applicationTracePeers.clear();
+    this.applicationHandshakeGenerations.clear();
+    this.applicationReadyGenerations.clear();
+    this.outboundSignalTraceMilestones.clear();
+    this.currentRoomId = '';
+    this.myIdentity = null;
+    this.activePolicy = ADAPTIVE_POLICY;
     this.emitState();
+  }
+
+  /**
+   * Records the first application packet actually delivered from each remote peer. Unlike a
+   * send attempt, this proves SDP, ICE, DataChannel and the application ingress pipeline all
+   * worked end to end. One event per peer/room keeps diagnostics bounded.
+   */
+  public traceApplicationDelivery(remotePeerId: string, packetType: string): void {
+    if (
+      !this.currentRoomId ||
+      !remotePeerId ||
+      remotePeerId === this.myIdentity?.peerId ||
+      packetType === 'application:hello' ||
+      /^(topology|signal|link|transport|chunk|relay):/.test(packetType) ||
+      this.applicationTracePeers.has(remotePeerId)
+    ) {
+      return;
+    }
+    if (
+      this.signaling.sendConnectionTrace({
+        kind: 'application-received',
+        remotePeerId,
+        generation: this.webrtc.getConnectionGeneration(remotePeerId),
+        packetType,
+      })
+    ) {
+      this.applicationTracePeers.add(remotePeerId);
+    }
+  }
+
+  /**
+   * Completes the explicit application handshake when NetworkService receives the hello.
+   * DataChannel open alone is insufficient evidence: this proves a canonical packet crossed
+   * parsing, topology routing, deduplication, ordering and application ingress.
+   */
+  public traceApplicationHandshake(remotePeerId: string): void {
+    const generation = this.webrtc.getConnectionGeneration(remotePeerId);
+    const key = `${remotePeerId}#${generation}`;
+    if (this.applicationReadyGenerations.has(key)) return;
+
+    const received = this.signaling.sendConnectionTrace({
+      kind: 'application-stage',
+      remotePeerId,
+      generation,
+      state: 'handshake-received',
+      packetType: 'application:hello',
+    });
+    const sentGeneration = this.applicationHandshakeGenerations.get(remotePeerId);
+    const ready =
+      sentGeneration === generation &&
+      this.signaling.sendConnectionTrace({
+        kind: 'application-stage',
+        remotePeerId,
+        generation,
+        state: 'ready',
+        packetType: 'application:hello',
+      });
+    if (received && ready) this.applicationReadyGenerations.add(key);
+  }
+
+  private sendApplicationHandshake(remotePeerId: string): void {
+    if (!this.myIdentity || !this.currentRoomId) return;
+    const generation = this.webrtc.getConnectionGeneration(remotePeerId);
+    if (this.applicationHandshakeGenerations.get(remotePeerId) === generation) return;
+
+    const packet = createPacket(
+      'application:hello',
+      this.myIdentity,
+      this.currentRoomId,
+      { protocolVersion: SIGNALING_PROTOCOL_VERSION },
+      remotePeerId,
+      { channelPriority: 'control', priority: 'CONTROL' }
+    );
+    if (!this.webrtc.sendPacket(remotePeerId, packet)) return;
+
+    this.applicationHandshakeGenerations.set(remotePeerId, generation);
+    this.signaling.sendConnectionTrace({
+      kind: 'application-stage',
+      remotePeerId,
+      generation,
+      state: 'handshake-sent',
+      packetType: 'application:hello',
+    });
   }
 
   private startReconciliationLoop() {
@@ -304,7 +433,7 @@ export class TopologyService {
   }
 
   private stopReconciliationLoop() {
-    if (this.reconciliationTimer) {
+    if (this.reconciliationTimer !== null) {
       clearInterval(this.reconciliationTimer);
       this.reconciliationTimer = null;
     }
@@ -312,7 +441,7 @@ export class TopologyService {
 
   private clearRepairGrace(peerId: string) {
     const timer = this.repairGraceTimers.get(peerId);
-    if (timer) {
+    if (timer !== undefined) {
       clearTimeout(timer);
       this.repairGraceTimers.delete(peerId);
     }
@@ -505,7 +634,7 @@ export class TopologyService {
       if (!this.allPeers.has(peerId)) {
         this.retryAttempts.delete(peerId);
         const timer = this.retryTimers.get(peerId);
-        if (timer) {
+        if (timer !== undefined) {
           clearTimeout(timer);
           this.retryTimers.delete(peerId);
         }
@@ -702,7 +831,7 @@ export class TopologyService {
   }
 
   private stopSnapshotLoop() {
-    if (this.snapshotTimer) {
+    if (this.snapshotTimer !== null) {
       clearInterval(this.snapshotTimer);
       this.snapshotTimer = null;
     }
@@ -731,12 +860,18 @@ export class TopologyService {
    * reachable, so that once any single path opens, the rest of the room follows from the
    * mesh rather than from the server.
    */
-  private async warmStartFromSnapshot(roomId: string): Promise<void> {
+  private async warmStartFromSnapshot(roomId: string, generation: number): Promise<void> {
     try {
       const snap = await this.identityStore.getRoomSnapshot(roomId);
       if (!snap) return;
 
-      await this.webrtc.loadRelayHints(snap.members);
+      if (generation !== this.roomGeneration || this.currentRoomId !== roomId) return;
+
+      await this.webrtc.loadRelayHints(
+        snap.members,
+        () => generation === this.roomGeneration && this.currentRoomId === roomId
+      );
+      if (generation !== this.roomGeneration || this.currentRoomId !== roomId) return;
       console.info(
         `[TopologyService] Warm start: ${snap.members.length} known members, ` +
           `${snap.topology.length} known links from a previous session`
@@ -821,7 +956,7 @@ export class TopologyService {
   }
 
   private stopRoutingLoop() {
-    if (this.routerTimer) {
+    if (this.routerTimer !== null) {
       clearInterval(this.routerTimer);
       this.routerTimer = null;
     }
@@ -990,7 +1125,36 @@ export class TopologyService {
     this.webrtc.onSignalNeeded((targetPeerId, type, payload) => {
       // Route through the mesh where possible; the server is the last resort, not the
       // default. See core/network/peer-signaling.ts for the preference order.
-      this.peerSignaling.route(targetPeerId, type, payload);
+      const route = this.peerSignaling.route(targetPeerId, type, payload);
+      const generation = this.webrtc.getConnectionGeneration(targetPeerId);
+      const candidateType = type === 'ice' ? this.signalCandidateType(payload) : undefined;
+      const milestoneKey = [
+        targetPeerId,
+        generation,
+        type,
+        candidateType || '',
+        route.transport,
+      ].join('|');
+      const alreadyTraced =
+        type === 'ice' && this.outboundSignalTraceMilestones.has(milestoneKey);
+      const traced = alreadyTraced || this.signaling.sendConnectionTrace({
+        kind: type === 'ice' ? 'ice-candidate-stage' : 'signal-stage',
+        remotePeerId: targetPeerId,
+        generation,
+        state: `${type}-sent`,
+        transport: route.transport,
+        candidateType,
+      });
+      if (type === 'ice' && traced && !alreadyTraced) {
+        this.outboundSignalTraceMilestones.add(milestoneKey);
+        if (
+          this.outboundSignalTraceMilestones.size >
+          TopologyService.MAX_OUTBOUND_SIGNAL_TRACE_MILESTONES
+        ) {
+          const oldest = this.outboundSignalTraceMilestones.values().next().value;
+          if (oldest !== undefined) this.outboundSignalTraceMilestones.delete(oldest);
+        }
+      }
       this.joinTracker.advance('SIGNALING_ESTABLISHED', { kind: type });
     });
 
@@ -1000,6 +1164,7 @@ export class TopologyService {
 
     this.webrtc.onConnectionState((peerId, status) => {
       if (status === 'connected') {
+        this.sendApplicationHandshake(peerId);
         // Recovered on its own — cancel any pending repair before it fires.
         this.clearRepairGrace(peerId);
         this.retryAttempts.delete(peerId);
@@ -1019,6 +1184,12 @@ export class TopologyService {
           this.clusterPeers.add(peerId);
         }
       } else if (status === 'disconnected' || status === 'failed') {
+        // A recovered transport, even within the same PC generation, must prove the
+        // application path again rather than inheriting readiness from before the drop.
+        this.applicationHandshakeGenerations.delete(peerId);
+        this.applicationReadyGenerations.delete(
+          `${peerId}#${this.webrtc.getConnectionGeneration(peerId)}`
+        );
         this.clusterPeers.delete(peerId);
         this.standbyPeers.delete(peerId);
 
@@ -1066,6 +1237,21 @@ export class TopologyService {
       }
       this.emitState();
     });
+  }
+
+  /** Candidate category only; never exposes addresses, ports or SDP to diagnostics. */
+  private signalCandidateType(
+    candidate: RTCIceCandidate | RTCIceCandidateInit
+  ): 'host' | 'srflx' | 'prflx' | 'relay' | 'unknown' {
+    const parsed = (candidate as RTCIceCandidate)?.type;
+    if (parsed === 'host' || parsed === 'srflx' || parsed === 'prflx' || parsed === 'relay') {
+      return parsed;
+    }
+    const raw = typeof candidate?.candidate === 'string' ? candidate.candidate : '';
+    const token = /\btyp\s+(host|srflx|prflx|relay)\b/i.exec(raw)?.[1]?.toLowerCase();
+    return token === 'host' || token === 'srflx' || token === 'prflx' || token === 'relay'
+      ? token
+      : 'unknown';
   }
 
   /**
@@ -1534,4 +1720,3 @@ export class TopologyService {
     });
   }
 }
-

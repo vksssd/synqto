@@ -5,6 +5,8 @@ import { IdentityService } from '@/features/identity/identity.service';
 import { RoomContext, computeRoomId } from './room-utils';
 import { DIRECT_ONLY_POLICY } from '@/core/topology/topology.types';
 
+export const SELECTED_ROOM_STORAGE_KEY = 'synqto_selected_room';
+
 export class RoomService {
   private static instance: RoomService | null = null;
   private network: NetworkService;
@@ -37,8 +39,8 @@ export class RoomService {
       return this.currentRoom;
     }
 
-    // Leave existing room if any
-    this.leaveCurrentRoom();
+    // Keep the old selection until the replacement has completed identity/network setup.
+    this.leaveCurrentRoom(true);
 
     const roomContext: RoomContext = {
       roomId,
@@ -52,8 +54,12 @@ export class RoomService {
 
     // Get current identity and join network
     const identity = await this.identityService.getOrCreateIdentity();
+    if (this.currentRoom !== roomContext) {
+      return this.currentRoom ?? roomContext;
+    }
     this.network.init(identity, roomId);
 
+    this.persistSelectedRoom(roomContext);
     this.emitChange();
     return roomContext;
   }
@@ -66,7 +72,8 @@ export class RoomService {
       return this.currentRoom;
     }
 
-    this.leaveCurrentRoom();
+    // Keep the previous persisted selection until this asynchronous replacement succeeds.
+    this.leaveCurrentRoom(true);
 
     const roomContext: RoomContext = {
       roomId,
@@ -78,8 +85,12 @@ export class RoomService {
 
     this.currentRoom = roomContext;
     const identity = await this.identityService.getOrCreateIdentity();
+    if (this.currentRoom !== roomContext) {
+      return this.currentRoom ?? roomContext;
+    }
     this.network.init(identity, roomId);
 
+    this.persistSelectedRoom(roomContext);
     this.emitChange();
     return roomContext;
   }
@@ -97,7 +108,7 @@ export class RoomService {
       return this.currentRoom;
     }
 
-    this.leaveCurrentRoom();
+    this.leaveCurrentRoom(true);
 
     const roomContext: RoomContext = {
       roomId: context.roomId,
@@ -117,8 +128,12 @@ export class RoomService {
 
     this.currentRoom = roomContext;
     const identity = await this.identityService.getOrCreateIdentity();
+    if (this.currentRoom !== roomContext) {
+      return this.currentRoom ?? roomContext;
+    }
     this.network.init(identity, context.roomId);
 
+    this.persistSelectedRoom(roomContext);
     this.emitChange();
     return roomContext;
   }
@@ -150,7 +165,7 @@ export class RoomService {
       return this.currentRoom;
     }
 
-    this.leaveCurrentRoom();
+    this.leaveCurrentRoom(true);
 
     const isWatcher = opts.mode === 'WATCHER';
     const roomContext: RoomContext = {
@@ -174,6 +189,9 @@ export class RoomService {
     this.currentRoom = roomContext;
 
     const identity = await this.identityService.getOrCreateIdentity();
+    if (this.currentRoom !== roomContext) {
+      return this.currentRoom ?? roomContext;
+    }
     this.network.init(identity, roomId, DIRECT_ONLY_POLICY);
 
     // Cross-context signal that a CoFocus session is live, independent of chrome.storage's
@@ -191,6 +209,43 @@ export class RoomService {
     // read side.
     this.setCoFocusActiveFlag(roomId, opts.mode);
 
+    this.persistSelectedRoom(roomContext);
+    this.emitChange();
+    return roomContext;
+  }
+
+  /**
+   * Rejoins the exact room selected by another extension context or a previous browser UI.
+   * It deliberately trusts the stored roomId instead of deriving one from the active tab:
+   * selected room and detected browser problem are separate state.
+   */
+  public async resumeRoom(context: RoomContext): Promise<RoomContext> {
+    if (!context?.roomId || !context.slug || !context.canonicalUrl) {
+      throw new Error('[RoomService] Cannot resume an invalid room context');
+    }
+    if (this.currentRoom?.roomId === context.roomId) return this.currentRoom;
+
+    this.leaveCurrentRoom(true);
+    const roomContext: RoomContext = {
+      ...context,
+      groupDetails: context.groupDetails ? { ...context.groupDetails } : undefined,
+      cofocusDetails: context.cofocusDetails ? { ...context.cofocusDetails } : undefined,
+    };
+    this.currentRoom = roomContext;
+
+    const identity = await this.identityService.getOrCreateIdentity();
+    if (this.currentRoom !== roomContext) {
+      return this.currentRoom ?? roomContext;
+    }
+    this.network.init(
+      identity,
+      roomContext.roomId,
+      roomContext.cofocusMode ? DIRECT_ONLY_POLICY : undefined
+    );
+    if (roomContext.cofocusMode) {
+      this.setCoFocusActiveFlag(roomContext.roomId, roomContext.cofocusMode);
+    }
+    this.persistSelectedRoom(roomContext);
     this.emitChange();
     return roomContext;
   }
@@ -207,8 +262,11 @@ export class RoomService {
     }
   }
 
-  public leaveCurrentRoom() {
-    if (!this.currentRoom) return;
+  public leaveCurrentRoom(preserveSelection = false) {
+    if (!this.currentRoom) {
+      if (!preserveSelection) this.clearSelectedRoom();
+      return;
+    }
 
     if (this.currentRoom.cofocusMode) {
       this.clearCoFocusActiveFlag();
@@ -216,7 +274,13 @@ export class RoomService {
 
     this.network.leave();
     this.currentRoom = null;
+    if (!preserveSelection) this.clearSelectedRoom();
     this.emitChange();
+  }
+
+  /** Releases this JavaScript context's socket while keeping the user's selected room. */
+  public suspendCurrentRoom() {
+    this.leaveCurrentRoom(true);
   }
 
   public leaveRoom() {
@@ -237,5 +301,17 @@ export class RoomService {
 
   private emitChange() {
     this.listeners.forEach((fn) => fn(this.currentRoom));
+  }
+
+  private persistSelectedRoom(room: RoomContext) {
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      chrome.storage.local.set({ [SELECTED_ROOM_STORAGE_KEY]: room });
+    }
+  }
+
+  private clearSelectedRoom() {
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      chrome.storage.local.remove(SELECTED_ROOM_STORAGE_KEY);
+    }
   }
 }

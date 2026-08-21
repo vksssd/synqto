@@ -205,6 +205,14 @@ export class TransportRouter {
    * more confusing than one that never arrives.
    */
   public flushPendingP2P(): void {
+    // A topology update can make the route usable before the scheduled retry fires. In that
+    // case this direct flush owns and cancels the pending callback rather than leaving a
+    // redundant timer alive. The timer callback clears the field before calling us, so this
+    // is a no-op when the timer itself is the caller.
+    if (this.flushTimer !== null) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = null;
+    }
     if (this.pendingP2P.length === 0) return;
     if (!this.p2pSenderFn) return;
 
@@ -226,6 +234,28 @@ export class TransportRouter {
     if (this.pendingP2P.length > 0) {
       this.scheduleFlush();
     }
+  }
+
+  /**
+   * Releases room-scoped deferred traffic and routing state.
+   *
+   * A deferred packet belongs to the room in which it was created. Keeping that queue across
+   * leave/init allowed a timer from the previous room to wake after a room switch and submit
+   * the old packet through the new room's P2P sender. Reset is deliberately separate from
+   * construction because NetworkService and its physical sender are process singletons.
+   */
+  public reset(): void {
+    if (this.flushTimer !== null) clearTimeout(this.flushTimer);
+    this.flushTimer = null;
+    this.pendingP2P = [];
+    this.activeView = null;
+    this.routeResolver = null;
+    this.getDirectPeersFn = null;
+    this.seenPacketIds.clear();
+    this.packetOrder = [];
+    this.droppedBestEffort = 0;
+    this.droppedDeferred = 0;
+    this.relayAllowed = true;
   }
 
   /** Deferral counters, surfaced so backpressure is observable rather than guessed at. */

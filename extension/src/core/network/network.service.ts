@@ -81,6 +81,13 @@ export class NetworkService {
    * DIRECT_ONLY_POLICY, which pins the room to Tier 1 and forbids server-relay fallback.
    */
   public init(identity: PeerIdentity, roomId: string, policy: TopologyPolicy = ADAPTIVE_POLICY) {
+    // init() is also a room-handoff boundary. Most callers leave explicitly, but a direct
+    // re-init must not preserve old topology loops, reliable retries, or deferred P2P work.
+    if (this.currentRoomId) {
+      this.leave();
+    } else {
+      this.transportRouter.reset();
+    }
     this.myIdentity = identity;
     this.currentRoomId = roomId;
 
@@ -105,7 +112,9 @@ export class NetworkService {
   public leave() {
     this.packetPipeline.clear();
     this.topology.leave();
+    this.transportRouter.reset();
     this.currentRoomId = '';
+    this.myIdentity = null;
   }
 
   public broadcast<T = unknown>(
@@ -205,6 +214,11 @@ export class NetworkService {
     return this.myIdentity;
   }
 
+  /** Room currently owned by this execution context, for cross-surface message fencing. */
+  public getCurrentRoomId(): string {
+    return this.currentRoomId;
+  }
+
   /**
    * Refreshes the identity stamped on OUTGOING packets, without touching the mesh.
    *
@@ -220,6 +234,24 @@ export class NetworkService {
    */
   public updateIdentity(identity: PeerIdentity): void {
     if (!identity) return;
+
+    if (
+      this.myIdentity &&
+      this.myIdentity.peerId !== identity.peerId &&
+      this.currentRoomId
+    ) {
+      // A nickname/avatar change keeps peerId stable and is safe in place. A peerId change
+      // is different: signaling, WebRTC, topology routing, replay windows and packet stream
+      // counters all key on it. Updating only PacketPipeline would put different subsystems
+      // under different identities. Preserve the room/policy but rebuild the network session
+      // atomically under the new routing identity.
+      const roomId = this.currentRoomId;
+      const policy = this.topology.getPolicy();
+      this.leave();
+      this.init(identity, roomId, policy);
+      return;
+    }
+
     this.myIdentity = identity;
     this.topology.updateIdentity(identity);
     this.packetPipeline.updateIdentity(identity);
@@ -233,6 +265,15 @@ export class NetworkService {
     // reply can sort before the message it answers. Merging first guarantees that for every
     // handler, without each one having to remember to do it.
     globalClock.update(packet.hlc);
+
+    if (packet.type === 'application:hello') {
+      this.topology.traceApplicationHandshake(packet.from.peerId);
+    }
+
+    // This is the first point where an inbound packet has survived transport routing,
+    // deduplication, reassembly and ordering. Reporting it here makes the diagnostic an
+    // honest application-delivery proof rather than merely a DataChannel send attempt.
+    this.topology.traceApplicationDelivery(packet.from.peerId, packet.type);
 
     // 1. Dispatch to registered type handlers
     const handlers = this.packetHandlers.get(packet.type);

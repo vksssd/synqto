@@ -1,6 +1,7 @@
 // ─── Real-time Chat Service (WhatsApp-style Rich Chat + Reliable Delivery + ACKs + Reactions + Polls + Quizzes) ───
 
 import { NetworkService } from '@/core/network/network.service';
+import { NotificationService } from '@/core/notify/notification.service';
 import {
   ChatMessagePayload,
   ChatAckPayload,
@@ -19,6 +20,8 @@ import {
   PollData,
   QuizData,
   FileAttachmentData,
+  NetworkPacket,
+  PacketType,
 } from '@/core/network/packet';
 import { HLC, compareHLC } from '@/core/network/hybrid-clock';
 import { uuid, debounce } from '@/shared/utils';
@@ -91,6 +94,10 @@ export class ChatService {
   private lamportClock = 0;
   private messages: ChatMessageItem[] = [];
   private unackedQueue: Map<string, { message: ChatMessageItem; payload: ChatMessagePayload; attempts: number; timer: any }> = new Map();
+  private roomGeneration = 0;
+  private historyRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  private networkUnsubscribers: Array<() => void> = [];
+  private destroyed = false;
 
   private listeners: Set<(messages: ChatMessageItem[]) => void> = new Set();
   private unreadCount = 0;
@@ -110,9 +117,20 @@ export class ChatService {
   }
 
   public init(roomId: string, myPeerId: string, myNickname = '') {
+    if (this.destroyed) return;
     if (this.currentRoomId === roomId && this.myPeerId === myPeerId) {
       return;
     }
+
+    // Finish the old room's persistence with a synchronous snapshot before changing any of
+    // the fields saveMessages() reads. A pending debounced callback must not wake later and
+    // save whichever room happens to be current at that point.
+    this.saveMessagesDebounced.cancel();
+    if (this.currentRoomId && this.messages.length > 0) {
+      void this.saveMessages();
+    }
+    this.clearHistoryRetry();
+    const generation = ++this.roomGeneration;
 
     this.currentRoomId = roomId;
     this.myPeerId = myPeerId;
@@ -122,24 +140,27 @@ export class ChatService {
     this.clearUnackedQueue();
 
     // 1. Load local cached messages
-    this.loadCachedMessages();
+    void this.loadCachedMessages(roomId, myPeerId, generation);
 
     // 2. Request history catch-up & broadcast anti-entropy sync digest
     this.requestHistorySync();
     this.broadcastSyncDigest();
 
     // 3. Retry history sync after initial WebRTC channel negotiation
-    setTimeout(() => {
+    const retryTimer = setTimeout(() => {
+      if (this.historyRetryTimer === retryTimer) this.historyRetryTimer = null;
+      if (!this.isCurrentRoom(roomId, generation)) return;
       if (this.messages.length < 5) {
         this.requestHistorySync();
         this.broadcastSyncDigest();
       }
     }, 1500);
+    this.historyRetryTimer = retryTimer;
   }
 
   private setupListeners() {
     // Catch-up on new peer join
-    this.network.on('presence:join', () => {
+    this.onNetwork('presence:join', () => {
       if (this.messages.length < 30) {
         this.requestHistorySync();
         this.broadcastSyncDigest();
@@ -147,7 +168,7 @@ export class ChatService {
     });
 
     // 0. Anti-entropy Sync Digest listener
-    this.network.on<SyncDigestPayload>('sync:digest', (payload, packet) => {
+    this.onNetwork<SyncDigestPayload>('sync:digest', (payload, packet) => {
       if (packet.from.peerId === this.myPeerId) return;
 
       this.lamportClock = Math.max(this.lamportClock, payload.latestLamport || 0) + 1;
@@ -170,7 +191,7 @@ export class ChatService {
     });
 
     // 0b. Anti-entropy Delta Response listener
-    this.network.on<SyncDeltaResponsePayload>('sync:delta_response', (payload) => {
+    this.onNetwork<SyncDeltaResponsePayload>('sync:delta_response', (payload) => {
       if (!payload?.messages || payload.messages.length === 0) return;
 
       this.lamportClock = Math.max(this.lamportClock, payload.latestLamport || 0) + 1;
@@ -195,7 +216,7 @@ export class ChatService {
     });
 
     // 1. Inbound chat message
-    this.network.on<ChatMessagePayload>('chat:message', (payload, packet) => {
+    this.onNetwork<ChatMessagePayload>('chat:message', (payload, packet) => {
       if (packet.roomId !== this.currentRoomId) return;
 
       // Update Lamport clock and sequence tracking
@@ -266,7 +287,7 @@ export class ChatService {
     });
 
     // 2. Inbound chat ACK (Delivery receipt)
-    this.network.on<ChatAckPayload>('chat:ack', (payload, packet) => {
+    this.onNetwork<ChatAckPayload>('chat:ack', (payload, packet) => {
       const msg = this.messages.find((m) => m.id === payload.messageId);
       if (msg && msg.isSelf) {
         if (msg.status !== 'read') {
@@ -283,7 +304,7 @@ export class ChatService {
     });
 
     // 3. Inbound chat read receipt
-    this.network.on<ChatAckPayload>('chat:read', (payload) => {
+    this.onNetwork<ChatAckPayload>('chat:read', (payload) => {
       const msg = this.messages.find((m) => m.id === payload.messageId);
       if (msg && msg.isSelf) {
         msg.status = 'read';
@@ -294,7 +315,7 @@ export class ChatService {
     });
 
     // 4. Inbound Reactions
-    this.network.on<ChatReactionPayload>('chat:reaction', (payload, packet) => {
+    this.onNetwork<ChatReactionPayload>('chat:reaction', (payload, packet) => {
       const msg = this.messages.find((m) => m.id === payload.messageId);
       if (!msg) return;
 
@@ -318,7 +339,7 @@ export class ChatService {
     });
 
     // 5. Inbound Poll Vote
-    this.network.on<ChatPollVotePayload>('chat:poll:vote', (payload, packet) => {
+    this.onNetwork<ChatPollVotePayload>('chat:poll:vote', (payload, packet) => {
       const msg = this.messages.find((m) => m.id === payload.messageId);
       if (!msg || !msg.poll) return;
 
@@ -339,7 +360,7 @@ export class ChatService {
     });
 
     // 6. Inbound Quiz Answer
-    this.network.on<ChatQuizAnswerPayload>('chat:quiz:answer', (payload, packet) => {
+    this.onNetwork<ChatQuizAnswerPayload>('chat:quiz:answer', (payload, packet) => {
       const msg = this.messages.find((m) => m.id === payload.messageId);
       if (!msg || !msg.quiz) return;
 
@@ -352,7 +373,7 @@ export class ChatService {
     });
 
     // 7. Inbound history request
-    this.network.on<ChatHistoryPayload>('chat:history:request', (payload, packet) => {
+    this.onNetwork<ChatHistoryPayload>('chat:history:request', (payload, packet) => {
       if (this.messages.length === 0) return;
 
       const since = payload?.sinceTimestamp || 0;
@@ -391,7 +412,7 @@ export class ChatService {
     });
 
     // 8. Inbound history response
-    this.network.on<ChatHistoryResponsePayload>('chat:history:response', (payload) => {
+    this.onNetwork<ChatHistoryResponsePayload>('chat:history:response', (payload) => {
       if (!payload?.messages || payload.messages.length === 0) return;
 
       let added = false;
@@ -412,6 +433,23 @@ export class ChatService {
         this.emitMessages();
       }
     });
+  }
+
+  private onNetwork<T = unknown>(
+    type: PacketType,
+    handler: (payload: T, packet: NetworkPacket) => void
+  ): void {
+    const unsubscribe = this.network.on<T>(type, (payload, packet) => {
+      if (
+        this.destroyed ||
+        !this.currentRoomId ||
+        packet.roomId !== this.currentRoomId
+      ) {
+        return;
+      }
+      handler(payload, packet);
+    });
+    this.networkUnsubscribers.push(unsubscribe);
   }
 
   /**
@@ -918,7 +956,12 @@ public sendMessage(
         return msg;
       }
     } catch (err) {
+      // The user pressed "screenshot" and nothing appeared. Say so.
       console.warn('[ChatService] Failed to capture screenshot:', err);
+      NotificationService.getInstance().error(
+        'Screenshot failed',
+        'Could not capture this tab. Some pages (Chrome settings, the Web Store) block capture.'
+      );
     }
     return null;
   }
@@ -1078,6 +1121,8 @@ public sendMessage(
    * Exponential backoff retry queue with congestion protection
    */
   private queueUnacked(msg: ChatMessageItem, payload: ChatMessagePayload) {
+    const roomId = this.currentRoomId;
+    const generation = this.roomGeneration;
     const entry = {
       message: msg,
       payload,
@@ -1096,6 +1141,10 @@ public sendMessage(
       const delay = delays[entry.attempts - 1] || 10000;
 
       entry.timer = setTimeout(() => {
+        if (!this.isCurrentRoom(roomId, generation)) {
+          if (this.unackedQueue.get(msg.id) === entry) this.removeUnacked(msg.id);
+          return;
+        }
         if (msg.status === 'sent') {
           this.network.broadcast('chat:message', payload);
           retry();
@@ -1110,14 +1159,14 @@ public sendMessage(
   private removeUnacked(messageId: string) {
     const entry = this.unackedQueue.get(messageId);
     if (entry) {
-      if (entry.timer) clearTimeout(entry.timer);
+      if (entry.timer !== null) clearTimeout(entry.timer);
       this.unackedQueue.delete(messageId);
     }
   }
 
   private clearUnackedQueue() {
     this.unackedQueue.forEach((entry) => {
-      if (entry.timer) clearTimeout(entry.timer);
+      if (entry.timer !== null) clearTimeout(entry.timer);
     });
     this.unackedQueue.clear();
   }
@@ -1157,12 +1206,14 @@ public sendMessage(
   }
 
   public onMessages(callback: (messages: ChatMessageItem[]) => void): () => void {
+    if (this.destroyed) return () => {};
     this.listeners.add(callback);
     callback(this.getMessages());
     return () => this.listeners.delete(callback);
   }
 
   public onUnread(callback: (count: number) => void): () => void {
+    if (this.destroyed) return () => {};
     this.unreadListeners.add(callback);
     callback(this.unreadCount);
     return () => this.unreadListeners.delete(callback);
@@ -1173,11 +1224,13 @@ public sendMessage(
   }
 
   public onNotificationToast(callback: (notif: ChatNotificationData) => void): () => void {
+    if (this.destroyed) return () => {};
     this.toastListeners.add(callback);
     return () => this.toastListeners.delete(callback);
   }
 
   private emitToast(notif: ChatNotificationData) {
+    if (this.destroyed) return;
     this.toastListeners.forEach((cb) => {
       try {
         cb(notif);
@@ -1188,6 +1241,7 @@ public sendMessage(
   }
 
   private emitMessages() {
+    if (this.destroyed) return;
     const msgs = this.getMessages();
     this.listeners.forEach((cb) => {
       try {
@@ -1199,6 +1253,7 @@ public sendMessage(
   }
 
   private emitUnread() {
+    if (this.destroyed) return;
     this.unreadListeners.forEach((cb) => cb(this.unreadCount));
   }
 
@@ -1208,18 +1263,19 @@ public sendMessage(
     });
   }
 
-  private async loadCachedMessages() {
-    if (!this.currentRoomId) return;
+  private async loadCachedMessages(roomId: string, myPeerId: string, generation: number) {
+    if (!roomId) return;
 
     try {
-      const key = `${STORAGE_PREFIX}${this.currentRoomId}`;
-      const legacyKey = `nerd_buddy_chat_${this.currentRoomId}`;
+      const key = `${STORAGE_PREFIX}${roomId}`;
+      const legacyKey = `nerd_buddy_chat_${roomId}`;
       if (typeof chrome !== 'undefined' && chrome.storage?.local) {
         const res = await chrome.storage.local.get([key, legacyKey]);
+        if (!this.isCurrentRoom(roomId, generation)) return;
         const stored: StoredChatMessage[] = res[key] || res[legacyKey] || [];
         if (stored.length > 0 && this.messages.length === 0) {
           this.messages = stored.map((s) => {
-            const isSelf = s.from.peerId === this.myPeerId;
+            const isSelf = s.from.peerId === myPeerId;
             // Preserves accurate delivery status: if a self message was never delivered, it remains 'sent' or 'pending'
             let status: MessageAckStatus = s.status || (isSelf ? 'sent' : 'delivered');
             if (isSelf && status !== 'delivered' && status !== 'read') {
@@ -1237,6 +1293,17 @@ public sendMessage(
       }
     } catch (err) {
       console.warn('[ChatService] Failed to load cached messages:', err);
+    }
+  }
+
+  private isCurrentRoom(roomId: string, generation: number): boolean {
+    return !this.destroyed && this.currentRoomId === roomId && this.roomGeneration === generation;
+  }
+
+  private clearHistoryRetry(): void {
+    if (this.historyRetryTimer !== null) {
+      clearTimeout(this.historyRetryTimer);
+      this.historyRetryTimer = null;
     }
   }
 
@@ -1275,7 +1342,33 @@ public sendMessage(
         await chrome.storage.local.set({ [key]: toSave });
       }
     } catch (err) {
+      // Storage failures lose the user's history silently, which is worse than most errors
+      // because nothing looks wrong until the messages are already gone.
       console.warn('[ChatService] Failed to save messages:', err);
+      NotificationService.getInstance().warn(
+        'Chat history not saved',
+        'Local storage is full or unavailable, so this conversation may not survive a reload.'
+      );
     }
+  }
+
+  public destroy(): void {
+    if (this.destroyed) return;
+    this.saveMessagesDebounced.cancel();
+    if (this.currentRoomId && this.messages.length > 0) void this.saveMessages();
+    this.destroyed = true;
+    this.roomGeneration++;
+    this.clearHistoryRetry();
+    this.clearUnackedQueue();
+    this.networkUnsubscribers.splice(0).forEach((unsubscribe) => {
+      try {
+        unsubscribe();
+      } catch {}
+    });
+    this.listeners.clear();
+    this.unreadListeners.clear();
+    this.toastListeners.clear();
+    this.currentRoomId = '';
+    if (ChatService.instance === this) ChatService.instance = null;
   }
 }

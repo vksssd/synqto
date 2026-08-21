@@ -67,12 +67,12 @@ export class PacketPipeline {
   }
 
   public init(identity: PeerIdentity, roomId: RoomId): void {
+    // Retire every room-scoped buffer before adopting the next room. clear() also blanks
+    // identity/room so a late packet delivered during this handoff is rejected rather than
+    // being interpreted under either session.
+    this.clear();
     this.myIdentity = identity;
     this.currentRoomId = roomId;
-    this.localStreamSeq.clear();
-    this.reliableTransport.clear();
-    this.orderingBuffer.clear();
-    this.reassembler.clear();
   }
 
   public onDeliver(handler: (packet: NetworkPacket) => void): void {
@@ -87,7 +87,11 @@ export class PacketPipeline {
     targetPeerId?: PeerId,
     options?: { isReliable?: boolean; maxAttempts?: number }
   ): Promise<DeliveryReceipt | null> {
-    if (!this.myIdentity) return null;
+    if (
+      !this.myIdentity ||
+      !this.currentRoomId ||
+      packet.roomId !== this.currentRoomId
+    ) return null;
 
     // 1. Assign monotonic sequence counter once per stream (scoped per-destination for unicast)
     if (packet.streamId && typeof packet.seq !== 'number') {
@@ -139,6 +143,15 @@ export class PacketPipeline {
    * Incoming packet processing pipeline.
    */
   private handleIncoming(incomingPacket: NetworkPacket): void {
+    // This is the common ingress boundary for relay and P2P. Reject before ACK handling,
+    // deduplication, chunk reassembly, or ordering so a late packet from a previous room
+    // cannot mutate current transport state or reach an application handler. clear() blanks
+    // currentRoomId on leave, making the pipeline fail closed during room handoff.
+    if (
+      !this.currentRoomId ||
+      incomingPacket.roomId !== this.currentRoomId
+    ) return;
+
     // 1. Process Protocol Control Envelopes
     if (incomingPacket.type === 'transport:ack') {
       this.reliableTransport.handleAck(incomingPacket.payload as AckPayload);
@@ -289,5 +302,7 @@ export class PacketPipeline {
     this.orderingBuffer.clear();
     this.reassembler.clear();
     this.localStreamSeq.clear();
+    this.myIdentity = null;
+    this.currentRoomId = '';
   }
 }

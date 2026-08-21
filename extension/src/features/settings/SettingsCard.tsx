@@ -1,6 +1,6 @@
 // ─── Extension Settings & Diagnostics Card (Clean UI + Day/Night/System Themes) ───
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Server, Trash2, Shield, Info, Check, MessageSquare, Plus, X, Sun, Layout, Palette, Sparkles, Clock, RefreshCw, CheckCircle, AlertTriangle, RotateCcw, Search, Type, Eye, SlidersHorizontal, ChevronDown, ChevronUp, ChevronsUpDown } from 'lucide-react';
 import { SignalingService } from '@/core/network/signaling.service';
 import { getAppVersion, getDisplayVersion } from '@/core/version';
@@ -33,6 +33,7 @@ import {
   FabClickAction,
   PopupContentMode,
 } from './fab-settings.types';
+import { OwnedTimeouts } from '@/shared/owned-timeouts';
 
 export const SettingsCard: React.FC = () => {
   const signaling = SignalingService.getInstance();
@@ -95,6 +96,35 @@ export const SettingsCard: React.FC = () => {
   const [fabSettings, setFabSettings] = useState<FabSettings>(DEFAULT_FAB_SETTINGS);
   const [newDomainInput, setNewDomainInput] = useState('');
   const [savedFab, setSavedFab] = useState(false);
+  const mountedRef = useRef(true);
+  const retryingRef = useRef(false);
+  const retryGenerationRef = useRef(0);
+  const retryUnsubscribeRef = useRef<(() => void) | null>(null);
+  const retryDeadlineRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const serverToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savedUrlTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savedFabTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const timeoutsRef = useRef<OwnedTimeouts | null>(null);
+  if (timeoutsRef.current === null) timeoutsRef.current = new OwnedTimeouts();
+  const timeouts = timeoutsRef.current;
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      retryGenerationRef.current++;
+      retryingRef.current = false;
+      retryUnsubscribeRef.current?.();
+      retryUnsubscribeRef.current = null;
+      timeouts.clearAll();
+      retryDeadlineRef.current = null;
+      serverToastTimerRef.current = null;
+      savedUrlTimerRef.current = null;
+      savedFabTimerRef.current = null;
+      reloadTimerRef.current = null;
+    };
+  }, [timeouts]);
 
   useEffect(() => {
     return signaling.on('connection:change', (data: { connected: boolean }) => {
@@ -120,6 +150,7 @@ export const SettingsCard: React.FC = () => {
   useEffect(() => {
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       chrome.storage.local.get([SYNQTO_FAB_STORAGE_KEY, FAB_STORAGE_KEY], (res) => {
+        if (!mountedRef.current) return;
         const saved = res[SYNQTO_FAB_STORAGE_KEY] || res[FAB_STORAGE_KEY];
         if (saved) {
           setFabSettings({ ...DEFAULT_FAB_SETTINGS, ...saved });
@@ -197,46 +228,71 @@ export const SettingsCard: React.FC = () => {
     { id: 'forest', label: 'Forest Green', icon: '🌲', desc: 'Emerald slate matrix' },
   ];
 
-  const handleRetryServerConnection = () => {
-    if (isRetryingServer) return;
-    const targetUrl = serverUrl.trim();
+  const showServerToast = (toast: { message: string; type: 'success' | 'error' }, durationMs: number) => {
+    if (!mountedRef.current) return;
+    setServerToast(toast);
+    serverToastTimerRef.current = timeouts.replace(serverToastTimerRef.current, () => {
+      serverToastTimerRef.current = null;
+      setServerToast(null);
+    }, durationMs);
+  };
+
+  const beginServerRetry = (targetUrl: string) => {
+    if (retryingRef.current) return;
     if (targetUrl && targetUrl !== signaling.getServerUrl()) {
       signaling.setServerUrl(targetUrl);
     }
+    retryingRef.current = true;
     setIsRetryingServer(true);
+    const generation = ++retryGenerationRef.current;
     signaling.reconnect();
 
     let handled = false;
-    const unsub = signaling.on('connection:change', (data: { connected: boolean }) => {
-      if (data.connected && !handled) {
+    const isCurrent = () => mountedRef.current && generation === retryGenerationRef.current;
+    let unsubscribe = () => {};
+    const releaseSubscription = () => {
+      unsubscribe();
+      if (retryUnsubscribeRef.current === unsubscribe) retryUnsubscribeRef.current = null;
+    };
+    unsubscribe = signaling.on('connection:change', (data: { connected: boolean }) => {
+      if (data.connected && !handled && isCurrent()) {
         handled = true;
+        retryingRef.current = false;
         setIsRetryingServer(false);
-        setServerToast({ message: '⚡ Successfully connected to signaling server! (Mesh Active)', type: 'success' });
-        setTimeout(() => setServerToast(null), 3500);
-        unsub();
+        showServerToast({ message: '⚡ Successfully connected to signaling server! (Mesh Active)', type: 'success' }, 3500);
+        timeouts.cancel(retryDeadlineRef.current);
+        retryDeadlineRef.current = null;
+        releaseSubscription();
       }
     });
+    retryUnsubscribeRef.current = unsubscribe;
 
-    setTimeout(() => {
-      unsub();
-      if (!handled) {
+    retryDeadlineRef.current = timeouts.replace(retryDeadlineRef.current, () => {
+      retryDeadlineRef.current = null;
+      releaseSubscription();
+      if (!handled && isCurrent()) {
+        retryingRef.current = false;
         setIsRetryingServer(false);
         if (signaling.getIsConnected()) {
-          setServerToast({ message: '⚡ Successfully connected to signaling server!', type: 'success' });
+          showServerToast({ message: '⚡ Successfully connected to signaling server!', type: 'success' }, 4000);
         } else {
-          setServerToast({ message: '⚠️ Free hosted server is spinning up. Please click Retry again in 5s.', type: 'error' });
+          showServerToast({ message: '⚠️ Free hosted server is spinning up. Please click Retry again in 5s.', type: 'error' }, 4000);
         }
-        setTimeout(() => setServerToast(null), 4000);
       }
     }, 3000);
   };
+
+  const handleRetryServerConnection = () => beginServerRetry(serverUrl.trim());
 
   const handleSaveAndReconnect = () => {
     if (serverUrl.trim()) {
       signaling.setServerUrl(serverUrl.trim());
       setSavedUrl(true);
-      setTimeout(() => setSavedUrl(false), 2000);
-      handleRetryServerConnection();
+      savedUrlTimerRef.current = timeouts.replace(savedUrlTimerRef.current, () => {
+        savedUrlTimerRef.current = null;
+        setSavedUrl(false);
+      }, 2000);
+      beginServerRetry(serverUrl.trim());
     }
   };
 
@@ -245,8 +301,11 @@ export const SettingsCard: React.FC = () => {
     setServerUrl(defaultUrl);
     signaling.setServerUrl(defaultUrl);
     setSavedUrl(true);
-    setTimeout(() => setSavedUrl(false), 2000);
-    handleRetryServerConnection();
+    savedUrlTimerRef.current = timeouts.replace(savedUrlTimerRef.current, () => {
+      savedUrlTimerRef.current = null;
+      setSavedUrl(false);
+    }, 2000);
+    beginServerRetry(defaultUrl);
   };
 
   const handleUpdateFabMode = (mode: FabDisplayMode) => {
@@ -302,8 +361,12 @@ export const SettingsCard: React.FC = () => {
           [SYNQTO_FAB_STORAGE_KEY]: settings,
         },
         () => {
+          if (!mountedRef.current) return;
           setSavedFab(true);
-          setTimeout(() => setSavedFab(false), 1500);
+          savedFabTimerRef.current = timeouts.replace(savedFabTimerRef.current, () => {
+            savedFabTimerRef.current = null;
+            setSavedFab(false);
+          }, 1500);
         }
       );
     }
@@ -329,8 +392,10 @@ export const SettingsCard: React.FC = () => {
       } else if (typeof localStorage !== 'undefined') {
         localStorage.clear();
       }
+      if (!mountedRef.current) return;
       setClearedData(true);
-      setTimeout(() => {
+      reloadTimerRef.current = timeouts.replace(reloadTimerRef.current, () => {
+        reloadTimerRef.current = null;
         setClearedData(false);
         window.location.reload();
       }, 1000);
@@ -532,7 +597,17 @@ export const SettingsCard: React.FC = () => {
         <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: isThemeExpanded ? '14px' : '0' }}>
           <div
             className="glass-card-header"
+            role="button"
+            tabIndex={0}
+            aria-label="Appearance, themes, and typography settings"
+            aria-expanded={isThemeExpanded}
             onClick={() => toggleCard('theme')}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                toggleCard('theme');
+              }
+            }}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -717,6 +792,7 @@ export const SettingsCard: React.FC = () => {
               <label style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer', fontSize: 'var(--font-size-xs)', color: 'var(--text-secondary)' }}>
                 <input
                   type="checkbox"
+                  aria-label="Enable custom color palette"
                   checked={customTheme.customPaletteEnabled}
                   onChange={(e) => handleToggleCustomOverride(e.target.checked)}
                 />
@@ -1300,6 +1376,7 @@ export const SettingsCard: React.FC = () => {
               </div>
               <input
                 type="checkbox"
+                aria-label="Enable high contrast mode"
                 checked={customTheme.highContrast}
                 onChange={(e) => themeService.setHighContrast(e.target.checked)}
                 style={{ accentColor: 'var(--primary)', width: '16px', height: '16px', cursor: 'pointer' }}
@@ -1389,7 +1466,17 @@ export const SettingsCard: React.FC = () => {
         <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: isWidgetExpanded ? '10px' : '0' }}>
           <div
             className="glass-card-header"
+            role="button"
+            tabIndex={0}
+            aria-label="In-browser floating widget settings"
+            aria-expanded={isWidgetExpanded}
             onClick={() => toggleCard('widget')}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                toggleCard('widget');
+              }
+            }}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -1556,7 +1643,13 @@ export const SettingsCard: React.FC = () => {
                 onChange={(e) => setNewDomainInput(e.target.value)}
                 style={{ fontSize: 'var(--font-size-sm)', padding: '4px 8px', flex: 1 }}
                aria-label="Blocked site domain"/>
-              <button type="submit" className="btn btn-primary btn-sm" disabled={!newDomainInput.trim()}>
+              <button
+                type="submit"
+                className="btn btn-primary btn-sm"
+                aria-label="Add whitelisted domain"
+                title="Add whitelisted domain"
+                disabled={!newDomainInput.trim()}
+              >
                 <Plus size={12} />
               </button>
             </form>
@@ -1619,6 +1712,7 @@ export const SettingsCard: React.FC = () => {
               </div>
               <input
                 type="checkbox"
+                aria-label="Show main Synqto floating button"
                 checked={fabSettings.showMainFab !== false}
                 onChange={(e) => {
                   const updated: FabSettings = { ...fabSettings, showMainFab: e.target.checked };
@@ -1651,6 +1745,7 @@ export const SettingsCard: React.FC = () => {
               </div>
               <input
                 type="checkbox"
+                aria-label="Show focus timer floating button"
                 checked={fabSettings.showTimerFab !== false}
                 onChange={(e) => {
                   const updated: FabSettings = { ...fabSettings, showTimerFab: e.target.checked };
@@ -1683,6 +1778,7 @@ export const SettingsCard: React.FC = () => {
               </div>
               <input
                 type="checkbox"
+                aria-label="Show Code Together dock"
                 checked={Boolean(fabSettings.showCodeTogetherDock)}
                 onChange={(e) => {
                   const updated: FabSettings = { ...fabSettings, showCodeTogetherDock: e.target.checked };
@@ -1827,7 +1923,17 @@ export const SettingsCard: React.FC = () => {
         <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: isTimerExpanded ? '10px' : '0' }}>
           <div
             className="glass-card-header"
+            role="button"
+            tabIndex={0}
+            aria-label="Focus timer and Pomodoro settings"
+            aria-expanded={isTimerExpanded}
             onClick={() => toggleCard('timer')}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                toggleCard('timer');
+              }
+            }}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -1901,6 +2007,7 @@ export const SettingsCard: React.FC = () => {
                 <label style={{ position: 'relative', display: 'inline-block', width: '38px', height: '20px', margin: 0, cursor: 'pointer' }}>
                   <input
                     type="checkbox"
+                    aria-label="Enable Pomodoro and timer bar"
                     checked={timerConfig.enabled}
                     onChange={(e) => timerService.setEnabled(e.target.checked)}
                     style={{ opacity: 0, width: 0, height: 0 }}
@@ -1946,7 +2053,7 @@ export const SettingsCard: React.FC = () => {
                         className="input-glass"
                         style={{ width: '100%', fontSize: 'var(--font-size-sm)', padding: '4px 6px' }}
                         value={timerConfig.workDurationMin}
-                        onChange={(e) => timerService.updateConfig({ workDurationMin: Math.max(1, parseInt(e.target.value) || 25) })}
+                        onChange={(e) => timerService.updateConfig({ workDurationMin: Math.min(120, Math.max(1, parseInt(e.target.value) || 25)) })}
                       />
                     </div>
                     <div>
@@ -1958,7 +2065,7 @@ export const SettingsCard: React.FC = () => {
                         className="input-glass"
                         style={{ width: '100%', fontSize: 'var(--font-size-sm)', padding: '4px 6px' }}
                         value={timerConfig.shortBreakMin}
-                        onChange={(e) => timerService.updateConfig({ shortBreakMin: Math.max(1, parseInt(e.target.value) || 5) })}
+                        onChange={(e) => timerService.updateConfig({ shortBreakMin: Math.min(60, Math.max(1, parseInt(e.target.value) || 5)) })}
                       />
                     </div>
                     <div>
@@ -1970,7 +2077,7 @@ export const SettingsCard: React.FC = () => {
                         className="input-glass"
                         style={{ width: '100%', fontSize: 'var(--font-size-sm)', padding: '4px 6px' }}
                         value={timerConfig.longBreakMin}
-                        onChange={(e) => timerService.updateConfig({ longBreakMin: Math.max(1, parseInt(e.target.value) || 15) })}
+                        onChange={(e) => timerService.updateConfig({ longBreakMin: Math.min(60, Math.max(1, parseInt(e.target.value) || 15)) })}
                       />
                     </div>
                   </div>
@@ -1979,6 +2086,7 @@ export const SettingsCard: React.FC = () => {
                     <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-secondary)' }}>🔔 Audio chime on session complete</span>
                     <input
                       type="checkbox"
+                      aria-label="Play audio chime when session completes"
                       checked={timerConfig.soundAlerts}
                       onChange={(e) => timerService.updateConfig({ soundAlerts: e.target.checked })}
                       style={{ accentColor: 'var(--primary)' }}
@@ -1996,7 +2104,17 @@ export const SettingsCard: React.FC = () => {
         <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: isServerExpanded ? '10px' : '0' }}>
           <div
             className="glass-card-header"
+            role="button"
+            tabIndex={0}
+            aria-label="Network server settings"
+            aria-expanded={isServerExpanded}
             onClick={() => toggleCard('server')}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                toggleCard('server');
+              }
+            }}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -2068,9 +2186,16 @@ export const SettingsCard: React.FC = () => {
                     onChange={(e) => setServerUrl(e.target.value)}
                     placeholder="wss://synqto-server.onrender.com/ws/"
                     style={{ flex: 1, fontSize: 'var(--font-size-sm)', padding: '6px 10px' }}
-                   aria-label="wss://synqto-server.onrender.com/ws/"/>
-                  <button className="btn btn-primary btn-sm" onClick={handleSaveAndReconnect} title="Save URL &amp; Connect">
-                    {savedUrl ? <Check size={13} /> : 'Save &amp; Connect'}
+                    aria-label="Signaling server WebSocket URL"
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={handleSaveAndReconnect}
+                    title="Save URL & Connect"
+                    aria-label="Save signaling server URL and connect"
+                  >
+                    {savedUrl ? <Check size={13} aria-hidden="true" /> : 'Save & Connect'}
                   </button>
                 </div>
 
@@ -2141,7 +2266,17 @@ export const SettingsCard: React.FC = () => {
         <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: isPrivacyExpanded ? '10px' : '0' }}>
           <div
             className="glass-card-header"
+            role="button"
+            tabIndex={0}
+            aria-label="Privacy and data storage settings"
+            aria-expanded={isPrivacyExpanded}
             onClick={() => toggleCard('privacy')}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                toggleCard('privacy');
+              }
+            }}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -2206,7 +2341,17 @@ export const SettingsCard: React.FC = () => {
         <div className="glass-card" style={{ background: 'var(--bg-surface)', display: 'flex', flexDirection: 'column', gap: isAboutExpanded ? '8px' : '0' }}>
           <div
             className="glass-card-header"
+            role="button"
+            tabIndex={0}
+            aria-label="About Synqto"
+            aria-expanded={isAboutExpanded}
             onClick={() => toggleCard('about')}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                toggleCard('about');
+              }
+            }}
             style={{
               display: 'flex',
               alignItems: 'center',

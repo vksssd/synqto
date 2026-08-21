@@ -43,7 +43,7 @@ export const DEFAULT_LINK_MONITOR_CONFIG: LinkMonitorConfig = {
 
 export class LinkMonitor {
   private health: Map<string, LinkHealth> = new Map();
-  private timer: any = null;
+  private timer: ReturnType<typeof setInterval> | null = null;
   private config: LinkMonitorConfig;
 
   /**
@@ -71,7 +71,7 @@ export class LinkMonitor {
   }
 
   public stop(): void {
-    if (this.timer) {
+    if (this.timer !== null) {
       clearInterval(this.timer);
       this.timer = null;
     }

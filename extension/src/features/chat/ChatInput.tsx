@@ -1,9 +1,10 @@
 // ─── WhatsApp-style Chat Composer (Mentions Autocomplete, Image Paste, Screenshot, Code, Poll, Quiz, Files) ───
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Send, X, EyeOff, Plus, Camera, Code, BarChart2, HelpCircle, Paperclip, Users, Radio, Volume2, Image as ImageIcon } from 'lucide-react';
 import { ChatMessageItem } from './chat.service';
 import { PeerIdentity } from '@/core/network/packet';
+import { OwnedTimeouts } from '@/shared/owned-timeouts';
 
 interface ChatInputProps {
   onSendMessage: (text: string, replyTo?: { id: string; preview: string }) => void;
@@ -58,6 +59,36 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   const inputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const docInputRef = useRef<HTMLInputElement>(null);
+  const mountedRef = useRef(true);
+  const readersRef = useRef<Set<FileReader>>(new Set());
+  const timeoutsRef = useRef<OwnedTimeouts | null>(null);
+  if (timeoutsRef.current === null) timeoutsRef.current = new OwnedTimeouts();
+  const timeouts = timeoutsRef.current;
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      timeouts.clearAll();
+      for (const reader of readersRef.current) reader.abort();
+      readersRef.current.clear();
+    };
+  }, [timeouts]);
+
+  const stageImageFile = (file: Blob) => {
+    const reader = new FileReader();
+    readersRef.current.add(reader);
+    const release = () => readersRef.current.delete(reader);
+    reader.onload = (event) => {
+      release();
+      if (mountedRef.current && event.target?.result) {
+        setStagedImage(event.target.result as string);
+      }
+    };
+    reader.onerror = release;
+    reader.onabort = release;
+    reader.readAsDataURL(file);
+  };
 
   // Handle @ mention detection
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -86,7 +117,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
       const newText = text.slice(0, lastAtIndex) + `@${mentionTag} ` + text.slice(cursorPos);
       setText(newText);
       setShowMentionPopup(false);
-      setTimeout(() => {
+      timeouts.schedule(() => {
         inputRef.current?.focus();
       }, 50);
     }
@@ -99,13 +130,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
       if (items[i].type.indexOf('image') !== -1) {
         const blob = items[i].getAsFile();
         if (blob) {
-          const reader = new FileReader();
-          reader.onload = (event) => {
-            if (event.target?.result) {
-              setStagedImage(event.target.result as string);
-            }
-          };
-          reader.readAsDataURL(blob);
+          stageImageFile(blob);
           e.preventDefault();
           return;
         }
@@ -117,13 +142,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        if (event.target?.result) {
-          setStagedImage(event.target.result as string);
-        }
-      };
-      reader.readAsDataURL(file);
+      stageImageFile(file);
     }
     e.target.value = '';
   };
@@ -691,6 +710,7 @@ const handleSend = () => {
           type="button"
           className="btn btn-secondary btn-icon"
           onClick={() => setShowAttachMenu(!showAttachMenu)}
+          aria-label="Attach image, screenshot, code, poll, quiz, or file"
           title="Attach Image, Screenshot, Code, Poll, Quiz, or File"
           style={{ width: '32px', height: '32px', flexShrink: 0 }}
         >
@@ -724,8 +744,11 @@ const handleSend = () => {
 
         {/* Send Button */}
         <button
+          type="button"
           className="btn btn-primary btn-icon"
           onClick={handleSend}
+          aria-label="Send message"
+          title="Send message"
           disabled={!text.trim() && !stagedImage}
           style={{ flexShrink: 0, width: '32px', height: '32px' }}
         >

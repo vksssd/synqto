@@ -11,20 +11,22 @@ export class GamificationService {
   private static instance: GamificationService | null = null;
 
   private stats: StreakStats = {
-    currentStreak: 1,
-    longestStreak: 1,
-    totalDaysActive: 1,
-    totalProblemsSolved: 1,
-    totalFocusMinutes: 15,
-    lastActiveDate: this.getTodayDateString(),
+    currentStreak: 0,
+    longestStreak: 0,
+    totalDaysActive: 0,
+    totalProblemsSolved: 0,
+    totalFocusMinutes: 0,
+    lastActiveDate: '',
     activityMap: {},
   };
 
   private badges: Record<BadgeId, Badge> = this.getDefaultBadges();
   private listeners: Set<(stats: StreakStats, badges: Badge[]) => void> = new Set();
   private initialized = false;
+  private pendingActions: Array<() => void> = [];
   /** Handle for the focus heartbeat, so it can be stopped and cannot be started twice. */
   private focusHeartbeat: ReturnType<typeof setInterval> | null = null;
+  private destroyed = false;
 
   private constructor() {
     this.loadFromStorage();
@@ -160,6 +162,7 @@ export class GamificationService {
       chrome.storage.local.get(
         [STORAGE_KEY_STATS, LEGACY_STORAGE_KEY_STATS, STORAGE_KEY_BADGES, LEGACY_STORAGE_KEY_BADGES],
         (res) => {
+          if (this.destroyed) return;
           const stats = res[STORAGE_KEY_STATS] || res[LEGACY_STORAGE_KEY_STATS];
           if (stats) {
             this.stats = { ...this.stats, ...stats };
@@ -181,15 +184,13 @@ export class GamificationService {
           // opened" rather than days studied. It now advances only from real signals:
           // recordProblemVisit, recordMessage and focus time.
           this.evaluateBadges();
-          this.initialized = true;
-          this.emitChange();
+          this.completeInitialization();
         }
       );
     } else {
       this.initEmptyStats();
       this.evaluateBadges();
-      this.initialized = true;
-      this.emitChange();
+      this.completeInitialization();
     }
   }
 
@@ -211,9 +212,11 @@ export class GamificationService {
     this.stats.totalProblemsSolved = 0;
     this.stats.totalFocusMinutes = 0;
     this.stats.totalDaysActive = 0;
+    this.stats.lastActiveDate = '';
   }
 
   private saveToStorage(): void {
+    if (this.destroyed) return;
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       chrome.storage.local.set({
         [STORAGE_KEY_STATS]: this.stats,
@@ -278,6 +281,7 @@ export class GamificationService {
    * Evaluates streak continuation for today.
    */
   public touchStreak(): void {
+    if (this.deferUntilInitialized(() => this.touchStreak())) return;
     const today = this.getTodayDateString();
     const yesterday = this.getYesterdayDateString();
 
@@ -302,6 +306,7 @@ export class GamificationService {
       // Either a gap of 2+ days, or the streak was already expired to 0 at load.
       // Today becomes day one of a fresh streak.
       this.stats.currentStreak = 1;
+      this.stats.longestStreak = Math.max(this.stats.longestStreak, 1);
       this.stats.totalDaysActive += 1;
     }
 
@@ -315,6 +320,7 @@ export class GamificationService {
    * Records solving / visiting a problem.
    */
   public recordProblemVisit(problemSlug: string): void {
+    if (this.deferUntilInitialized(() => this.recordProblemVisit(problemSlug))) return;
     this.touchStreak();
 
     const entry = this.ensureToday();
@@ -331,6 +337,7 @@ export class GamificationService {
    * Records sending a collaborative chat message.
    */
   public recordMessageSent(): void {
+    if (this.deferUntilInitialized(() => this.recordMessageSent())) return;
     this.touchStreak();
     this.ensureToday().messagesSent += 1;
     this.saveToStorage();
@@ -340,6 +347,7 @@ export class GamificationService {
    * Unlocks milestone badges based on statistics.
    */
   public unlockCustomBadge(badgeId: BadgeId): void {
+    if (this.deferUntilInitialized(() => this.unlockCustomBadge(badgeId))) return;
     if (this.badges[badgeId] && !this.badges[badgeId].unlockedAt) {
       this.badges[badgeId].unlockedAt = Date.now();
       this.badges[badgeId].progress.current = this.badges[badgeId].progress.max;
@@ -381,9 +389,10 @@ export class GamificationService {
     // Guarded against double-start. The handle was previously discarded, so there was no way
     // to stop the timer and no way to notice a second one running: two heartbeats would have
     // counted every minute twice, forever, with no symptom other than implausible stats.
-    if (this.focusHeartbeat !== null) return;
+    if (this.destroyed || this.focusHeartbeat !== null) return;
 
     this.focusHeartbeat = setInterval(() => {
+      if (this.destroyed || !this.initialized) return;
       // Only credit a minute the user could plausibly have spent studying.
       //
       // This used to increment unconditionally, which meant "focus minutes" measured how long
@@ -414,6 +423,32 @@ export class GamificationService {
     }
   }
 
+  private deferUntilInitialized(action: () => void): boolean {
+    if (this.destroyed) return true;
+    if (this.initialized) return false;
+    // Storage initialization is normally a single event-loop turn, but keep this bounded if
+    // an extension API callback is delayed or never delivered.
+    if (this.pendingActions.length < 100) this.pendingActions.push(action);
+    return true;
+  }
+
+  private completeInitialization(): void {
+    if (this.destroyed || this.initialized) return;
+    this.initialized = true;
+    const pending = this.pendingActions.splice(0);
+    if (pending.length === 0) {
+      this.emitChange();
+      return;
+    }
+    pending.forEach((action) => {
+      try {
+        action();
+      } catch (err) {
+        console.error('[GamificationService] deferred action failed:', err);
+      }
+    });
+  }
+
   public getStats(): StreakStats {
     return this.stats;
   }
@@ -423,6 +458,7 @@ export class GamificationService {
   }
 
   public onChange(listener: (stats: StreakStats, badges: Badge[]) => void): () => void {
+    if (this.destroyed) return () => {};
     this.listeners.add(listener);
     listener(this.stats, this.getBadges());
     return () => {
@@ -431,7 +467,17 @@ export class GamificationService {
   }
 
   private emitChange(): void {
+    if (this.destroyed) return;
     const badgeList = this.getBadges();
     this.listeners.forEach((fn) => fn(this.stats, badgeList));
+  }
+
+  public destroy(): void {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    this.stopFocusHeartbeat();
+    this.pendingActions = [];
+    this.listeners.clear();
+    if (GamificationService.instance === this) GamificationService.instance = null;
   }
 }

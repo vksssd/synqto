@@ -22,9 +22,12 @@ export class DiscoveryService {
   private currentProblemTitle = '';
   private currentProblemUrl = '';
   private sessionStartedAt = Date.now();
+  private currentRoomId = '';
+  private destroyed = false;
 
   private heartbeatTimer: any = null;
   private pruneTimer: any = null;
+  private networkUnsubscribers: Array<() => void> = [];
   private listeners: Set<(peers: OnlinePeer[]) => void> = new Set();
   private alertListeners: Set<(alert: { from: PeerIdentity; type: 'wave' | 'poke' | 'problem_mention'; text: string }) => void> = new Set();
 
@@ -51,54 +54,83 @@ export class DiscoveryService {
 
   private setupListeners() {
     // 1. Presence Join
-    this.network.on<PresencePayload>('presence:join', (payload, packet) => {
-      this.handlePeerActivity(packet.from, payload);
-      // Respond directly with targeted unicast ping to the newly joined peer to prevent O(N^2) broadcast storm
-      this.sendPingTo(packet.from.peerId);
-    });
+    this.networkUnsubscribers.push(
+      this.network.on<PresencePayload>('presence:join', (payload, packet) => {
+        this.handlePeerActivity(packet.from, payload);
+        // Respond directly with targeted unicast ping to the newly joined peer to prevent O(N^2) broadcast storm
+        this.sendPingTo(packet.from.peerId);
+      })
+    );
 
     // 2. Presence Ping / Heartbeat
-    this.network.on<PresencePayload>('presence:ping', (payload, packet) => {
-      this.handlePeerActivity(packet.from, payload);
-    });
+    this.networkUnsubscribers.push(
+      this.network.on<PresencePayload>('presence:ping', (payload, packet) => {
+        this.handlePeerActivity(packet.from, payload);
+      })
+    );
 
     // 3. Presence Update
-    this.network.on<PresencePayload>('presence:update', (payload, packet) => {
-      this.handlePeerActivity(packet.from, payload);
-    });
+    this.networkUnsubscribers.push(
+      this.network.on<PresencePayload>('presence:update', (payload, packet) => {
+        this.handlePeerActivity(packet.from, payload);
+      })
+    );
 
     // 4. Presence Leave
-    this.network.on('presence:leave', (_, packet) => {
-      this.onlinePeers.delete(packet.from.peerId);
-      this.emitChange();
-    });
+    this.networkUnsubscribers.push(
+      this.network.on('presence:leave', (_, packet) => {
+        this.onlinePeers.delete(packet.from.peerId);
+        this.emitChange();
+      })
+    );
 
     // 5. Interactive alerts (wave, poke, problem share)
-    this.network.on<{ text?: string }>('community:wave', (payload, packet) => {
-      this.emitAlert({
-        from: packet.from,
-        type: 'wave',
-        text: payload?.text || `${packet.from.nickname} waved at you! 👋`,
-      });
-    });
+    this.networkUnsubscribers.push(
+      this.network.on<{ text?: string }>('community:wave', (payload, packet) => {
+        this.emitAlert({
+          from: packet.from,
+          type: 'wave',
+          text: payload?.text || `${packet.from.nickname} waved at you! 👋`,
+        });
+      })
+    );
 
     // 6. Interactive poke
-    this.network.on<{ text?: string }>('community:poke', (payload, packet) => {
-      this.emitAlert({
-        from: packet.from,
-        type: 'poke',
-        text: payload?.text || `${packet.from.nickname} poked you! 👉`,
-      });
-    });
+    this.networkUnsubscribers.push(
+      this.network.on<{ text?: string }>('community:poke', (payload, packet) => {
+        this.emitAlert({
+          from: packet.from,
+          type: 'poke',
+          text: payload?.text || `${packet.from.nickname} poked you! 👉`,
+        });
+      })
+    );
 
     // 7. Problem mention
-    this.network.on<{ title: string; url: string }>('community:problem_mention', (payload, packet) => {
-      this.emitAlert({
-        from: packet.from,
-        type: 'problem_mention',
-        text: `${packet.from.nickname} shared: ${payload?.title || 'a problem'}`,
-      });
-    });
+    this.networkUnsubscribers.push(
+      this.network.on<{ title: string; url: string }>(
+        'community:problem_mention',
+        (payload, packet) => {
+          this.emitAlert({
+            from: packet.from,
+            type: 'problem_mention',
+            text: `${packet.from.nickname} shared: ${payload?.title || 'a problem'}`,
+          });
+        }
+      )
+    );
+  }
+
+  /** Clears presence that belonged to the previous room before rendering the new roster. */
+  public resetForRoom(roomId: string): void {
+    const nextRoomId = roomId || '';
+    if (nextRoomId === this.currentRoomId) return;
+    this.currentRoomId = nextRoomId;
+    this.sessionStartedAt = Date.now();
+    const hadPeers = this.onlinePeers.size > 0;
+    this.onlinePeers.clear();
+    if (hadPeers) this.emitChange();
+    if (nextRoomId) this.sendPing();
   }
 
   private handlePeerActivity(from: PeerIdentity, payload: PresencePayload) {
@@ -206,7 +238,9 @@ export class DiscoveryService {
     // Self-rescheduling rather than setInterval: the period depends on the current peer
     // count, which changes as people join and leave.
     const scheduleHeartbeat = () => {
+      if (this.destroyed) return;
       this.heartbeatTimer = setTimeout(() => {
+        if (this.destroyed) return;
         this.sendPing();
         scheduleHeartbeat();
       }, this.heartbeatIntervalMs());
@@ -261,12 +295,19 @@ export class DiscoveryService {
   }
 
   public destroy() {
+    if (this.destroyed) return;
+    this.destroyed = true;
     // heartbeatTimer is a self-rescheduling setTimeout, not an interval.
-    if (this.heartbeatTimer) clearTimeout(this.heartbeatTimer);
-    if (this.pruneTimer) clearInterval(this.pruneTimer);
+    if (this.heartbeatTimer !== null) clearTimeout(this.heartbeatTimer);
+    if (this.pruneTimer !== null) clearInterval(this.pruneTimer);
     this.heartbeatTimer = null;
     this.pruneTimer = null;
     this.network.broadcast('presence:leave', {});
+    this.networkUnsubscribers.forEach((unsubscribe) => unsubscribe());
+    this.networkUnsubscribers = [];
     this.onlinePeers.clear();
+    this.listeners.clear();
+    this.alertListeners.clear();
+    DiscoveryService.instance = null;
   }
 }

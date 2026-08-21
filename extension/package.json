@@ -6,25 +6,28 @@
   "scripts": {
     "dev": "vite build --watch",
     "build": "node scripts/check-versions.mjs && vite build",
+    "typecheck": "tsc --noEmit",
     "check:versions": "node scripts/check-versions.mjs",
-    "test": "npx tsx scripts/test-topology.mjs",
-    "test:soak": "npx tsx scripts/run-soak-simulation.mjs",
+    "test": "tsx scripts/test-topology.mjs",
+    "test:soak": "tsx scripts/run-soak-simulation.mjs",
     "package": "node scripts/package.mjs",
     "clean": "rimraf dist",
     "preview:ui": "vite --host 127.0.0.1",
-    "test:stress": "npx tsx scripts/stress-mesh.mjs",
-    "test:routing": "npx tsx scripts/stress-routing.mjs",
-    "test:security": "npx tsx scripts/stress-security.mjs",
-    "test:logic": "npx tsx scripts/stress-logic.mjs",
-    "test:icons": "npx tsx scripts/stress-icons.mjs",
-    "test:all": "npm run check:versions && npm run test && npm run test:security && npm run test:logic && npm run test:icons && npm run test:transport && npm run test:stress && npm run test:routing",
-    "test:transport": "npx tsx scripts/stress-transport.mjs"
+    "test:stress": "tsx scripts/stress-mesh.mjs",
+    "test:routing": "tsx scripts/stress-routing.mjs",
+    "test:security": "tsx scripts/stress-security.mjs",
+    "test:logic": "tsx scripts/stress-logic.mjs",
+    "test:icons": "tsx scripts/stress-icons.mjs",
+    "test:signaling": "tsx scripts/test-signaling-lifecycle.mjs",
+    "test:lifecycle": "tsx scripts/test-content-lifecycle.mjs",
+    "test:all": "npm run check:versions && npm run typecheck && npm run test && npm run test:signaling && npm run test:security && npm run test:logic && npm run test:icons && npm run test:lifecycle && npm run test:transport && npm run test:stress && npm run test:routing",
+    "test:transport": "tsx scripts/stress-transport.mjs"
   },
   "dependencies": {
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
     "clsx": "^2.1.1",
-    "lucide-react": "^0.460.0"
+    "lucide-react": "^0.460.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.287",
@@ -32,6 +35,7 @@
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "rimraf": "^6.0.1",
+    "tsx": "^4.20.6",
     "typescript": "^5.6.3",
     "vite": "^6.0.0"
   }

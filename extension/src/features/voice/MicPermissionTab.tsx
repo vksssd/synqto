@@ -1,11 +1,17 @@
 // ─── Microphone Permission Unlocker for Chrome Extensions ───
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Mic, CheckCircle2, AlertCircle, Sparkles } from 'lucide-react';
+import { OwnedTimeouts } from '@/shared/owned-timeouts';
 
 export const MicPermissionTab: React.FC = () => {
   const [status, setStatus] = useState<'idle' | 'requesting' | 'granted' | 'denied'>('idle');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const mountedRef = useRef(true);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const timeoutsRef = useRef<OwnedTimeouts | null>(null);
+  if (timeoutsRef.current === null) timeoutsRef.current = new OwnedTimeouts();
+  const timeouts = timeoutsRef.current;
 
   const handleRequestMic = async () => {
     setStatus('requesting');
@@ -15,28 +21,37 @@ export const MicPermissionTab: React.FC = () => {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       // Stop stream immediately since we only needed the permission grant
       stream.getTracks().forEach((track) => track.stop());
+      if (!mountedRef.current) return;
 
       setStatus('granted');
       try {
         localStorage.setItem('synqto_mic_granted', 'true');
       } catch (e) {}
 
-      setTimeout(() => {
+      closeTimerRef.current = timeouts.replace(closeTimerRef.current, () => {
+        closeTimerRef.current = null;
         if (window.opener || window.history.length > 1) {
           window.close();
         }
       }, 1500);
     } catch (err: any) {
       console.error('[MicPermission] Permission request failed:', err);
+      if (!mountedRef.current) return;
       setStatus('denied');
       setErrorMsg(err?.message || 'Permission was dismissed or denied in the browser prompt.');
     }
   };
 
   useEffect(() => {
+    mountedRef.current = true;
     // Automatically trigger permission prompt on page load
-    handleRequestMic();
-  }, []);
+    void handleRequestMic();
+    return () => {
+      mountedRef.current = false;
+      timeouts.clearAll();
+      closeTimerRef.current = null;
+    };
+  }, [timeouts]);
 
   return (
     <div

@@ -1,7 +1,9 @@
 // ─── Floating & Header Focus Timer & Pomodoro Bar Component ───
 
 import React, { useState, useEffect } from 'react';
+import { formatTimerTime } from './timer-format';
 import { TimerService } from './timer.service';
+import { parseTimerInput } from './timer-state';
 import { TimerState, PomodoroConfig, TimerMode } from './timer.types';
 import { Play, Pause, RotateCcw } from 'lucide-react';
 
@@ -10,6 +12,9 @@ export const FocusTimerBar: React.FC = () => {
   const [state, setState] = useState<TimerState>(timerService.getState());
   const [config, setConfig] = useState<PomodoroConfig>(timerService.getConfig());
   const [isExpanded, setIsExpanded] = useState(false);
+  const [isEditingTime, setIsEditingTime] = useState(false);
+  const [timeInput, setTimeInput] = useState('');
+  const [timeError, setTimeError] = useState('');
 
   useEffect(() => {
     return timerService.onChange((s, c) => {
@@ -22,11 +27,6 @@ export const FocusTimerBar: React.FC = () => {
     return null; // By default not visible unless toggled on in settings
   }
 
-  const formatTime = (totalSec: number) => {
-    const mins = Math.floor(totalSec / 60);
-    const secs = totalSec % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
 
   const getProgressPct = () => {
     if (state.mode === 'stopwatch' || state.targetDurationSec === 0) return 100;
@@ -50,6 +50,33 @@ export const FocusTimerBar: React.FC = () => {
   };
 
   const currentColor = getModeColor(state.mode);
+
+  const beginTimeEdit = () => {
+    setTimeInput(formatTimerTime(state.timeLeftSec));
+    setTimeError('');
+    setIsEditingTime(true);
+  };
+
+  const commitTimeEdit = () => {
+    const parsed = parseTimerInput(timeInput);
+    if (!parsed.ok) {
+      setTimeError(parsed.error);
+      return false;
+    }
+    const result = timerService.setTime(parsed.seconds);
+    if (!result.ok) {
+      setTimeError(result.error);
+      return false;
+    }
+    setTimeError('');
+    setIsEditingTime(false);
+    return true;
+  };
+
+  const cancelTimeEdit = () => {
+    setTimeError('');
+    setIsEditingTime(false);
+  };
 
   return (
     <div
@@ -87,18 +114,72 @@ export const FocusTimerBar: React.FC = () => {
           </button>
 
           <div>
-            <div
-              style={{
-                fontFamily: 'var(--font-mono, monospace)',
-                fontSize: '18px',
-                fontWeight: 700,
-                color: 'var(--text-primary)',
-                letterSpacing: '-0.5px',
-                lineHeight: 1.1,
-              }}
-            >
-              {formatTime(state.timeLeftSec)}
-            </div>
+            {isEditingTime ? (
+              <input
+                autoFocus
+                aria-label="Timer value"
+                aria-invalid={Boolean(timeError)}
+                aria-describedby={timeError ? 'synqto-timer-edit-error' : undefined}
+                value={timeInput}
+                onChange={(event) => {
+                  setTimeInput(event.target.value);
+                  setTimeError('');
+                }}
+                onBlur={commitTimeEdit}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    commitTimeEdit();
+                  } else if (event.key === 'Escape') {
+                    event.preventDefault();
+                    cancelTimeEdit();
+                  }
+                }}
+                title="Enter minutes, MM:SS, or H:MM:SS"
+                style={{
+                  width: '86px',
+                  boxSizing: 'border-box',
+                  border: `1px solid ${timeError ? '#ef4444' : currentColor}`,
+                  borderRadius: '5px',
+                  background: 'rgba(0, 0, 0, 0.25)',
+                  padding: '1px 4px',
+                  fontFamily: 'var(--font-mono, monospace)',
+                  fontSize: '18px',
+                  fontWeight: 700,
+                  color: 'var(--text-primary)',
+                  letterSpacing: '-0.5px',
+                  lineHeight: 1.1,
+                  outline: 'none',
+                }}
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={beginTimeEdit}
+                aria-label={`Edit timer value, currently ${formatTimerTime(state.timeLeftSec)}`}
+                title="Edit timer value"
+                style={{
+                  display: 'block',
+                  border: 'none',
+                  background: 'transparent',
+                  padding: 0,
+                  fontFamily: 'var(--font-mono, monospace)',
+                  fontSize: '18px',
+                  fontWeight: 700,
+                  color: 'var(--text-primary)',
+                  letterSpacing: '-0.5px',
+                  lineHeight: 1.1,
+                  cursor: 'text',
+                }}
+              >
+                {formatTimerTime(state.timeLeftSec)}
+              </button>
+            )}
+            {timeError && (
+              <div id="synqto-timer-edit-error" role="alert" style={{ maxWidth: '150px', color: '#ef4444', fontSize: '10px', lineHeight: 1.15 }}>
+                {timeError}
+              </div>
+            )}
             <div style={{ fontSize: 'var(--font-size-xs)', color: currentColor, fontWeight: 600, textTransform: 'capitalize' }}>
               {state.mode === 'pomodoro'
                 ? '🍅 Focus Session'
@@ -139,8 +220,10 @@ export const FocusTimerBar: React.FC = () => {
           </button>
 
           <button
+            type="button"
             className="btn btn-ghost btn-sm"
             onClick={() => timerService.reset()}
+            aria-label="Reset timer"
             title="Reset timer"
             style={{ padding: '4px' }}
           >
@@ -148,8 +231,11 @@ export const FocusTimerBar: React.FC = () => {
           </button>
 
           <button
+            type="button"
             className="btn btn-ghost btn-sm"
             onClick={() => setIsExpanded(!isExpanded)}
+            aria-label={isExpanded ? 'Hide timer modes' : 'Show timer modes'}
+            aria-expanded={isExpanded}
             title="Toggle timer modes"
             style={{ padding: '4px 6px', fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)' }}
           >

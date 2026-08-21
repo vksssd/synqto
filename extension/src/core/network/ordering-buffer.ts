@@ -16,7 +16,7 @@ export function toStreamKey(streamId: string, senderPeerId: PeerId): string {
 interface StreamState {
   expectedSeq: number;
   holdingQueue: Map<number, NetworkPacket>;
-  gapTimer: any;
+  gapTimer: ReturnType<typeof setTimeout> | null;
   gapDetectedAt: number;
   lastDeliveredAt: number;
 }
@@ -70,7 +70,7 @@ export class OrderingBuffer {
 
     // 1. In-order packet arrival
     if (packet.seq === state.expectedSeq) {
-      if (state.gapTimer) {
+      if (state.gapTimer !== null) {
         clearTimeout(state.gapTimer);
         state.gapTimer = null;
       }
@@ -128,7 +128,7 @@ export class OrderingBuffer {
 
     state.holdingQueue.set(packet.seq, packet);
 
-    if (!state.gapTimer) {
+    if (state.gapTimer === null) {
       state.gapDetectedAt = typeof packet.timestamp === 'number' ? packet.timestamp : Date.now();
       const missingStart = state.expectedSeq;
       const missingEnd = Math.min(packet.seq - 1, state.expectedSeq + this.MAX_GAP_REQUEST);
@@ -191,7 +191,7 @@ export class OrderingBuffer {
     this.streams.forEach((state) => {
       if (state.holdingQueue.size > 0 && state.gapDetectedAt > 0) {
         if (simulatedNow - state.gapDetectedAt >= this.GAP_TIMEOUT_MS) {
-          if (state.gapTimer) {
+          if (state.gapTimer !== null) {
             clearTimeout(state.gapTimer);
             state.gapTimer = null;
           }
@@ -228,7 +228,7 @@ export class OrderingBuffer {
 
   public clear(): void {
     this.streams.forEach((state) => {
-      if (state.gapTimer) clearTimeout(state.gapTimer);
+      if (state.gapTimer !== null) clearTimeout(state.gapTimer);
     });
     this.streams.clear();
   }

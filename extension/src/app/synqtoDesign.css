@@ -16,6 +16,14 @@
    1. Foundation tokens
    ───────────────────────────────────────────────────────────────────── */
 :root {
+  /* Control sizing scale. Every interactive target derives from --sq-ctl, so density can be
+     retuned from one value instead of hunting per-component px. Mirrors --nb-ctl in the
+     content widget's tool-icons.ts so the two surfaces stay dimensionally consistent. */
+  --sq-ctl: 34px;
+  --sq-ico: calc(var(--sq-ctl) * 0.5);
+  --sq-gap: calc(var(--sq-ctl) * 0.18);
+  --sq-pad: calc(var(--sq-ctl) * 0.24);
+
   --font-size-base: 14px;
   --font-size-xs: 11.5px;
   --font-size-sm: 12.5px;
@@ -1335,8 +1343,60 @@ button,
 @media (max-width: 420px) {
   .main-content { padding: 8px; gap: 8px; }
   .bottom-nav { padding-inline: 4px; }
-  .nav-tab { min-width: 48px; padding-inline: 7px; font-size: 9.5px; }
+  .nav-tab { min-width: 48px; padding-inline: 7px; }
   .btn { font-size: 11.5px; }
+}
+
+/* ── Icon-first responsive strategy ───────────────────────────────────────────
+   The side panel used to respond to narrowing by SHRINKING TEXT — nav labels fell to
+   9.5px, below the 11px legibility floor and well under the ~12px minimum most
+   accessibility guidance sets for UI text. Shrinking type to fit is the wrong lever: it
+   degrades the thing the user has to read in order to preserve a label that has already
+   stopped being readable.
+
+   Icon-first drops the LABEL instead and keeps the glyph at full size. The icon stays
+   legible, the target stays the same, and the accessible name moves to aria-label — so
+   the control loses visible text but nothing else.
+
+   Container queries, not media queries, wherever a component could appear inside a
+   narrower column than the panel itself: a toolbar in a split view must collapse on ITS
+   width, not the panel's. The panel-level media query below remains as the fallback for
+   the nav bar, which always spans the full panel. */
+
+.nav-tab,
+.sq-toolbar,
+.sq-header-actions {
+  container-type: inline-size;
+}
+
+/* Nav labels collapse before they would need to shrink.
+   360px is where four labelled tabs stop fitting at full type size. */
+@media (max-width: 360px) {
+  .nav-tab .nav-tab-label { display: none; }
+  .nav-tab { gap: 0; justify-content: center; }
+}
+
+/* Same rule expressed per-component, for toolbars that can be narrower than the panel. */
+@container (max-width: 300px) {
+  .sq-btn-label { display: none; }
+  .sq-btn { gap: 0; justify-content: center; }
+}
+
+/* An icon-only control must never fall below a comfortable pointer target, whatever the
+   available width. Derived from the shared control scale rather than a literal px value. */
+.nav-tab,
+.sq-btn {
+  min-height: var(--sq-ctl, 34px);
+  min-width: var(--sq-ctl, 34px);
+}
+
+/* Type never goes below the legibility floor, at any width. This is the guard that makes
+   the strategy above load-bearing: without it, a future breakpoint could reintroduce
+   shrink-to-fit and nothing would object. */
+.nav-tab,
+.btn,
+.sq-btn {
+  font-size: max(var(--font-size-xs, 11px), 11px);
 }
 
 @media (min-width: 1100px) {
@@ -1387,12 +1447,14 @@ h6{font-size:.95rem}
   :root{--font-size-base:13.5px}
   .btn{min-height:38px}
   .btn-icon{width:38px;height:38px}
-  .nav-tab{font-size:10.5px}
+  /* Icon size holds; the LABEL is what gives way at narrower widths (see the icon-first
+     block above). Shrinking nav type to 10.5px here was the second, duplicate copy of the
+     shrink-to-fit strategy — the first was in the 420px block further up this file. */
   .nav-tab svg{width:20px;height:20px;flex-basis:20px}
 }
 @media (max-width:420px){
   .main-content{padding:8px;gap:9px}
-  .nav-tab{min-width:52px;padding-inline:8px;font-size:10px}
+  .nav-tab{min-width:52px;padding-inline:8px}
   .nav-tab svg{width:19px;height:19px}
   .btn{font-size:12.5px}
   .btn-sm{font-size:11.5px}

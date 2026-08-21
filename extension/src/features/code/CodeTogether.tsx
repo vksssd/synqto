@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { CodeService } from './code.service';
 import { CodeLanguage, CodeSessionState } from './code.types';
 import { Play, Copy, Check, RotateCcw, Terminal, Code2, Users, ChevronDown, Clock, CheckCircle2, AlertCircle } from 'lucide-react';
+import { OwnedTimeouts } from '@/shared/owned-timeouts';
 
 interface CodeTogetherProps {
   currentRoomId: string;
@@ -31,6 +32,20 @@ export const CodeTogether: React.FC<CodeTogetherProps> = ({ currentRoomId, isCom
   const [pageEditorAttached, setPageEditorAttached] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lineNumbersRef = useRef<HTMLDivElement>(null);
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
+  const timeoutsRef = useRef<OwnedTimeouts | null>(null);
+  if (timeoutsRef.current === null) timeoutsRef.current = new OwnedTimeouts();
+  const timeouts = timeoutsRef.current;
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      timeouts.clearAll();
+      copiedTimerRef.current = null;
+    };
+  }, [timeouts]);
 
   useEffect(() => {
     const unsub = codeService.onStateChange((state) => {
@@ -82,7 +97,7 @@ export const CodeTogether: React.FC<CodeTogetherProps> = ({ currentRoomId, isCom
       codeService.updateCode(newCode);
 
       // Restore cursor after state updates
-      setTimeout(() => {
+      timeouts.schedule(() => {
         if (textareaRef.current) {
           textareaRef.current.selectionStart = start + 2;
           textareaRef.current.selectionEnd = start + 2;
@@ -102,8 +117,12 @@ export const CodeTogether: React.FC<CodeTogetherProps> = ({ currentRoomId, isCom
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(session.code);
+      if (!mountedRef.current) return;
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      copiedTimerRef.current = timeouts.replace(copiedTimerRef.current, () => {
+        copiedTimerRef.current = null;
+        setCopied(false);
+      }, 2000);
     } catch {}
   };
 

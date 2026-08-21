@@ -11,6 +11,8 @@
 // acquired track, which could be un-muted by any later code path.
 
 import React, { useState, useEffect, useRef } from 'react';
+import { describeMediaError } from '@/core/notify/notification.service';
+import { formatTimerTime } from '@/features/timer/timer-format';
 import { RoomContext } from '@/features/room/room-utils';
 import { PeerIdentity } from '@/core/network/packet';
 import { TutorService } from '@/features/tutor/tutor.service';
@@ -31,31 +33,19 @@ interface CoFocusWatcherViewProps {
  * needs to grant it somewhere that can prompt, which is a different action from "plug in a
  * camera" or "close the other app using it".
  */
+/**
+ * Camera failure text, from the shared translator.
+ *
+ * This was a second, independent switch over the same DOMException names as
+ * describeMediaError — same cases, same intent, separately worded. Two copies of one mapping
+ * drift: the messages differed already, so the same underlying failure read differently
+ * depending on whether it hit the camera path or the microphone path.
+ */
 function describeCameraFailure(err: unknown): string {
-  const name = (err as { name?: string } | null)?.name ?? '';
-  switch (name) {
-    case 'NotAllowedError':
-    case 'SecurityError':
-      return 'Camera permission was not granted. Chrome may not be able to show the prompt in the side panel — open the extension in a tab and allow camera access there once.';
-    case 'NotFoundError':
-    case 'OverconstrainedError':
-      return 'No camera was found on this device.';
-    case 'NotReadableError':
-      return 'Your camera is in use by another app.';
-    case 'AbortError':
-      return 'Starting the camera was interrupted. Try again.';
-    default:
-      return name
-        ? `Camera unavailable (${name}). Check permissions and try again.`
-        : 'Camera unavailable. Check permissions and try again.';
-  }
+  const { title, detail } = describeMediaError(err, 'camera');
+  return `${title}. ${detail}`;
 }
 
-function formatCountdown(totalSec: number): string {
-  const m = Math.floor(totalSec / 60);
-  const s = totalSec % 60;
-  return `${m}:${s.toString().padStart(2, '0')}`;
-}
 
 export const CoFocusWatcherView: React.FC<CoFocusWatcherViewProps> = ({ room, identity }) => {
   const tutorService = TutorService.getInstance();
@@ -204,7 +194,7 @@ export const CoFocusWatcherView: React.FC<CoFocusWatcherViewProps> = ({ room, id
                   color: isComplete ? '#34d399' : '#c4b5fd',
                 }}
               >
-                {isComplete ? 'Done' : formatCountdown(session.remainingSec)}
+                {isComplete ? 'Done' : formatTimerTime(session.remainingSec)}
               </span>
             </div>
           ) : null}

@@ -8,6 +8,15 @@ import {
   POMODORO_CONFIG_STORAGE_KEY,
   POMODORO_STATE_STORAGE_KEY,
 } from './timer.types';
+import {
+  adjustTimerState,
+  computeTimerTime,
+  editTimerState,
+  normalizeTimerState,
+  normalizePomodoroConfig,
+  pauseTimerState,
+  startTimerState,
+} from './timer-state';
 
 export class TimerService {
   private static instance: TimerService | null = null;
@@ -23,11 +32,27 @@ export class TimerService {
 
   private intervalId: any = null;
   private listeners: Set<(state: TimerState, config: PomodoroConfig) => void> = new Set();
+  private initialized = false;
+  private pendingActions: Array<() => void> = [];
+  private destroyed = false;
+  private activeAudioContexts = new Set<any>();
+  private readonly handleStorageChange = (changes: any, area: string): void => {
+    if (this.destroyed || area !== 'local') return;
+    if (changes[POMODORO_CONFIG_STORAGE_KEY]) {
+      this.config = normalizePomodoroConfig(changes[POMODORO_CONFIG_STORAGE_KEY].newValue);
+      this.emit();
+    }
+    if (changes[POMODORO_STATE_STORAGE_KEY]) {
+      const incoming: TimerState = changes[POMODORO_STATE_STORAGE_KEY].newValue;
+      if (incoming) {
+        this.state = normalizeTimerState(incoming);
+        this.emit();
+      }
+    }
+  };
 
   private constructor() {
-    this.loadState().then(() => {
-      this.startTickLoop();
-    });
+    void this.initialize();
     this.listenToStorageChanges();
   }
 
@@ -45,16 +70,12 @@ export class TimerService {
           POMODORO_CONFIG_STORAGE_KEY,
           POMODORO_STATE_STORAGE_KEY,
         ]);
+        if (this.destroyed) return;
         if (res[POMODORO_CONFIG_STORAGE_KEY]) {
-          this.config = { ...DEFAULT_POMODORO_CONFIG, ...res[POMODORO_CONFIG_STORAGE_KEY] };
+          this.config = normalizePomodoroConfig(res[POMODORO_CONFIG_STORAGE_KEY]);
         }
         if (res[POMODORO_STATE_STORAGE_KEY]) {
-          const savedState: TimerState = res[POMODORO_STATE_STORAGE_KEY];
-          savedState.timeLeftSec = this.computeCurrentTimeLeft(savedState);
-          if (savedState.isRunning && savedState.mode !== 'stopwatch' && savedState.timeLeftSec === 0) {
-            savedState.isRunning = false;
-          }
-          this.state = savedState;
+          this.state = normalizeTimerState(res[POMODORO_STATE_STORAGE_KEY] as TimerState);
         } else {
           this.resetToMode('pomodoro');
         }
@@ -64,48 +85,37 @@ export class TimerService {
     }
   }
 
-  private computeCurrentTimeLeft(state: TimerState = this.state): number {
-    if (!state.isRunning) {
-      return state.pausedRemainingSec ?? state.timeLeftSec;
-    }
-    const now = Date.now();
-    if (state.mode === 'stopwatch') {
-      if (state.startedAt) {
-        return Math.floor((now - state.startedAt) / 1000);
+  private async initialize(): Promise<void> {
+    await this.loadState();
+    if (this.destroyed || this.initialized) return;
+    this.initialized = true;
+    const pending = this.pendingActions.splice(0);
+    pending.forEach((action) => {
+      try {
+        action();
+      } catch (err) {
+        console.error('[TimerService] deferred action failed:', err);
       }
-      return state.timeLeftSec;
-    }
-    // Countdown modes (pomodoro, short_break, long_break)
-    if (state.targetEndTime) {
-      return Math.max(0, Math.ceil((state.targetEndTime - now) / 1000));
-    }
-    return state.timeLeftSec;
+    });
+    this.startTickLoop();
+    this.emit();
+  }
+
+  private computeCurrentTimeLeft(state: TimerState = this.state): number {
+    return computeTimerTime(state);
   }
 
   private listenToStorageChanges() {
     if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) {
-      chrome.storage.onChanged.addListener((changes, area) => {
-        if (area === 'local') {
-          if (changes[POMODORO_CONFIG_STORAGE_KEY]) {
-            this.config = { ...DEFAULT_POMODORO_CONFIG, ...changes[POMODORO_CONFIG_STORAGE_KEY].newValue };
-            this.emit();
-          }
-          if (changes[POMODORO_STATE_STORAGE_KEY]) {
-            const incoming: TimerState = changes[POMODORO_STATE_STORAGE_KEY].newValue;
-            if (incoming) {
-              incoming.timeLeftSec = this.computeCurrentTimeLeft(incoming);
-              this.state = incoming;
-              this.emit();
-            }
-          }
-        }
-      });
+      chrome.storage.onChanged.addListener(this.handleStorageChange);
     }
   }
 
   private startTickLoop() {
-    if (this.intervalId) clearInterval(this.intervalId);
+    if (this.destroyed) return;
+    if (this.intervalId !== null) clearInterval(this.intervalId);
     this.intervalId = setInterval(() => {
+      if (this.destroyed) return;
       if (this.state.isRunning) {
         const computed = this.computeCurrentTimeLeft();
         this.state.timeLeftSec = computed;
@@ -150,36 +160,21 @@ export class TimerService {
   }
 
   public start() {
-    const currentRemaining = this.computeCurrentTimeLeft();
-    const now = Date.now();
-    if (this.state.mode === 'stopwatch') {
-      this.state.startedAt = now - currentRemaining * 1000;
-      this.state.targetEndTime = undefined;
-    } else {
-      this.state.targetEndTime = now + currentRemaining * 1000;
-      this.state.startedAt = undefined;
-    }
-    this.state.isRunning = true;
-    this.state.pausedRemainingSec = undefined;
-    this.state.timeLeftSec = currentRemaining;
-    this.state.lastUpdated = now;
+    if (this.deferUntilInitialized(() => this.start())) return;
+    this.state = startTimerState(this.state);
     this.emit();
     this.saveState();
   }
 
   public pause() {
-    const currentRemaining = this.computeCurrentTimeLeft();
-    this.state.isRunning = false;
-    this.state.pausedRemainingSec = currentRemaining;
-    this.state.timeLeftSec = currentRemaining;
-    this.state.targetEndTime = undefined;
-    this.state.startedAt = undefined;
-    this.state.lastUpdated = Date.now();
+    if (this.deferUntilInitialized(() => this.pause())) return;
+    this.state = pauseTimerState(this.state);
     this.emit();
     this.saveState();
   }
 
   public toggle() {
+    if (this.deferUntilInitialized(() => this.toggle())) return;
     if (this.state.isRunning) {
       this.pause();
     } else {
@@ -188,6 +183,7 @@ export class TimerService {
   }
 
   public reset() {
+    if (this.deferUntilInitialized(() => this.reset())) return;
     this.state.isRunning = false;
     this.state.targetEndTime = undefined;
     this.state.startedAt = undefined;
@@ -198,6 +194,7 @@ export class TimerService {
   }
 
   public setMode(mode: TimerMode) {
+    if (this.deferUntilInitialized(() => this.setMode(mode))) return;
     this.state.isRunning = false;
     this.state.targetEndTime = undefined;
     this.state.startedAt = undefined;
@@ -208,27 +205,27 @@ export class TimerService {
   }
 
   public addTime(seconds: number) {
-    const currentRemaining = this.computeCurrentTimeLeft();
-    const newRemaining = Math.max(0, currentRemaining + seconds);
-    const now = Date.now();
-
-    if (this.state.isRunning) {
-      if (this.state.mode === 'stopwatch') {
-        this.state.startedAt = now - newRemaining * 1000;
-      } else {
-        this.state.targetEndTime = now + newRemaining * 1000;
-      }
-    } else {
-      this.state.pausedRemainingSec = newRemaining;
-    }
-
-    this.state.timeLeftSec = newRemaining;
-    if (this.state.mode !== 'stopwatch') {
-      this.state.targetDurationSec = Math.max(newRemaining, this.state.targetDurationSec + seconds);
-    }
-    this.state.lastUpdated = now;
+    if (this.deferUntilInitialized(() => this.addTime(seconds))) return;
+    const result = adjustTimerState(this.state, seconds);
+    if (!result.ok) return;
+    this.state = result.state;
     this.emit();
     this.saveState();
+  }
+
+  /** Edits the current countdown/elapsed value without forcing a pause. */
+  public setTime(seconds: number): { ok: true } | { ok: false; error: string } {
+    const result = editTimerState(this.state, seconds);
+    if (!result.ok) return result;
+    if (this.deferUntilInitialized(() => {
+      this.setTime(seconds);
+    })) {
+      return { ok: true };
+    }
+    this.state = result.state;
+    this.emit();
+    this.saveState();
+    return { ok: true };
   }
 
   private resetToMode(mode: TimerMode) {
@@ -254,13 +251,21 @@ export class TimerService {
   }
 
   public updateConfig(newConfig: Partial<PomodoroConfig>) {
-    this.config = { ...this.config, ...newConfig };
+    if (this.deferUntilInitialized(() => this.updateConfig({ ...newConfig }))) return;
+    this.config = normalizePomodoroConfig({ ...this.config, ...newConfig });
     this.saveConfig();
     this.emit();
   }
 
   public setEnabled(enabled: boolean) {
     this.updateConfig({ enabled });
+  }
+
+  private deferUntilInitialized(action: () => void): boolean {
+    if (this.destroyed) return true;
+    if (this.initialized) return false;
+    if (this.pendingActions.length < 100) this.pendingActions.push(action);
+    return true;
   }
 
   public getConfig(): PomodoroConfig {
@@ -272,12 +277,14 @@ export class TimerService {
   }
 
   public onChange(listener: (state: TimerState, config: PomodoroConfig) => void): () => void {
+    if (this.destroyed) return () => {};
     this.listeners.add(listener);
     listener(this.getState(), this.getConfig());
     return () => this.listeners.delete(listener);
   }
 
   private emit() {
+    if (this.destroyed) return;
     const s = this.getState();
     const c = this.getConfig();
     this.listeners.forEach((fn) => {
@@ -290,6 +297,7 @@ export class TimerService {
   }
 
   private saveState() {
+    if (this.destroyed) return;
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       chrome.storage.local.set({
         [POMODORO_STATE_STORAGE_KEY]: this.state,
@@ -298,6 +306,7 @@ export class TimerService {
   }
 
   private saveConfig() {
+    if (this.destroyed) return;
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       chrome.storage.local.set({
         [POMODORO_CONFIG_STORAGE_KEY]: this.config,
@@ -309,10 +318,13 @@ export class TimerService {
    * Synthesizes a soothing bell chime using Web Audio API
    */
   private playCompletionChime() {
+    let ctx: any = null;
     try {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
       if (!AudioCtx) return;
-      const ctx = new AudioCtx();
+      ctx = new AudioCtx();
+      this.activeAudioContexts.add(ctx);
+      let remainingTones = 4;
 
       const playTone = (freq: number, start: number, duration: number) => {
         const osc = ctx.createOscillator();
@@ -327,6 +339,10 @@ export class TimerService {
 
         osc.connect(gain);
         gain.connect(ctx.destination);
+        osc.onended = () => {
+          remainingTones--;
+          if (remainingTones === 0) this.closeAudioContext(ctx);
+        };
 
         osc.start(ctx.currentTime + start);
         osc.stop(ctx.currentTime + start + duration);
@@ -338,7 +354,31 @@ export class TimerService {
       playTone(783.99, 0.3, 1.5);  // G5
       playTone(1046.5, 0.45, 2.0); // C6
     } catch (e) {
+      if (ctx) this.closeAudioContext(ctx);
       console.warn('[TimerService] Web Audio chime not supported:', e);
     }
+  }
+
+  private closeAudioContext(ctx: any): void {
+    if (!this.activeAudioContexts.delete(ctx)) return;
+    try {
+      Promise.resolve(ctx.close()).catch(() => {});
+    } catch {}
+  }
+
+  public destroy(): void {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    if (this.intervalId !== null) {
+      clearInterval(this.intervalId);
+      this.intervalId = null;
+    }
+    if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) {
+      chrome.storage.onChanged.removeListener(this.handleStorageChange);
+    }
+    this.pendingActions = [];
+    [...this.activeAudioContexts].forEach((ctx) => this.closeAudioContext(ctx));
+    this.listeners.clear();
+    if (TimerService.instance === this) TimerService.instance = null;
   }
 }

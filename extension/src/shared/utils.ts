@@ -46,16 +46,27 @@ export function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-/** Debounce a function. */
+export type DebouncedFunction<T extends (...args: unknown[]) => void> =
+  ((...args: Parameters<T>) => void) & { cancel: () => void };
+
+/** Debounce a function. The returned callback can be cancelled during owner teardown. */
 export function debounce<T extends (...args: unknown[]) => void>(
   fn: T,
   delayMs: number
-): (...args: Parameters<T>) => void {
+): DebouncedFunction<T> {
   let timer: ReturnType<typeof setTimeout> | null = null;
-  return (...args: Parameters<T>) => {
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(() => fn(...args), delayMs);
+  const debounced = (...args: Parameters<T>) => {
+    if (timer !== null) clearTimeout(timer);
+    timer = setTimeout(() => {
+      timer = null;
+      fn(...args);
+    }, delayMs);
   };
+  debounced.cancel = () => {
+    if (timer !== null) clearTimeout(timer);
+    timer = null;
+  };
+  return debounced;
 }
 
 /** Merge class names (simple version without tailwind-merge). */

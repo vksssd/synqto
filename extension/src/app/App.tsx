@@ -1,19 +1,32 @@
 // ─── Synqto Root App Shell ───
 
 import React, { useState, useEffect } from 'react';
+import { ToastHost } from '@/core/notify/ToastHost';
+import { formatTimerTime } from '@/features/timer/timer-format';
 import { IdentityService } from '@/features/identity/identity.service';
-import { RoomService } from '@/features/room/room.service';
+import { RoomService, SELECTED_ROOM_STORAGE_KEY } from '@/features/room/room.service';
 import { GroupService } from '@/features/group/group.service';
 import { DiscoveryService, OnlinePeer } from '@/features/discovery/discovery.service';
 import { ChatService } from '@/features/chat/chat.service';
 import { TopologyService } from '@/core/network/topology.service';
 import { WhiteboardService } from '@/features/whiteboard/whiteboard.service';
+import { CodeService } from '@/features/code/code.service';
+import { VoiceService } from '@/features/voice/voice.service';
+import { TutorService } from '@/features/tutor/tutor.service';
 import { NetworkService } from '@/core/network/network.service';
 import { SignalingService } from '@/core/network/signaling.service';
 import { GamificationService } from '@/features/gamification/gamification.service';
 import { detectResource } from '@/content/resource-detector';
 import { PeerIdentity } from '@/core/network/packet';
 import { RoomContext } from '@/features/room/room-utils';
+import {
+  chooseResumableRoom,
+  shouldAdoptDetectedProblem,
+} from '@/features/room/room-selection';
+import {
+  claimSidePanelNetworkOwnership,
+  releaseSidePanelNetworkOwnership,
+} from '@/core/runtime/network-handoff';
 
 import { NavBar, NavTabType } from '@/features/navigation/NavBar';
 import { ProblemRoomChatView } from '@/features/room/ProblemRoomChatView';
@@ -56,6 +69,9 @@ const MainApp: React.FC = () => {
   const signalingService = SignalingService.getInstance();
   const timerService = TimerService.getInstance();
   const whiteboardService = WhiteboardService.getInstance();
+  const codeService = CodeService.getInstance();
+  const voiceService = VoiceService.getInstance();
+  const tutorService = TutorService.getInstance();
   const networkService = NetworkService.getInstance();
 
   const initialTab = (urlParams?.get('view') as NavTabType) || 'chat';
@@ -125,6 +141,9 @@ const MainApp: React.FC = () => {
   // 2. Listen for Room context changes
   useEffect(() => {
     return roomService.onChange((r) => {
+      const nextRoomId = r?.roomId || '';
+      voiceService.setRoom(nextRoomId);
+      discoveryService.resetForRoom(nextRoomId);
       setRoom(r);
 
       // Point the SHARED whiteboard at this room.
@@ -134,6 +153,8 @@ const MainApp: React.FC = () => {
       // answered with the whole local notebook — were transmitted into the next room the user
       // entered. Binding it to the room here is what keeps a board private to its room.
       void whiteboardService.setRoom(r?.roomId || '');
+      codeService.setRoom(r?.roomId || '');
+      tutorService.setRoom(r?.roomId || '');
 
       if (r) {
         gamificationService.recordProblemVisit(r.slug);
@@ -228,17 +249,7 @@ const MainApp: React.FC = () => {
   // 8. Track active problem from Chrome storage
   useEffect(() => {
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-      chrome.storage.local.set({
-        synqto_sidepanel_open: true,
-        nerd_buddy_sidepanel_open: true,
-      });
-
-      chrome.storage.local.get(['synqto_active_problem', 'nerd_buddy_active_problem'], (res) => {
-        const p = res.synqto_active_problem || res.nerd_buddy_active_problem;
-        if (p) {
-          roomService.joinProblemRoom(p.platform, p.slug, p.title, p.canonicalUrl);
-        }
-      });
+      let disposed = false;
 
       const handleStorageChange = (changes: any, area: string) => {
         if (area === 'local') {
@@ -251,7 +262,11 @@ const MainApp: React.FC = () => {
             // in the background would be silently pulled out of it — camera and partner gone,
             // no prompt, no explanation. Auto-detection is a convenience and must yield to an
             // explicit session the user deliberately started.
-            if (roomService.getCurrentRoom()?.cofocusMode) return;
+            // Active tab/problem is detection state, not room selection. Once the user has a
+            // room, only an explicit action (Detect, group selection, custom room, Leave)
+            // may change it. This prevents ordinary tab browsing from tearing down a live
+            // room and generating the register/unregister churn seen in server logs.
+            if (!shouldAdoptDetectedProblem(roomService.getCurrentRoom())) return;
 
             const p = problemChange.newValue;
             roomService.joinProblemRoom(p.platform, p.slug, p.title, p.canonicalUrl);
@@ -259,13 +274,50 @@ const MainApp: React.FC = () => {
         }
       };
 
-      chrome.storage.onChanged.addListener(handleStorageChange);
+      // The offscreen page keeps the mesh alive while the panel is closed. It is a separate
+      // JavaScript realm, so its SignalingService "singleton" is not the same singleton as
+      // ours. Wait for its explicit release acknowledgement before joining; otherwise both
+      // realms briefly register the same peer ID and continuously supersede one another.
+      const ownershipClaim = claimSidePanelNetworkOwnership();
+      void ownershipClaim.ready.then(() => {
+        if (disposed) return;
+
+        chrome.storage.onChanged.addListener(handleStorageChange);
+        chrome.storage.local.get(
+          [SELECTED_ROOM_STORAGE_KEY, 'synqto_active_problem', 'nerd_buddy_active_problem'],
+          (res) => {
+            if (disposed) return;
+            const selectedRoom = res[SELECTED_ROOM_STORAGE_KEY] as RoomContext | undefined;
+            const detectedProblem = (res.synqto_active_problem ||
+              res.nerd_buddy_active_problem) as RoomContext | undefined;
+            const candidate = chooseResumableRoom(selectedRoom, detectedProblem);
+            if (candidate?.roomId) {
+              void roomService.resumeRoom(candidate);
+            } else if (candidate) {
+              void roomService.joinProblemRoom(
+                candidate.platform,
+                candidate.slug,
+                candidate.title,
+                candidate.canonicalUrl
+              );
+            }
+          }
+        );
+      });
 
       return () => {
-        chrome.storage.local.set({
-          synqto_sidepanel_open: false,
-          nerd_buddy_sidepanel_open: false,
-        });
+        disposed = true;
+        // Send room:leave and close this context's socket before allowing the offscreen
+        // context to resume. This turns an ordinary panel close into an intentional lifecycle
+        // transition instead of the repeated WebSocket 1006/EOF pattern seen in production.
+        if (roomService.getCurrentRoom()?.cofocusMode) {
+          // CoFocus owns the panel UI and does not run in the offscreen context. Closing the
+          // panel ends that explicit session instead of leaving a stale resumable selection.
+          roomService.leaveRoom();
+        } else {
+          roomService.suspendCurrentRoom();
+        }
+        releaseSidePanelNetworkOwnership(ownershipClaim.token);
         // Belt-and-suspenders for the synqto_cofocus_active flag (see
         // room.service.ts's setCoFocusActiveFlag / offscreen.ts's resumeBackgroundMesh):
         // the panel unmounting is the one signal that fires however the panel closed —
@@ -438,7 +490,11 @@ const MainApp: React.FC = () => {
               boxShadow: isConnected ? '0 0 8px #10b981' : '0 0 8px #ef4444',
               marginLeft: '2px',
             }}
-            title={isConnected ? 'Signaling Server: Connected (wss://synqto-server.onrender.com/ws/)' : 'Signaling Server: Disconnected (Offline Mode)'}
+            title={
+              isConnected
+                ? `Signaling Server: Connected (${signalingService.getServerUrl()})`
+                : 'Signaling Server: Disconnected (Offline Mode)'
+            }
           />
           <span
             onClick={!isConnected ? handleManualReconnect : undefined}
@@ -480,7 +536,7 @@ const MainApp: React.FC = () => {
             <span>
               {timerConfig.enabled
                 ? timerState.isRunning
-                  ? `🍅 ${Math.floor(timerState.timeLeftSec / 60)}:${(timerState.timeLeftSec % 60).toString().padStart(2, '0')}`
+                  ? `🍅 ${formatTimerTime(timerState.timeLeftSec)}`
                   : 'Timer 🍅'
                 : 'Timer ⏱️'}
             </span>
@@ -795,6 +851,7 @@ const MainApp: React.FC = () => {
       {/* Main Content Area */}
       <main className="main-content">
         {/* Floating Focus Timer / Pomodoro (Visible only when enabled in Settings) */}
+        <ToastHost />
         <FocusTimerBar />
 
         {/*

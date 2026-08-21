@@ -35,15 +35,95 @@ const HUES = [
 
 const STORAGE_KEY = 'synqto_identity';
 const LEGACY_STORAGE_KEY = 'nerd_buddy_identity';
+const MAX_PEER_ID_LENGTH = 64;
+const MAX_NICKNAME_LENGTH = 48;
+
+function isValidPeerId(peerId: unknown): peerId is string {
+  return (
+    typeof peerId === 'string' &&
+    peerId.length > 0 &&
+    peerId.length <= MAX_PEER_ID_LENGTH &&
+    /^[A-Za-z0-9_:-]+$/.test(peerId)
+  );
+}
+
+function utf8Length(value: string): number {
+  return new TextEncoder().encode(value).length;
+}
+
+/** Rejects corrupted or attacker-written storage records before they become routing keys. */
+export function isValidStoredIdentity(value: unknown): value is PeerIdentity {
+  if (!value || typeof value !== 'object') return false;
+  const identity = value as Partial<PeerIdentity>;
+  return (
+    isValidPeerId(identity.peerId) &&
+    typeof identity.nickname === 'string' &&
+    identity.nickname.length > 0 &&
+    utf8Length(identity.nickname) <= MAX_NICKNAME_LENGTH &&
+    typeof identity.avatar === 'string' &&
+    identity.avatar.length <= 32 &&
+    typeof identity.color === 'string' &&
+    identity.color.length <= 32
+  );
+}
+
+function sanitizeNickname(nickname: string): string {
+  const cleaned = nickname
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .trim();
+  let result = '';
+  let bytes = 0;
+  for (const char of cleaned) {
+    const nextBytes = utf8Length(char);
+    if (bytes + nextBytes > MAX_NICKNAME_LENGTH) break;
+    result += char;
+    bytes += nextBytes;
+  }
+  return result;
+}
 
 export class IdentityService {
   private static instance: IdentityService | null = null;
   private currentIdentity: PeerIdentity | null = null;
+  /** Stable fallback for synchronous callers while persistent storage is still loading. */
+  private provisionalIdentity: PeerIdentity | null = null;
   private initPromise: Promise<PeerIdentity> | null = null;
   private listeners: Set<(identity: PeerIdentity) => void> = new Set();
+  private storageChangeListener: ((changes: any, area: string) => void) | null = null;
+  private operationGeneration = 0;
+  private identityRevision = 0;
+  private destroyed = false;
 
   private constructor() {
+    this.setupStorageListener();
     this.getOrCreateIdentity().catch(() => {});
+  }
+
+  private setupStorageListener(): void {
+    if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) {
+      this.storageChangeListener = (changes, area) => {
+        if (this.destroyed || area !== 'local') return;
+        const candidate = changes[STORAGE_KEY]?.newValue ?? changes[LEGACY_STORAGE_KEY]?.newValue;
+        if (!isValidStoredIdentity(candidate)) return;
+        if (
+          this.currentIdentity?.peerId === candidate.peerId &&
+          this.currentIdentity?.nickname === candidate.nickname &&
+          this.currentIdentity?.avatar === candidate.avatar &&
+          this.currentIdentity?.color === candidate.color
+        ) {
+          return;
+        }
+
+        // chrome.storage.local is shared across the side panel, offscreen document and
+        // service worker. Adopting the latest valid write makes simultaneous first-run
+        // identity creation converge instead of leaving each realm with a different peer ID.
+        this.currentIdentity = candidate;
+        this.provisionalIdentity = candidate;
+        this.identityRevision++;
+        this.listeners.forEach((fn) => fn(candidate));
+      };
+      chrome.storage.onChanged.addListener(this.storageChangeListener);
+    }
   }
 
   public static getInstance(): IdentityService {
@@ -58,6 +138,10 @@ export class IdentityService {
   }
 
   public async getOrCreateIdentity(): Promise<PeerIdentity> {
+    if (this.destroyed) {
+      if (!this.provisionalIdentity) this.provisionalIdentity = this.generateIdentity();
+      return this.currentIdentity || this.provisionalIdentity;
+    }
     if (this.currentIdentity) {
       return this.currentIdentity;
     }
@@ -66,6 +150,8 @@ export class IdentityService {
       return this.initPromise;
     }
 
+    const generation = this.operationGeneration;
+    const revision = this.identityRevision;
     this.initPromise = (async () => {
       try {
         // Try loading from storage (support both modern synqto_ and legacy nerd_buddy_ keys)
@@ -73,8 +159,14 @@ export class IdentityService {
           try {
             const result = await chrome.storage.local.get([STORAGE_KEY, LEGACY_STORAGE_KEY]);
             const identity = result[STORAGE_KEY] || result[LEGACY_STORAGE_KEY];
-            if (identity) {
+            if (isValidStoredIdentity(identity)) {
+              if (!this.isCurrentOperation(generation)) return identity;
+              if (this.identityRevision !== revision && this.currentIdentity) {
+                return this.currentIdentity;
+              }
               this.currentIdentity = identity;
+              this.provisionalIdentity = identity;
+              this.identityRevision++;
               return this.currentIdentity!;
             }
           } catch (e) {
@@ -84,8 +176,17 @@ export class IdentityService {
           const stored = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
           if (stored) {
             try {
-              this.currentIdentity = JSON.parse(stored);
-              return this.currentIdentity!;
+              const parsed = JSON.parse(stored);
+              if (isValidStoredIdentity(parsed)) {
+                if (!this.isCurrentOperation(generation)) return parsed;
+                if (this.identityRevision !== revision && this.currentIdentity) {
+                  return this.currentIdentity;
+                }
+                this.currentIdentity = parsed;
+                this.provisionalIdentity = parsed;
+                this.identityRevision++;
+                return this.currentIdentity;
+              }
             } catch (e) {
               console.warn('[IdentityService] Failed to parse identity from localStorage', e);
             }
@@ -93,8 +194,14 @@ export class IdentityService {
         }
 
         // Generate new random identity if none exists in storage
+        if (!this.isCurrentOperation(generation)) {
+          return this.currentIdentity || this.provisionalIdentity || this.generateIdentity();
+        }
+        if (this.identityRevision !== revision && this.currentIdentity) {
+          return this.currentIdentity;
+        }
         const newIdentity = this.generateIdentity();
-        await this.saveIdentity(newIdentity);
+        await this.saveIdentity(newIdentity, generation);
         return newIdentity;
       } finally {
         this.initPromise = null;
@@ -105,6 +212,10 @@ export class IdentityService {
   }
 
   public async regenerateIdentity(): Promise<PeerIdentity> {
+    if (this.destroyed) {
+      if (!this.provisionalIdentity) this.provisionalIdentity = this.generateIdentity();
+      return this.currentIdentity || this.provisionalIdentity;
+    }
     const newIdentity = this.generateIdentity();
     await this.saveIdentity(newIdentity);
     return newIdentity;
@@ -112,9 +223,10 @@ export class IdentityService {
 
   public async updateNickname(nickname: string): Promise<PeerIdentity> {
     const current = await this.getOrCreateIdentity();
+    const cleanNickname = sanitizeNickname(nickname);
     const updated: PeerIdentity = {
       ...current,
-      nickname: nickname.trim() || current.nickname,
+      nickname: cleanNickname || current.nickname,
     };
     await this.saveIdentity(updated);
     return updated;
@@ -136,8 +248,11 @@ export class IdentityService {
     };
   }
 
-  private async saveIdentity(identity: PeerIdentity) {
+  private async saveIdentity(identity: PeerIdentity, generation = this.operationGeneration) {
+    if (!this.isCurrentOperation(generation)) return;
     this.currentIdentity = identity;
+    this.provisionalIdentity = identity;
+    this.identityRevision++;
 
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       await chrome.storage.local.set({
@@ -149,10 +264,12 @@ export class IdentityService {
       localStorage.setItem(LEGACY_STORAGE_KEY, JSON.stringify(identity));
     }
 
+    if (!this.isCurrentOperation(generation)) return;
     this.listeners.forEach((fn) => fn(identity));
   }
 
   public onChange(listener: (identity: PeerIdentity) => void): () => void {
+    if (this.destroyed) return () => {};
     this.listeners.add(listener);
     if (this.currentIdentity) {
       listener(this.currentIdentity);
@@ -173,11 +290,31 @@ export class IdentityService {
 
     // If async initialization is currently in flight, do not overwrite storage with a new fallback identity
     if (this.initPromise) {
-      return this.generateIdentity();
+      if (!this.provisionalIdentity) {
+        this.provisionalIdentity = this.generateIdentity();
+      }
+      return this.provisionalIdentity;
     }
 
     const fallback = this.generateIdentity();
-    void this.saveIdentity(fallback);
+    if (!this.destroyed) void this.saveIdentity(fallback);
     return fallback;
+  }
+
+  private isCurrentOperation(generation: number): boolean {
+    return !this.destroyed && generation === this.operationGeneration;
+  }
+
+  public destroy(): void {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    this.operationGeneration++;
+    if (this.storageChangeListener && typeof chrome !== 'undefined' && chrome.storage?.onChanged) {
+      chrome.storage.onChanged.removeListener(this.storageChangeListener);
+    }
+    this.storageChangeListener = null;
+    this.listeners.clear();
+    this.initPromise = null;
+    if (IdentityService.instance === this) IdentityService.instance = null;
   }
 }

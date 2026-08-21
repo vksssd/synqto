@@ -1,10 +1,11 @@
 // ─── Share Group Modal (Generate Instant Invite Tokens) ───
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useModalA11y } from '@/shared/useModalA11y';
 import { StudyGroup } from './group.types';
 import { GroupService } from './group.service';
 import { Share2, X, Copy, Check, Lock, Globe, KeyRound } from 'lucide-react';
+import { OwnedTimeouts } from '@/shared/owned-timeouts';
 
 interface ShareGroupModalProps {
   group: StudyGroup | null;
@@ -23,15 +24,46 @@ export const ShareGroupModal: React.FC<ShareGroupModalProps> = ({
   // return violates the Rules of Hooks and desynchronises hook order as the modal toggles.
   const [copied, setCopied] = useState(false);
   const [handleCopied, setHandleCopied] = useState(false);
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleCopiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isOpenRef = useRef(isOpen);
+  const timeoutsRef = useRef<OwnedTimeouts | null>(null);
+  if (timeoutsRef.current === null) timeoutsRef.current = new OwnedTimeouts();
+  const timeouts = timeoutsRef.current;
+  isOpenRef.current = isOpen;
+
+  useEffect(() => () => {
+    timeouts.clearAll();
+    copiedTimerRef.current = null;
+    handleCopiedTimerRef.current = null;
+  }, [timeouts]);
+
+  useEffect(() => {
+    if (isOpen) return;
+    timeouts.cancel(copiedTimerRef.current);
+    timeouts.cancel(handleCopiedTimerRef.current);
+    copiedTimerRef.current = null;
+    handleCopiedTimerRef.current = null;
+    setCopied(false);
+    setHandleCopied(false);
+  }, [isOpen, timeouts]);
 
   if (!isOpen || !group) return null;
 
   const inviteCode = groupService.generateInviteCode(group);
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(inviteCode);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2500);
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(inviteCode);
+      if (!isOpenRef.current) return;
+      setCopied(true);
+      copiedTimerRef.current = timeouts.replace(copiedTimerRef.current, () => {
+        copiedTimerRef.current = null;
+        setCopied(false);
+      }, 2500);
+    } catch {
+      // The invite remains visible for manual copying when clipboard access is unavailable.
+    }
   };
 
   return (
@@ -147,10 +179,18 @@ export const ShareGroupModal: React.FC<ShareGroupModalProps> = ({
               <button
                 type="button"
                 className="btn btn-secondary btn-sm"
-                onClick={() => {
-                  navigator.clipboard.writeText(`@${group.slug}`).catch(() => {});
-                  setHandleCopied(true);
-                  setTimeout(() => setHandleCopied(false), 1600);
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(`@${group.slug}`);
+                    if (!isOpenRef.current) return;
+                    setHandleCopied(true);
+                    handleCopiedTimerRef.current = timeouts.replace(handleCopiedTimerRef.current, () => {
+                      handleCopiedTimerRef.current = null;
+                      setHandleCopied(false);
+                    }, 1600);
+                  } catch {
+                    // The handle remains visible for manual copying.
+                  }
                 }}
                 aria-label={`Copy squad handle @${group.slug}`}
               >

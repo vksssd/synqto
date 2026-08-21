@@ -1,7 +1,153 @@
 // ─── Background Service Worker (Manifest V3 Coordinator) ───
 
+import { ContextRegistry } from '@/core/runtime/context-registry';
+import { detectRoutedResource, RoutedResource } from '@/core/runtime/tab-room-context';
+import { Capability } from '@/core/types/identifiers';
+import {
+  PopupRect,
+  PopupDisplay,
+  PopupWindowPreset,
+  computePopupBounds,
+  isWhiteboardPopupWindow,
+  selectPopupDisplay,
+} from '@/core/runtime/popup-window';
+
 const ALARM_KEEPALIVE = 'nerd_buddy_keepalive';
+const CONTEXT_REGISTRY_STORAGE_KEY = 'synqto_context_registry';
 let creatingOffscreen: Promise<void> | null = null;
+const WHITEBOARD_POPUP_SESSION_KEY = 'synqto_whiteboard_popup_window_id';
+let whiteboardPopupWindowId: number | null = null;
+let whiteboardPopupOperation: Promise<{ success: boolean; windowId?: number; reused?: boolean; error?: string }> | null = null;
+
+async function getSourceWindowBounds(windowId?: number): Promise<PopupRect | null> {
+  try {
+    // Content-script senders carry tab.windowId. Extension pages such as the side panel do
+    // not, so fall back to the last-focused browser window to preserve monitor affinity.
+    const win = windowId === undefined
+      ? await chrome.windows.getLastFocused()
+      : await chrome.windows.get(windowId);
+    if (
+      typeof win.left !== 'number' || typeof win.top !== 'number' ||
+      typeof win.width !== 'number' || typeof win.height !== 'number'
+    ) return null;
+    return { left: win.left, top: win.top, width: win.width, height: win.height };
+  } catch {
+    return null;
+  }
+}
+
+async function getPopupWorkArea(sourceWindowId?: number): Promise<PopupRect> {
+  const sourceBounds = await getSourceWindowBounds(sourceWindowId);
+  try {
+    const displays = await new Promise<PopupDisplay[]>((resolve) => {
+      chrome.system.display.getInfo((items) => resolve(items));
+    });
+    const selected = selectPopupDisplay(displays, sourceBounds);
+    if (selected) return selected.workArea;
+  } catch {
+    // Older Chromium builds may not expose system.display despite the optional runtime API.
+  }
+  return sourceBounds ?? { left: 0, top: 0, width: 1280, height: 800 };
+}
+
+async function rememberWhiteboardPopup(windowId: number | null): Promise<void> {
+  whiteboardPopupWindowId = windowId;
+  if (!chrome.storage.session) return;
+  if (windowId === null) await chrome.storage.session.remove(WHITEBOARD_POPUP_SESSION_KEY);
+  else await chrome.storage.session.set({ [WHITEBOARD_POPUP_SESSION_KEY]: windowId });
+}
+
+async function forgetWhiteboardPopupIfOwned(windowId: number): Promise<void> {
+  if (whiteboardPopupWindowId === windowId) whiteboardPopupWindowId = null;
+  if (!chrome.storage.session) return;
+  const stored = await chrome.storage.session.get([WHITEBOARD_POPUP_SESSION_KEY]);
+  // A delayed removal event for an older window must never erase a replacement popup.
+  if (stored[WHITEBOARD_POPUP_SESSION_KEY] === windowId) {
+    await chrome.storage.session.remove(WHITEBOARD_POPUP_SESSION_KEY);
+  }
+}
+
+async function findExistingWhiteboardPopup(canonicalUrl: string): Promise<chrome.windows.Window | null> {
+  if (whiteboardPopupWindowId === null && chrome.storage.session) {
+    const stored = await chrome.storage.session.get([WHITEBOARD_POPUP_SESSION_KEY]);
+    const storedId = stored[WHITEBOARD_POPUP_SESSION_KEY];
+    if (typeof storedId === 'number') whiteboardPopupWindowId = storedId;
+  }
+
+  if (whiteboardPopupWindowId !== null) {
+    try {
+      const cached = await chrome.windows.get(whiteboardPopupWindowId, { populate: true });
+      if (isWhiteboardPopupWindow(cached, canonicalUrl)) return cached;
+    } catch {
+      // Stale IDs are expected after manual close or a service-worker/browser restart.
+    }
+    await rememberWhiteboardPopup(null);
+  }
+
+  // Session restore can recreate the popup while storage.session starts empty. Discover the
+  // canonical URL before creating so browser restart cannot produce a duplicate document.
+  const windows = await chrome.windows.getAll({ populate: true, windowTypes: ['popup'] });
+  const discovered = windows.find((win) => isWhiteboardPopupWindow(win, canonicalUrl)) ?? null;
+  if (discovered?.id !== undefined) await rememberWhiteboardPopup(discovered.id);
+  return discovered;
+}
+
+function openOrFocusWhiteboardPopup(
+  preset: PopupWindowPreset,
+  sourceWindowId?: number
+): Promise<{ success: boolean; windowId?: number; reused?: boolean; error?: string }> {
+  if (whiteboardPopupOperation) return whiteboardPopupOperation;
+
+  whiteboardPopupOperation = (async () => {
+    const canonicalUrl = chrome.runtime.getURL('sidepanel.html?view=whiteboard');
+    const workArea = await getPopupWorkArea(sourceWindowId);
+    const bounds = computePopupBounds(workArea, preset);
+    const existing = await findExistingWhiteboardPopup(canonicalUrl);
+
+    if (existing?.id !== undefined) {
+      try {
+        const focused = await chrome.windows.update(existing.id, { ...bounds, focused: true });
+        await rememberWhiteboardPopup(focused.id ?? existing.id);
+        return { success: true, windowId: focused.id ?? existing.id, reused: true };
+      } catch {
+        // The user can close the popup between discovery and focus. Recover within this
+        // request instead of making them click a second time.
+        await forgetWhiteboardPopupIfOwned(existing.id);
+      }
+    }
+
+    const created = await chrome.windows.create({
+      url: canonicalUrl,
+      type: 'popup',
+      focused: true,
+      ...bounds,
+    });
+    if (created.id === undefined) throw new Error('Chrome did not return a popup window ID');
+    await rememberWhiteboardPopup(created.id);
+    return { success: true, windowId: created.id, reused: false };
+  })()
+    .catch((err) => ({ success: false, error: String(err?.message || err) }))
+    .finally(() => {
+      whiteboardPopupOperation = null;
+    });
+
+  return whiteboardPopupOperation;
+}
+
+chrome.windows.onRemoved.addListener((windowId) => {
+  if (windowId === whiteboardPopupWindowId) {
+    void forgetWhiteboardPopupIfOwned(windowId);
+    return;
+  }
+  // A restarted worker may not have hydrated the cached ID yet.
+  if (chrome.storage.session) {
+    void chrome.storage.session.get([WHITEBOARD_POPUP_SESSION_KEY]).then((stored) => {
+      if (stored[WHITEBOARD_POPUP_SESSION_KEY] === windowId) {
+        return forgetWhiteboardPopupIfOwned(windowId);
+      }
+    });
+  }
+});
 
 // 1. Setup keepalive alarm
 chrome.alarms.create(ALARM_KEEPALIVE, { periodInMinutes: 1 });
@@ -50,14 +196,91 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
 });
 
-import { ContextRegistry } from '@/core/runtime/context-registry';
-import { Capability } from '@/core/types/identifiers';
-
 const registry = ContextRegistry.getInstance();
+const removedDuringHydration = new Set<number>();
+
+const registryReady = (async () => {
+  try {
+    if (!chrome.storage.session) return;
+    const [stored, tabs] = await Promise.all([
+      chrome.storage.session.get([CONTEXT_REGISTRY_STORAGE_KEY]),
+      chrome.tabs.query({}),
+    ]);
+    const liveTabIds = new Set(
+      tabs
+        .map((tab) => tab.id)
+        .filter((tabId): tabId is number => tabId !== undefined && !removedDuringHydration.has(tabId))
+    );
+    registry.hydrate(stored[CONTEXT_REGISTRY_STORAGE_KEY], liveTabIds);
+    registry.pruneStale();
+    await chrome.storage.session.set({
+      [CONTEXT_REGISTRY_STORAGE_KEY]: registry.snapshot(),
+    });
+  } catch (err) {
+    console.debug('[ServiceWorker] Context registry hydration bypassed:', err);
+  }
+})();
+
+function persistContextRegistry() {
+  void registryReady.then(async () => {
+    try {
+      if (chrome.storage.session) {
+        await chrome.storage.session.set({
+          [CONTEXT_REGISTRY_STORAGE_KEY]: registry.snapshot(),
+        });
+      }
+    } catch (err) {
+      console.debug('[ServiceWorker] Context registry persistence bypassed:', err);
+    }
+  });
+}
+
+function detectTabResource(tab: chrome.tabs.Tab): RoutedResource | null {
+  return detectRoutedResource(tab.url, tab.title);
+}
+
+function updateTabContext(tab: chrome.tabs.Tab): RoutedResource | null {
+  if (tab.id === undefined) return null;
+  const resource = detectTabResource(tab);
+  if (!resource) {
+    registry.unregister(tab.id);
+    persistContextRegistry();
+    return null;
+  }
+  registry.register({
+    tabId: tab.id,
+    url: resource.url,
+    roomId: resource.roomId,
+    isProblemTab: true,
+  });
+  persistContextRegistry();
+  return resource;
+}
+
+function publishActiveTabContext(tab: chrome.tabs.Tab) {
+  const resource = updateTabContext(tab);
+  if (resource) {
+    chrome.storage.local.set({
+      synqto_active_problem: resource,
+      synqto_active_url: resource.url,
+      nerd_buddy_active_problem: resource,
+      nerd_buddy_active_url: resource.url,
+    });
+  } else {
+    chrome.storage.local.remove([
+      'synqto_active_problem',
+      'nerd_buddy_active_problem',
+      'synqto_active_url',
+      'nerd_buddy_active_url',
+    ]);
+  }
+}
 
 // Clean up tab tracking when closed
 chrome.tabs.onRemoved.addListener((tabId) => {
+  removedDuringHydration.add(tabId);
   registry.unregister(tabId);
+  persistContextRegistry();
 });
 
 // 3. Listen for tab switches to keep active problem context updated
@@ -65,25 +288,16 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
   try {
     const tab = await chrome.tabs.get(activeInfo.tabId);
     if (tab.url) {
-      registry.updateUrl(activeInfo.tabId, tab.url);
-
-      chrome.storage.local.set({
-        synqto_active_url: tab.url,
-        nerd_buddy_active_url: tab.url,
-      });
+      publishActiveTabContext(tab);
     }
   } catch (e) {}
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.url) {
-    registry.updateUrl(tabId, changeInfo.url);
-  }
-  if (tab.active && changeInfo.url) {
-    chrome.storage.local.set({
-      synqto_active_url: changeInfo.url,
-      nerd_buddy_active_url: changeInfo.url,
-    });
+    const updatedTab = { ...tab, id: tabId, url: changeInfo.url };
+    if (tab.active) publishActiveTabContext(updatedTab);
+    else updateTabContext(updatedTab);
   }
 });
 
@@ -98,36 +312,47 @@ function getRequiredCapability(messageType: string): Capability | undefined {
 // 4. Listen for messages from content scripts and floating widgets
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'PROBLEM_DETECTED') {
+    const resource = detectRoutedResource(
+      sender.tab?.url || message.payload?.url,
+      message.payload?.title || sender.tab?.title
+    );
     if (sender.tab?.id) {
-      registry.register({
-        tabId: sender.tab.id,
-        url: message.payload?.url || sender.tab.url,
-        roomId: message.payload?.roomId,
-        isProblemTab: true,
-      });
+      if (resource) {
+        registry.register({
+          tabId: sender.tab.id,
+          url: resource.url || sender.tab.url,
+          roomId: resource.roomId,
+          isProblemTab: true,
+        });
+        persistContextRegistry();
+      }
     }
     // Only accept from active foreground tab
-    if (sender.tab?.active) {
+    if (sender.tab?.active && resource) {
       chrome.storage.local.set({
-        synqto_active_problem: message.payload,
-        synqto_active_url: message.payload.url,
-        nerd_buddy_active_problem: message.payload,
-        nerd_buddy_active_url: message.payload.url,
+        synqto_active_problem: resource,
+        synqto_active_url: resource.url,
+        nerd_buddy_active_problem: resource,
+        nerd_buddy_active_url: resource.url,
       });
     }
   } else if (message.type === 'SET_TAB_ROOM_CONTEXT') {
     const targetTabId = message.tabId || sender.tab?.id;
     if (targetTabId && message.roomId) {
       registry.updateRoom(targetTabId, message.roomId);
+      persistContextRegistry();
     }
   } else if (
     message.type === 'LOCAL_CURSOR_MOVE' ||
     message.type === 'LOCAL_CLICK_PULSE' ||
     message.type === 'WHITEBOARD_STROKE_LOCAL' ||
+    message.type === 'WHITEBOARD_STROKES_LOCAL' ||
+    message.type === 'WHITEBOARD_UPDATE_STROKES_LOCAL' ||
     message.type === 'WHITEBOARD_CLEAR_LOCAL' ||
     message.type === 'WHITEBOARD_UNDO_LOCAL' ||
     message.type === 'WHITEBOARD_BG_LOCAL' ||
     message.type === 'WHITEBOARD_PAGE_SYNC_LOCAL' ||
+    message.type === 'WHITEBOARD_PRIVACY_LOCAL' ||
     message.type === 'TIMER_STATE_SYNC' ||
     message.type === 'CODE_DELTA_LOCAL' ||
     message.type === 'CODE_CURSOR_LOCAL' ||
@@ -136,24 +361,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     message.type === 'CODE_CURSOR_REMOTE' ||
     message.type === 'CODE_SYNC_REMOTE'
   ) {
-    // 1. Forward to sidepanel / extension views / offscreen
-    chrome.runtime.sendMessage(message).catch(() => {});
+    // Route only to relevant tabs matching this room/session and capability. The original
+    // runtime.sendMessage from the content script already reaches extension pages; sending it
+    // again here delivered every local mutation twice.
+    const explicitRoomId = message.roomId || message.payload?.roomId;
 
-    // 2. Route only to relevant tabs matching this room/session and capability
-    const targetRoomId =
-      message.roomId ||
-      message.payload?.roomId ||
-      (sender.tab?.id ? registry.getContext(sender.tab.id)?.roomId : undefined);
+    void registryReady.then(() => {
+      const targetRoomId =
+        explicitRoomId ||
+        (sender.tab?.id ? registry.getContext(sender.tab.id)?.roomId : undefined);
+      const routedMessage = targetRoomId ? { ...message, roomId: targetRoomId } : message;
+      const capability = getRequiredCapability(message.type);
+      const targetTabs = targetRoomId
+        ? registry.getTabsForRoom(targetRoomId, capability)
+        : registry.getAllProblemTabs();
 
-    const capability = getRequiredCapability(message.type);
-    const targetTabs = targetRoomId
-      ? registry.getTabsForRoom(targetRoomId, capability)
-      : registry.getAllProblemTabs();
-
-    targetTabs.forEach((tabId) => {
-      if (tabId !== sender.tab?.id) {
-        chrome.tabs.sendMessage(tabId, message).catch(() => {});
-      }
+      targetTabs.forEach((tabId) => {
+        if (tabId !== sender.tab?.id) {
+          chrome.tabs.sendMessage(tabId, routedMessage).catch(() => {});
+        }
+      });
     });
   } else if (message.type === 'OPEN_SIDEPANEL') {
     // chrome.sidePanel.open() must be invoked synchronously inside this handler to stay
@@ -225,6 +452,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
 
     return true; // async sendResponse
+  } else if (message.type === 'OPEN_WHITEBOARD_POPUP') {
+    const preset: PopupWindowPreset =
+      message.preset === 'small' || message.preset === 'medium' ||
+      message.preset === 'large' || message.preset === 'near-maximized'
+        ? message.preset
+        : 'large';
+    void openOrFocusWhiteboardPopup(preset, sender.tab?.windowId).then(sendResponse);
+    return true;
   } else if (message.type === 'SEND_PAGE_CHAT_MESSAGE') {
     // Forward to sidepanel for P2P mesh distribution
     chrome.runtime.sendMessage(message).catch(() => {});

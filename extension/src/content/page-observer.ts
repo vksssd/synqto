@@ -17,8 +17,17 @@ export class PageObserver {
   private callback: (resource: DetectedResource) => void;
   private mutationObserver: MutationObserver | null = null;
   private pollTimer: any = null;
+  private destroyed = false;
+  private originalPushState: History['pushState'] | null = null;
+  private originalReplaceState: History['replaceState'] | null = null;
+  private patchedPushState: History['pushState'] | null = null;
+  private patchedReplaceState: History['replaceState'] | null = null;
+  private invalidationNotified = false;
 
-  constructor(callback: (resource: DetectedResource) => void) {
+  constructor(
+    callback: (resource: DetectedResource) => void,
+    private readonly onContextInvalidated?: () => void
+  ) {
     this.callback = callback;
     this.init();
   }
@@ -32,25 +41,30 @@ export class PageObserver {
       const originalReplaceState = window.history.replaceState;
 
       if (typeof originalPushState === 'function') {
-        window.history.pushState = (...args) => {
-          originalPushState.apply(window.history, args);
-          this.debouncedCheck();
+        const observer = this;
+        this.originalPushState = originalPushState;
+        this.patchedPushState = function (this: History, ...args) {
+          originalPushState.apply(this, args);
+          if (!observer.destroyed) observer.debouncedCheck();
         };
+        window.history.pushState = this.patchedPushState;
       }
 
       if (typeof originalReplaceState === 'function') {
-        window.history.replaceState = (...args) => {
-          originalReplaceState.apply(window.history, args);
-          this.debouncedCheck();
+        const observer = this;
+        this.originalReplaceState = originalReplaceState;
+        this.patchedReplaceState = function (this: History, ...args) {
+          originalReplaceState.apply(this, args);
+          if (!observer.destroyed) observer.debouncedCheck();
         };
+        window.history.replaceState = this.patchedReplaceState;
       }
     }
-
     // 2. Navigation events
     if (typeof window !== 'undefined') {
-      window.addEventListener('popstate', () => this.debouncedCheck());
-      window.addEventListener('hashchange', () => this.debouncedCheck());
-      window.addEventListener('yt-navigate-finish', () => this.debouncedCheck());
+      window.addEventListener('popstate', this.handleNavigation);
+      window.addEventListener('hashchange', this.handleNavigation);
+      window.addEventListener('yt-navigate-finish', this.handleNavigation);
     }
 
     // 3. MutationObserver on document.title & problem headings
@@ -70,6 +84,7 @@ export class PageObserver {
     // 4. Polling fallback (1500ms interval) to catch quiet SPA transitions without CPU overhead
     this.pollTimer = setInterval(() => {
       if (!isExtensionValid()) {
+        this.notifyContextInvalidated();
         this.destroy();
         return;
       }
@@ -80,14 +95,31 @@ export class PageObserver {
   }
 
   private debouncedCheck = debounce(() => {
+    if (this.destroyed) return;
     if (!isExtensionValid()) {
+      this.notifyContextInvalidated();
       this.destroy();
       return;
     }
     this.checkCurrentPage();
   }, 250);
 
+  private handleNavigation = () => {
+    if (!this.destroyed) this.debouncedCheck();
+  };
+
+  private notifyContextInvalidated(): void {
+    if (this.invalidationNotified) return;
+    this.invalidationNotified = true;
+    try {
+      this.onContextInvalidated?.();
+    } catch (error) {
+      console.warn('[Synqto] Content-script invalidation cleanup failed:', error);
+    }
+  }
+
   private checkCurrentPage() {
+    if (this.destroyed) return;
     const currentUrl = window.location.href;
     const currentTitle = document.title;
 
@@ -105,13 +137,37 @@ export class PageObserver {
   }
 
   public destroy() {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    this.debouncedCheck.cancel();
+
     if (this.mutationObserver) {
       this.mutationObserver.disconnect();
       this.mutationObserver = null;
     }
-    if (this.pollTimer) {
+    if (this.pollTimer !== null) {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
     }
+
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('popstate', this.handleNavigation);
+      window.removeEventListener('hashchange', this.handleNavigation);
+      window.removeEventListener('yt-navigate-finish', this.handleNavigation);
+
+      // Do not overwrite a router/library that replaced History after us. Restoration is
+      // ownership-specific in the same way stale signaling cleanup is ownership-specific.
+      if (this.patchedPushState && window.history.pushState === this.patchedPushState) {
+        window.history.pushState = this.originalPushState!;
+      }
+      if (this.patchedReplaceState && window.history.replaceState === this.patchedReplaceState) {
+        window.history.replaceState = this.originalReplaceState!;
+      }
+    }
+
+    this.originalPushState = null;
+    this.originalReplaceState = null;
+    this.patchedPushState = null;
+    this.patchedReplaceState = null;
   }
 }

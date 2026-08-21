@@ -35,7 +35,7 @@ export class TierCoordinator {
   private activeTransaction: MigrationTransaction | null = null;
   private peerCount = 1;
 
-  private transitionTimer: any = null;
+  private transitionTimer: ReturnType<typeof setTimeout> | null = null;
   private onTierChangedFn: ((newTier: TopologyTier, oldTier: TopologyTier) => void) | null = null;
   private onStateChangedFn: ((newState: TopologyLifecycleState) => void) | null = null;
 
@@ -178,7 +178,7 @@ export class TierCoordinator {
     };
 
     this.setLifecycleState(evaluatingState);
-    if (this.transitionTimer) clearTimeout(this.transitionTimer);
+    if (this.transitionTimer !== null) clearTimeout(this.transitionTimer);
 
     this.transitionTimer = setTimeout(() => {
       this.transitionTimer = null;
@@ -231,7 +231,7 @@ export class TierCoordinator {
   }
 
   private cancelScheduledTransition(stableState: TopologyLifecycleState): void {
-    if (this.transitionTimer) {
+    if (this.transitionTimer !== null) {
       clearTimeout(this.transitionTimer);
       this.transitionTimer = null;
     }
@@ -251,7 +251,7 @@ export class TierCoordinator {
   }
 
   public reset(): void {
-    if (this.transitionTimer) clearTimeout(this.transitionTimer);
+    if (this.transitionTimer !== null) clearTimeout(this.transitionTimer);
     this.transitionTimer = null;
     this.activeTransaction = null;
     this.currentTier = 'TIER1_FULL_MESH';

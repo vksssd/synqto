@@ -1,6 +1,18 @@
 import { FabSettings, DEFAULT_FAB_SETTINGS, FAB_STORAGE_KEY, SYNQTO_FAB_STORAGE_KEY, FabPosition } from '@/features/settings/fab-settings.types';
+import { formatTimerTime as sharedFormatTimerTime } from '@/features/timer/timer-format';
+import {
+  adjustTimerState,
+  computeTimerTime,
+  editTimerState,
+  normalizeTimerState,
+  normalizePomodoroConfig,
+  parseTimerInput,
+  pauseTimerState,
+  startTimerState,
+} from '@/features/timer/timer-state';
 import { THEME_SETTINGS_STORAGE_KEY } from '@/features/settings/theme.service';
 import { detectResource } from './resource-detector';
+import { messageBelongsToRoom } from '@/core/runtime/tab-room-context';
 import { getPlatformBadgeColor, computeRoomId } from '@/features/room/room-utils';
 import { safeMediaUrl, safeCssColor, escapeHtml as sharedEscapeHtml } from '@/core/security/sanitize';
 import { renderIconSprite, icon, toolButton, ICON_BUTTON_CSS } from './tool-icons';
@@ -17,6 +29,12 @@ import {
   TimerMode,
 } from '@/features/timer/timer.types';
 import { WhiteboardToolType } from '@/features/whiteboard/whiteboard.types';
+import {
+  getWhiteboardLabelAnchor,
+  getWhiteboardRenderedBounds,
+  isLabelableWhiteboardTool,
+  withWhiteboardLabel,
+} from '@/features/whiteboard/whiteboard-label';
 
 interface ChatMessageData {
   id: string;
@@ -78,15 +96,26 @@ interface InPageStroke {
   expiresAt?: number;
 }
 
+interface InPageNotebookPage {
+  id: string;
+  title: string;
+  strokes: InPageStroke[];
+  undoStack: InPageStroke[];
+  redoStack: InPageStroke[];
+  background: string;
+  bgColor: string;
+  createdAt: number;
+}
+
+interface InPageNotebook {
+  activePageId: string;
+  pages: InPageNotebookPage[];
+}
+
 // ── Geometric Collision & Bounding Box Helpers ──
 function getStrokeBounds(stroke: InPageStroke): { minX: number; minY: number; maxX: number; maxY: number } {
-  if (stroke.geometry) {
-    const minX = Math.min(stroke.geometry.x1, stroke.geometry.x2);
-    const maxX = Math.max(stroke.geometry.x1, stroke.geometry.x2);
-    const minY = Math.min(stroke.geometry.y1, stroke.geometry.y2);
-    const maxY = Math.max(stroke.geometry.y1, stroke.geometry.y2);
-    return { minX, minY, maxX, maxY };
-  }
+  const renderedBounds = getWhiteboardRenderedBounds(stroke);
+  if (renderedBounds) return renderedBounds;
   if (stroke.points && stroke.points.length > 0) {
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const p of stroke.points) {
@@ -139,12 +168,14 @@ export class FloatingWidget {
   private liveStage: any = null;
   private peerCount = 1;
   private isServerConnected = true;
+  private serverUrl = 'wss://synqto-server.onrender.com/ws/';
   private serverToastMessage: string | null = null;
   private replyingTo: ChatMessageData | null = null;
   private revealedSpoilers: Record<string, boolean> = {};
 
   // Draggable Position State
   private currentPosition: FabPosition = { right: 24, bottom: 24 };
+  private timerPosition: FabPosition = { right: 140, bottom: 24 };
   private isDragging = false;
   private dragMoved = false;
   private popupSize: 'compact' | 'medium' | 'large' | 'fullscreen' = 'compact';
@@ -225,6 +256,10 @@ export class FloatingWidget {
   private wbPersonalStrokes: InPageStroke[] = [];
   private wbPersonalTheme: string = 'grid';
   private wbPersonalBgColor: string = '#090d16';
+  private wbCollabNotebook: InPageNotebook | null = null;
+  private wbPersonalNotebook: InPageNotebook | null = null;
+  private wbCollabPageId = '';
+  private wbPersonalPageId = '';
   /**
    * Undo history for the COLLABORATIVE board only.
    *
@@ -271,6 +306,24 @@ export class FloatingWidget {
    * guess from a UI that appears to be working.
    */
   private contextInvalidated = false;
+  private runtimeMessageListener: ((msg: any) => void) | null = null;
+  private storageChangeListener: ((changes: Record<string, any>, area: string) => void) | null = null;
+  private viewportResizeListener: (() => void) | null = null;
+  private viewportResizeRaf: number | null = null;
+  private activeDragCleanup: (() => void) | null = null;
+  private domReadyListener: (() => void) | null = null;
+
+  /**
+   * Whether the side panel is open. Decides who owns the timer countdown — see
+   * startTimerTickLoop. Mirrors the synqto_sidepanel_open / nerd_buddy_sidepanel_open flag
+   * that App.tsx maintains.
+   */
+  private sidePanelOpen = false;
+
+  /** Keeps the whiteboard canvas buffer in step with its CSS box. See initWhiteboardCanvas. */
+  private wbResizeObserver: ResizeObserver | null = null;
+  private wbResizeScheduled = false;
+
 
   /**
    * The redo stack belonging to the board currently being edited.
@@ -305,6 +358,7 @@ export class FloatingWidget {
   private wbIsMovingSelection: boolean = false;
   private wbDragStartCoords: { x: number; y: number } | null = null;
   private wbIsMarqueeSelecting: boolean = false;
+  private wbLabelEditorStrokeId: string | null = null;
   private wbAnimationRafId: number | null = null;
   private wbDrawRafScheduled: boolean = false;
   private latestPreviewPoints?: WhiteboardPoint[];
@@ -318,12 +372,17 @@ export class FloatingWidget {
 
   private async init() {
     await this.loadIdentity();
+    if (this.contextInvalidated) return;
     await this.loadSettings();
-    await this.loadInPagePersonalBoard();
+    if (this.contextInvalidated) return;
     await this.loadServerConnectionStatus();
+    if (this.contextInvalidated) return;
     await this.loadTimerState();
+    if (this.contextInvalidated) return;
     this.startTimerTickLoop();
     this.detectCurrentPageProblem();
+    await this.loadWhiteboardDocuments();
+    if (this.contextInvalidated) return;
     this.checkVisibilityAndRender();
     this.listenToStorageChanges();
     this.listenForRuntimeMessages();
@@ -334,8 +393,14 @@ export class FloatingWidget {
   private async loadServerConnectionStatus() {
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       try {
-        const res = await chrome.storage.local.get(['synqto_server_connected', 'nerd_buddy_server_connected']);
+        const res = await chrome.storage.local.get([
+          'synqto_server_connected',
+          'nerd_buddy_server_connected',
+          'synqto_server_url',
+          'nerd_buddy_server_url',
+        ]);
         this.isServerConnected = Boolean(res.synqto_server_connected ?? res.nerd_buddy_server_connected ?? true);
+        this.serverUrl = res.synqto_server_url || res.nerd_buddy_server_url || this.serverUrl;
       } catch (e) {
         this.isServerConnected = true;
       }
@@ -349,36 +414,112 @@ export class FloatingWidget {
     }
   }
 
-  private async loadInPagePersonalBoard() {
+  private collabNotebookStorageKey(): string | null {
+    const roomId = this.currentProblem?.roomId;
+    return roomId ? `synqto_collab_notebook_${roomId}` : null;
+  }
+
+  private createInPageNotebook(kind: 'personal' | 'collaborative'): InPageNotebook {
+    const id = kind === 'personal' ? 'personal-1' : `page-${this.currentProblem?.roomId || 'local'}`;
+    return {
+      activePageId: id,
+      pages: [{
+        id,
+        title: kind === 'personal' ? 'Scratchpad 1: Problem Dry Run' : 'Page 1: Architecture & Ideas',
+        strokes: [],
+        undoStack: [],
+        redoStack: [],
+        background: 'grid',
+        bgColor: '#090d16',
+        createdAt: Date.now(),
+      }],
+    };
+  }
+
+  private applyNotebookToBoard(kind: 'personal' | 'collaborative', notebook: InPageNotebook) {
+    const page = notebook.pages.find((candidate) => candidate.id === notebook.activePageId) || notebook.pages[0];
+    if (!page) return;
+    if (kind === 'personal') {
+      this.wbPersonalNotebook = notebook;
+      this.wbPersonalPageId = page.id;
+      this.wbPersonalStrokes = page.strokes || [];
+      this.wbPersonalRedoStack = page.redoStack || [];
+      this.wbPersonalTheme = page.background || 'grid';
+      this.wbPersonalBgColor = page.bgColor || '#090d16';
+    } else {
+      this.wbCollabNotebook = notebook;
+      this.wbCollabPageId = page.id;
+      this.wbStrokes = page.strokes || [];
+      this.wbRedoStack = page.redoStack || [];
+      this.wbTheme = page.background || 'grid';
+      this.wbBgColor = page.bgColor || '#090d16';
+    }
+  }
+
+  /** Loads the exact notebook documents used by WhiteboardService and standalone popouts. */
+  private async loadWhiteboardDocuments() {
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       try {
-        const res = await chrome.storage.local.get(['synqto_inpage_personal_board', 'synqto_wb_privacy_mode']);
-        if (res.synqto_inpage_personal_board) {
-          const board = res.synqto_inpage_personal_board;
-          if (Array.isArray(board.strokes)) this.wbPersonalStrokes = board.strokes;
-          if (board.theme) this.wbPersonalTheme = board.theme;
-          if (board.bgColor) this.wbPersonalBgColor = board.bgColor;
+        const collabKey = this.collabNotebookStorageKey();
+        const keys = [
+          'synqto_personal_notebook',
+          'synqto_whiteboard_privacy_mode',
+          // One-way personal-board migration from the old embedded-popup schema.
+          'synqto_inpage_personal_board',
+          'synqto_wb_privacy_mode',
+          ...(collabKey ? [collabKey] : []),
+        ];
+        const res = await chrome.storage.local.get(keys);
+
+        this.wbPrivacyMode =
+          res.synqto_whiteboard_privacy_mode || res.synqto_wb_privacy_mode || this.wbPrivacyMode;
+
+        let personal = res.synqto_personal_notebook as InPageNotebook | undefined;
+        if (!personal?.pages?.length) {
+          personal = this.createInPageNotebook('personal');
+          const legacy = res.synqto_inpage_personal_board;
+          if (legacy && Array.isArray(legacy.strokes)) {
+            personal.pages[0].strokes = legacy.strokes;
+            personal.pages[0].background = legacy.theme || personal.pages[0].background;
+            personal.pages[0].bgColor = legacy.bgColor || personal.pages[0].bgColor;
+          }
+          await chrome.storage.local.set({ synqto_personal_notebook: personal });
         }
-        if (res.synqto_wb_privacy_mode) {
-          this.wbPrivacyMode = res.synqto_wb_privacy_mode;
-        }
+        this.applyNotebookToBoard('personal', personal);
+
+        const collab = collabKey && res[collabKey]?.pages?.length
+          ? (res[collabKey] as InPageNotebook)
+          : this.createInPageNotebook('collaborative');
+        this.applyNotebookToBoard('collaborative', collab);
       } catch (e) {}
     }
   }
 
   private saveInPagePersonalBoard() {
-    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-      try {
-        chrome.storage.local.set({
-          synqto_inpage_personal_board: {
-            strokes: this.wbPersonalStrokes,
-            theme: this.wbPersonalTheme,
-            bgColor: this.wbPersonalBgColor,
-          },
-          synqto_wb_privacy_mode: this.wbPrivacyMode,
-        });
-      } catch (e) {}
-    }
+    this.persistWhiteboardDocument('personal');
+  }
+
+  private persistWhiteboardDocument(kind: 'personal' | 'collaborative') {
+    if (typeof chrome === 'undefined' || !chrome.storage?.local) return;
+    const notebook =
+      (kind === 'personal' ? this.wbPersonalNotebook : this.wbCollabNotebook) ||
+      this.createInPageNotebook(kind);
+    const pageId = kind === 'personal' ? this.wbPersonalPageId : this.wbCollabPageId;
+    const page = notebook.pages.find((candidate) => candidate.id === pageId) || notebook.pages[0];
+    if (!page) return;
+
+    page.strokes = kind === 'personal' ? this.wbPersonalStrokes : this.wbStrokes;
+    page.redoStack = kind === 'personal' ? this.wbPersonalRedoStack : this.wbRedoStack;
+    page.background = kind === 'personal' ? this.wbPersonalTheme : this.wbTheme;
+    page.bgColor = kind === 'personal' ? this.wbPersonalBgColor : this.wbBgColor;
+    notebook.activePageId = page.id;
+
+    const key = kind === 'personal' ? 'synqto_personal_notebook' : this.collabNotebookStorageKey();
+    if (!key) return;
+    chrome.storage.local.set({
+      [key]: notebook,
+      synqto_whiteboard_privacy_mode: this.wbPrivacyMode,
+    });
   }
 
   private async loadSettings() {
@@ -391,27 +532,19 @@ export class FloatingWidget {
         // ThemeService persists to 'synqto_theme_custom_settings'. So the widget silently
         // ignored every theme change and drifted permanently out of sync with the panel.
         THEME_SETTINGS_STORAGE_KEY,
-        'synqto_collab_notebook',
         'synqto_active_problem',
         'nerd_buddy_active_problem',
         'synqto_live_stage',
         'nerd_buddy_live_stage',
+        'synqto_sidepanel_open',
         'nerd_buddy_sidepanel_open',
         'nerd_buddy_peer_count',
       ]);
 
+      this.sidePanelOpen = Boolean(res.synqto_sidepanel_open ?? res.nerd_buddy_sidepanel_open);
+
       if (res[THEME_SETTINGS_STORAGE_KEY]) {
         this.themeSettings = res[THEME_SETTINGS_STORAGE_KEY];
-      }
-
-      if (res.synqto_collab_notebook && Array.isArray(res.synqto_collab_notebook.pages)) {
-        const nb = res.synqto_collab_notebook;
-        const activePage = nb.pages.find((p: any) => p.id === nb.activePageId) || nb.pages[0];
-        if (activePage) {
-          this.wbStrokes = activePage.strokes || [];
-          if (activePage.background) this.wbTheme = activePage.background;
-          if (activePage.bgColor) this.wbBgColor = activePage.bgColor;
-        }
       }
 
       if (res[SYNQTO_FAB_STORAGE_KEY] || res[FAB_STORAGE_KEY]) {
@@ -419,10 +552,12 @@ export class FloatingWidget {
       }
 
       // Initialize position based on persistence mode
-      if (this.settings.positionMode === 'permanent' && this.settings.savedPosition) {
-        this.currentPosition = { ...this.settings.savedPosition };
+      if (this.settings.positionMode === 'permanent') {
+        this.currentPosition = { ...(this.settings.savedMainPosition || this.settings.savedPosition || { right: 24, bottom: 24 }) };
+        this.timerPosition = { ...(this.settings.savedTimerPosition || { right: 140, bottom: 24 }) };
       } else {
         this.currentPosition = { right: 24, bottom: 24 };
+        this.timerPosition = { right: 140, bottom: 24 };
       }
 
       const problem = res.synqto_active_problem || res.nerd_buddy_active_problem;
@@ -505,6 +640,18 @@ export class FloatingWidget {
   }
 
   private destroyWidgetDOM() {
+    this.removeDomReadyListeners();
+    this.activeDragCleanup?.();
+    this.activeDragCleanup = null;
+    this.wbResizeObserver?.disconnect();
+    this.wbResizeObserver = null;
+    if (this.wbClearArmTimer !== null) clearTimeout(this.wbClearArmTimer);
+    this.wbClearArmTimer = null;
+    this.wbClearArmed = false;
+    if (this.wbAnimationRafId !== null) cancelAnimationFrame(this.wbAnimationRafId);
+    this.wbAnimationRafId = null;
+    this.wbDrawRafScheduled = false;
+    this.wbPatternCache.clear();
     if (this.hostElement) {
       this.hostElement.remove();
       this.hostElement = null;
@@ -520,10 +667,15 @@ export class FloatingWidget {
     if (document.getElementById('synqto-floating-host')) return;
 
     if (!document.body) {
+      this.removeDomReadyListeners();
+      this.domReadyListener = () => {
+        this.removeDomReadyListeners();
+        if (!this.contextInvalidated) this.checkVisibilityAndRender();
+      };
       if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', () => this.checkVisibilityAndRender(), { once: true });
+        document.addEventListener('DOMContentLoaded', this.domReadyListener, { once: true });
       } else {
-        window.addEventListener('load', () => this.checkVisibilityAndRender(), { once: true });
+        window.addEventListener('load', this.domReadyListener, { once: true });
       }
       return;
     }
@@ -549,6 +701,15 @@ export class FloatingWidget {
     this.shadow = host.attachShadow({ mode: 'open' });
 
     this.render();
+  }
+
+  private removeDomReadyListeners(): void {
+    if (!this.domReadyListener) return;
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('DOMContentLoaded', this.domReadyListener);
+    }
+    if (typeof window !== 'undefined') window.removeEventListener('load', this.domReadyListener);
+    this.domReadyListener = null;
   }
 
   /**
@@ -593,7 +754,20 @@ export class FloatingWidget {
       return;
     }
     try {
-      const p = (chrome.runtime as any)?.sendMessage?.(message);
+      const messageType =
+        message && typeof message === 'object' && typeof (message as Record<string, unknown>).type === 'string'
+          ? String((message as Record<string, unknown>).type)
+          : '';
+      if (messageType.startsWith('WHITEBOARD_') && messageType.endsWith('_LOCAL')) {
+        // Runtime delivery is for live peers; the canonical room-scoped notebook is what
+        // makes the exact same board survive closing the popup or opening a standalone view.
+        if (this.wbPrivacyMode === 'collaborative') this.persistWhiteboardDocument('collaborative');
+      }
+      const routedMessage =
+        this.currentProblem?.roomId && message && typeof message === 'object'
+          ? { ...(message as Record<string, unknown>), roomId: this.currentProblem.roomId }
+          : message;
+      const p = (chrome.runtime as any)?.sendMessage?.(routedMessage);
       if (p && typeof p.catch === 'function') {
         p.catch((err: any) => {
           if (String(err?.message || err).includes('Extension context invalidated')) {
@@ -612,30 +786,93 @@ export class FloatingWidget {
   private markContextInvalidated(): void {
     if (this.contextInvalidated) return;
     this.contextInvalidated = true;
+    this.releaseContextResources();
     try {
-      this.render();
+      this.renderContextInvalidatedState();
     } catch {
-      /* render itself may fail in a torn-down context; the flag is what matters */
+      /* DOM replacement itself may fail in a torn-down page; the flag is what matters */
     }
+  }
+
+  /** Leaves one inert explanation behind without rebuilding any interactive widget owners. */
+  private renderContextInvalidatedState(): void {
+    if (!this.shadow) return;
+    this.shadow.innerHTML = `
+      <div role="alert" style="
+        max-width: 300px;
+        padding: 10px 12px;
+        border: 1px solid rgba(245, 158, 11, 0.65);
+        border-radius: 10px;
+        background: rgba(30, 41, 59, 0.98);
+        color: #fef3c7;
+        font: 600 12px/1.4 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+        pointer-events: none;
+      ">
+        Synqto updated — reload this page to reconnect.
+      </div>
+    `;
+  }
+
+  /** Called by the shared content-script lifecycle coordinator when Chrome invalidates it. */
+  public handleContextInvalidated(): void {
+    this.markContextInvalidated();
+  }
+
+  private releaseContextResources(): void {
+    if (this.timerInterval !== null) clearInterval(this.timerInterval);
+    if (this.wbClearArmTimer !== null) clearTimeout(this.wbClearArmTimer);
+    this.timerInterval = null;
+    this.wbClearArmTimer = null;
+    this.wbClearArmed = false;
+    this.wbResizeObserver?.disconnect();
+    this.wbResizeObserver = null;
+    if (this.wbAnimationRafId !== null) cancelAnimationFrame(this.wbAnimationRafId);
+    if (this.viewportResizeRaf !== null) cancelAnimationFrame(this.viewportResizeRaf);
+    this.wbAnimationRafId = null;
+    this.viewportResizeRaf = null;
+    this.wbResizeScheduled = false;
+    this.wbDrawRafScheduled = false;
+    this.wbPatternCache.clear();
+    this.wbLaserTrails = [];
+    this.tempDisappearingStrokes = [];
+    this.activeDragCleanup?.();
+    this.activeDragCleanup = null;
+    this.removeDomReadyListeners();
+
+    if (this.viewportResizeListener && typeof window !== 'undefined') {
+      window.removeEventListener('resize', this.viewportResizeListener);
+    }
+    this.viewportResizeListener = null;
+    try {
+      if (this.runtimeMessageListener && chrome.runtime?.onMessage) {
+        chrome.runtime.onMessage.removeListener(this.runtimeMessageListener);
+      }
+      if (this.storageChangeListener && chrome.storage?.onChanged) {
+        chrome.storage.onChanged.removeListener(this.storageChangeListener);
+      }
+    } catch {
+      // Chrome listener removal can throw after the extension context has already vanished.
+    }
+    this.runtimeMessageListener = null;
+    this.storageChangeListener = null;
   }
 
   private listenForViewportResize() {
     if (typeof window === 'undefined') return;
-    let scheduled = false;
-    window.addEventListener(
-      'resize',
-      () => {
-        // Coalesce to one clamp per frame — resize fires continuously while dragging a window
-        // edge, and each handler run does layout-reading work.
-        if (scheduled) return;
-        scheduled = true;
-        requestAnimationFrame(() => {
-          scheduled = false;
-          this.applyHostPosition();
-        });
-      },
-      { passive: true }
-    );
+    if (this.viewportResizeListener) return;
+    this.viewportResizeListener = () => {
+      if (this.contextInvalidated || this.viewportResizeRaf !== null) return;
+      // Coalesce to one clamp per frame — resize fires continuously while dragging a window
+      // edge, and each handler run does layout-reading work.
+      this.viewportResizeRaf = requestAnimationFrame(() => {
+        this.viewportResizeRaf = null;
+        if (this.contextInvalidated) return;
+        this.applyHostPosition();
+        this.applyTimerPosition();
+      });
+    };
+    window.addEventListener('resize', this.viewportResizeListener, { passive: true });
   }
 
   private applyHostPosition() {
@@ -646,6 +883,33 @@ export class FloatingWidget {
     const bottom = Math.max(10, Math.min(window.innerHeight - 55, curBottom));
     this.hostElement.style.setProperty('right', `${right}px`, 'important');
     this.hostElement.style.setProperty('bottom', `${bottom}px`, 'important');
+  }
+
+  private applyTimerPosition() {
+    if (!this.shadow) return;
+    const right = Math.max(10, Math.min(window.innerWidth - 210, this.timerPosition.right));
+    const bottom = Math.max(10, Math.min(window.innerHeight - 55, this.timerPosition.bottom));
+    this.timerPosition = { right, bottom };
+    const timerFab = this.shadow.getElementById('nb-timer-fab-trigger') as HTMLElement | null;
+    if (timerFab) {
+      timerFab.style.setProperty('position', 'fixed', 'important');
+      timerFab.style.setProperty('right', `${right}px`, 'important');
+      timerFab.style.setProperty('bottom', `${bottom}px`, 'important');
+      timerFab.style.setProperty('z-index', '2147483646', 'important');
+    }
+    const popup = this.shadow.getElementById('nb-timer-popup-card') as HTMLElement | null;
+    if (popup) {
+      popup.style.position = 'fixed';
+      popup.style.right = `${right}px`;
+      popup.style.left = 'auto';
+      if (bottom > window.innerHeight - 390) {
+        popup.style.top = `${Math.max(10, window.innerHeight - bottom + 52)}px`;
+        popup.style.bottom = 'auto';
+      } else {
+        popup.style.bottom = `${bottom + 52}px`;
+        popup.style.top = 'auto';
+      }
+    }
   }
 
   /** Signature of the currently injected stylesheet, so it is only re-parsed on real change. */
@@ -886,11 +1150,11 @@ export class FloatingWidget {
 
         /* Dedicated Standalone Timer & Pomodoro Popup Window */
         .timer-popup-card {
-          display: ${this.isTimerOpen ? 'flex' : 'none'};
+          display: ${this.isTimerOpen && this.settings.showTimerFab !== false ? 'flex' : 'none'};
           flex-direction: column;
-          position: absolute;
-          ${isNearTop ? 'top: 52px; bottom: auto;' : 'bottom: 52px; top: auto;'}
-          ${isNearLeft ? 'left: 0; right: auto;' : 'right: 0; left: auto;'}
+          position: fixed;
+          right: ${Math.max(10, this.timerPosition.right)}px;
+          bottom: ${Math.max(62, this.timerPosition.bottom + 52)}px;
           width: 320px;
           background: var(--bg-card);
           border: 1px solid rgba(244, 63, 94, 0.5);
@@ -1033,11 +1297,34 @@ export class FloatingWidget {
         /* Messages List */
         .message-list {
           flex: 1;
+          /* min-height:0 is load-bearing, not cosmetic.
+             A flex item defaults to min-height:auto, which means it refuses to shrink below
+             its CONTENT height. In a column flex container that makes a scrolling child grow
+             with its content instead of scrolling — so as the conversation got longer the
+             list pushed the composer box past the bottom of the popup and the input simply
+             was not there any more. That is the "some parts are not visible" symptom, and it
+             appears only after enough messages accumulate, which is why it looks intermittent.
+             Every scrolling flex child in this stylesheet needs this. */
+          min-height: 0;
           overflow-y: auto;
           padding: 12px;
           display: flex;
           flex-direction: column;
           gap: 10px;
+        }
+
+        /* ── Height budget ──
+           The popup is a fixed-height column: chrome (header, tabs, toolbars, composer) plus
+           one flexible content area. Nothing guarantees the chrome leaves room for content —
+           open every whiteboard drawer at the smallest popup size and the canvas can be
+           squeezed toward zero.
+
+           A floor on the content area makes the content the last thing to give way: the
+           chrome scrolls or wraps before the working area disappears. Expressed against the
+           control scale so it stays correct if density is retuned. */
+        .message-list,
+        #nb-whiteboard-canvas {
+          min-height: max(120px, calc(var(--nb-ctl, 30px) * 4));
         }
 
         .chat-bubble {
@@ -1201,6 +1488,9 @@ export class FloatingWidget {
 
         #nb-whiteboard-canvas {
           flex-grow: 1;
+          /* Same flex rule as .message-list: without min-height:0 a growing child cannot
+             shrink, so the toolbars above it get pushed out of the popup instead. */
+          min-height: 0;
           width: 100%;
           height: 100%;
           cursor: crosshair;
@@ -1283,7 +1573,7 @@ export class FloatingWidget {
               <div class="problem-title">${this.escapeHtml(problemTitle)}</div>
               <div class="badges-row">
                 <span class="platform-pill">${platform}</span>
-                <span class="peer-count-pill" title="${this.isServerConnected ? 'Signaling Server: Connected (wss://synqto-server.onrender.com/ws/)' : 'Signaling Server: Disconnected (Offline Mode)'}">
+                <span class="peer-count-pill" title="${this.isServerConnected ? `Signaling Server: Connected (${this.escapeHtml(this.serverUrl)})` : 'Signaling Server: Disconnected (Offline Mode)'}">
                   <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${this.isServerConnected ? '#10b981' : '#ef4444'};box-shadow:0 0 6px ${this.isServerConnected ? '#10b981' : '#ef4444'};"></span>
                   <span>${this.peerCount} Online ${this.isServerConnected ? '' : '(Offline)'}</span>
                 </span>
@@ -1465,17 +1755,18 @@ export class FloatingWidget {
             </div>
 
             <!-- Floating Selection Action Bar -->
-            <div id="nb-wb-selection-floating-bar" class="nb-toolstrip" style="display:${this.wbSelectedStrokeIds.length > 0 ? 'flex' : 'none'};align-items:center;gap:4px;padding:3px 8px;background:rgba(15,23,42,0.95);border-bottom:1px solid #6366f1;box-shadow:0 4px 12px rgba(0,0,0,0.5);font-size: var(--font-size-xs);">
+            <div id="nb-wb-selection-floating-bar" class="nb-toolstrip" style="display:${this.wbSelectedStrokeIds.length > 0 ? 'flex' : 'none'};align-items:center;background:rgba(15,23,42,0.95);border-bottom:1px solid #6366f1;box-shadow:0 4px 12px rgba(0,0,0,0.5);font-size: var(--font-size-xs);">
               <span id="nb-wb-sel-count" style="color:#818cf8;font-weight:700;margin-right:2px;flex:0 0 auto;">${this.wbSelectedStrokeIds.length} selected</span>
               ${toolButton({ iconId: 'copy', label: 'Copy', title: 'Copy (Ctrl+C)', id: 'nb-wb-sel-copy', style: 'background:rgba(99,102,241,0.2);border-color:rgba(99,102,241,0.4);color:#fff;' })}
               ${toolButton({ iconId: 'duplicate', label: 'Duplicate', title: 'Duplicate (Ctrl+D)', id: 'nb-wb-sel-dup', style: 'background:rgba(16,185,129,0.2);border-color:rgba(16,185,129,0.4);color:#fff;' })}
               ${toolButton({ iconId: 'paste', label: 'Paste', title: 'Paste (Ctrl+V)', id: 'nb-wb-sel-paste', style: 'background:rgba(56,189,248,0.2);border-color:rgba(56,189,248,0.4);color:#fff;' })}
+              ${toolButton({ iconId: 'text', label: 'Label', title: 'Edit object label', id: 'nb-wb-sel-label', style: 'display:none;background:rgba(168,85,247,0.2);border-color:rgba(168,85,247,0.4);color:#fff;' })}
               ${toolButton({ iconId: 'trash', label: 'Delete', title: 'Delete (Del)', id: 'nb-wb-sel-del', style: 'background:rgba(239,68,68,0.2);border-color:rgba(239,68,68,0.4);color:#fca5a5;' })}
               ${toolButton({ iconId: 'close', label: 'Deselect', title: 'Deselect (Esc)', id: 'nb-wb-sel-clear', style: 'border-color:var(--border-subtle);' })}
             </div>
 
             <!-- Drawer: Shapes -->
-            <div id="nb-wb-drawer-shapes" class="nb-toolstrip" style="display:${this.wbShowShapesDrawer ? 'flex' : 'none'};align-items:center;gap:3px;padding:3px 6px;background:rgba(0,0,0,0.85);border-bottom:1px solid var(--border-subtle);overflow-x:auto;">
+            <div id="nb-wb-drawer-shapes" class="nb-toolstrip" style="display:${this.wbShowShapesDrawer ? 'flex' : 'none'};align-items:center;background:rgba(0,0,0,0.85);border-bottom:1px solid var(--border-subtle);overflow-x:auto;">
               <span style="font-size: var(--font-size-2xs);color:var(--text-muted);font-weight:600;flex:0 0 auto;">Shapes</span>
               ${([
                 { id: 'line', icon: 'line', label: 'Line' },
@@ -1492,6 +1783,11 @@ export class FloatingWidget {
               ] as Array<{ id: string; icon: ToolIconId; label: string }>).map((t) =>
                 toolButton({
                   iconId: t.icon,
+                  // Must carry wb-tool-btn: the tool-selection handler binds to
+                  // '.wb-tool-btn[data-wbtool]'. Migrating these to toolButton() emitted only
+                  // 'nb-tbtn', so every shapes/DSA/architecture tool silently stopped
+                  // responding to clicks while still looking and hovering like a live control.
+                  className: 'wb-tool-btn',
                   label: t.label,
                   title: `${t.label} shape`,
                   dataAttr: `data-wbtool="${t.id}"`,
@@ -1501,7 +1797,7 @@ export class FloatingWidget {
             </div>
 
             <!-- Drawer: DSA Visualizers -->
-            <div id="nb-wb-drawer-dsa" class="nb-toolstrip" style="display:${this.wbShowDsaDrawer ? 'flex' : 'none'};align-items:center;gap:3px;padding:3px 6px;background:rgba(8,28,44,0.95);border-bottom:1px solid rgba(56,189,248,0.3);overflow-x:auto;">
+            <div id="nb-wb-drawer-dsa" class="nb-toolstrip" style="display:${this.wbShowDsaDrawer ? 'flex' : 'none'};align-items:center;background:rgba(8,28,44,0.95);border-bottom:1px solid rgba(56,189,248,0.3);overflow-x:auto;">
               <span style="font-size: var(--font-size-2xs);color:#7dd3fc;font-weight:700;flex:0 0 auto;">DSA</span>
               ${([
                 { id: 'array_cells', icon: 'array', label: 'Array', title: 'Array cells [0..N]' },
@@ -1515,6 +1811,11 @@ export class FloatingWidget {
               ] as Array<{ id: string; icon: ToolIconId; label: string; title: string }>).map((t) =>
                 toolButton({
                   iconId: t.icon,
+                  // Must carry wb-tool-btn: the tool-selection handler binds to
+                  // '.wb-tool-btn[data-wbtool]'. Migrating these to toolButton() emitted only
+                  // 'nb-tbtn', so every shapes/DSA/architecture tool silently stopped
+                  // responding to clicks while still looking and hovering like a live control.
+                  className: 'wb-tool-btn',
                   label: t.label,
                   title: t.title,
                   dataAttr: `data-wbtool="${t.id}"`,
@@ -1525,7 +1826,7 @@ export class FloatingWidget {
             </div>
 
             <!-- Drawer: Architecture Shapes -->
-            <div id="nb-wb-drawer-arch" class="nb-toolstrip" style="display:${this.wbShowArchDrawer ? 'flex' : 'none'};align-items:center;gap:3px;padding:3px 6px;background:rgba(0,0,0,0.9);border-bottom:1px solid var(--border-subtle);overflow-x:auto;">
+            <div id="nb-wb-drawer-arch" class="nb-toolstrip" style="display:${this.wbShowArchDrawer ? 'flex' : 'none'};align-items:center;background:rgba(0,0,0,0.9);border-bottom:1px solid var(--border-subtle);overflow-x:auto;">
               <span style="font-size: var(--font-size-2xs);color:var(--text-muted);font-weight:600;flex:0 0 auto;">Arch</span>
               ${([
                 { id: 'db_cylinder', icon: 'database', label: 'SQL', title: 'SQL database' },
@@ -1549,6 +1850,11 @@ export class FloatingWidget {
               ] as Array<{ id: string; icon: ToolIconId; label: string; title: string }>).map((t) =>
                 toolButton({
                   iconId: t.icon,
+                  // Must carry wb-tool-btn: the tool-selection handler binds to
+                  // '.wb-tool-btn[data-wbtool]'. Migrating these to toolButton() emitted only
+                  // 'nb-tbtn', so every shapes/DSA/architecture tool silently stopped
+                  // responding to clicks while still looking and hovering like a live control.
+                  className: 'wb-tool-btn',
                   label: t.label,
                   title: t.title,
                   dataAttr: `data-wbtool="${t.id}"`,
@@ -1570,14 +1876,37 @@ export class FloatingWidget {
               </div>
 
               <div style="display:flex;gap:3px;align-items:center;">
-                ${['#090d16', '#0f172a', '#062c24', '#fef3c7', '#ffffff', '#f8fafc', '#1e1035'].map((bg) => `
-                  <div class="bg-dot" data-wbbg="${bg}" style="width:12px;height:12px;border-radius:3px;background:${bg};border:${this.wbBgColor === bg ? '2px solid #6366f1' : '1px solid rgba(255,255,255,0.25)'};cursor:pointer;" title="Background: ${bg}"></div>
+                ${([
+                  { v: '#090d16', n: 'Midnight' },
+                  { v: '#0f172a', n: 'Slate' },
+                  { v: '#062c24', n: 'Forest' },
+                  { v: '#fef3c7', n: 'Cream' },
+                  { v: '#ffffff', n: 'White' },
+                  { v: '#f8fafc', n: 'Paper' },
+                  { v: '#1e1035', n: 'Plum' },
+                ]).map(({ v: bg, n: bgName }) => `
+                  <!-- A colour swatch communicates entirely through colour, so without a
+                       name it is unusable to a screen reader and unidentifiable to anyone
+                       who cannot distinguish the hues. The 12px box was also far below a
+                       usable pointer target; the swatch is now sized from the shared scale
+                       with the visible colour inset, so the target grows without the dot
+                       looking heavy. -->
+                  <button type="button" class="bg-dot nb-swatch" data-wbbg="${bg}" role="radio" aria-checked="${this.wbBgColor === bg}" aria-label="${bgName} background" title="${bgName} background" style="--nb-swatch-color:${bg};${this.wbBgColor === bg ? 'border-color:#6366f1;' : ''}"></button>
                 `).join('')}
               </div>
 
               <div style="display:flex;gap:4px;align-items:center;">
-                ${['#6366f1', '#06b6d4', '#10b981', '#f59e0b', '#f43f5e', '#a855f7', '#ffffff', '#0f172a'].map((c) => `
-                  <div class="color-dot ${this.wbColor === c ? 'active' : ''}" data-color="${c}" style="background:${c};"></div>
+                ${([
+                  { v: '#6366f1', n: 'Indigo' },
+                  { v: '#06b6d4', n: 'Cyan' },
+                  { v: '#10b981', n: 'Green' },
+                  { v: '#f59e0b', n: 'Amber' },
+                  { v: '#f43f5e', n: 'Rose' },
+                  { v: '#a855f7', n: 'Purple' },
+                  { v: '#ffffff', n: 'White' },
+                  { v: '#0f172a', n: 'Ink' },
+                ]).map(({ v: c, n: colorName }) => `
+                  <button type="button" class="color-dot nb-swatch ${this.wbColor === c ? 'active' : ''}" data-color="${c}" role="radio" aria-checked="${this.wbColor === c}" aria-label="${colorName} pen" title="${colorName}" style="--nb-swatch-color:${c};"></button>
                 `).join('')}
               </div>
 
@@ -1591,6 +1920,11 @@ export class FloatingWidget {
 
             <!-- HTML5 Interactive Canvas -->
             <canvas id="nb-whiteboard-canvas"></canvas>
+            <div id="nb-wb-label-editor" style="display:none;position:absolute;z-index:80;align-items:center;gap:4px;padding:5px 6px;border-radius:7px;border:1px solid rgba(168,85,247,0.6);background:rgba(15,23,42,0.97);box-shadow:0 10px 25px rgba(0,0,0,0.7);">
+              <input id="nb-wb-label-input" type="text" aria-label="Object label" placeholder="Object label" style="width:130px;padding:4px 6px;border-radius:4px;border:1px solid var(--border-subtle);background:rgba(0,0,0,0.45);color:#fff;font-size:var(--font-size-sm);outline:none;" />
+              <button id="nb-wb-label-save" class="nb-tbtn" type="button">Save</button>
+              <button id="nb-wb-label-skip" class="nb-tbtn" type="button">Skip</button>
+            </div>
           </div>
         ` : `
           <!-- Chat Messages View -->
@@ -1601,50 +1935,7 @@ export class FloatingWidget {
                 <div style="font-size: var(--font-size-md);font-weight:600;color:var(--text-secondary);">No messages yet</div>
                 <div style="font-size: var(--font-size-sm);max-width:220px;">Say hello or ask for a hint! Messages are synchronized P2P across all peers.</div>
               </div>
-            ` : this.messages.map((m, idx) => `
-              <div class="chat-bubble ${m.isSelf ? 'self' : 'other'}" id="nb-msg-${this.escapeHtml(m.id)}">
-                ${m.replyPreview ? `
-                  <div class="wa-quote-box">
-                    <div style="font-weight:700;color:var(--primary);">${this.escapeHtml(m.replyPreview.split(':')[0] || 'Reply')}</div>
-                    <div style="color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this.escapeHtml(m.replyPreview)}</div>
-                  </div>
-                ` : ''}
-                
-                ${!m.isSelf ? `
-                  <div class="chat-header">
-                    <div class="chat-author">
-                      <!-- from.avatar and from.color are as remote as from.nickname beside
-                           them: all three arrive on the sender's packet identity. Only the
-                           nickname was escaped, leaving avatar as an HTML sink and color as
-                           a CSS-declaration sink in the adjacent style attribute. -->
-                      <span>${this.escapeHtml(m.from?.avatar || '👤')}</span>
-                      <span style="color:${safeCssColor(m.from?.color, 'var(--primary)')};">
-                        ${this.escapeHtml(m.from?.nickname || 'Buddy')}
-                      </span>
-                    </div>
-                    <button class="icon-btn nb-reply-trigger" data-id="${this.escapeHtml(m.id)}" data-text="${this.escapeHtml(m.text.slice(0, 35))}" data-nick="${this.escapeHtml(m.from?.nickname || 'Buddy')}" style="padding:0;width:18px;height:18px;" title="Reply">
-                      ↩
-                    </button>
-                  </div>
-                ` : ''}
-
-                <div class="chat-body">
-                  ${this.renderFormattedText(m.text, idx, m)}
-                  
-                  <span class="chat-meta">
-                    <span>${this.formatTimestamp(m.timestamp)}</span>
-                    ${m.isSelf ? `
-                      <span class="ack-icon">
-                        ${m.status === 'pending' ? '⏳' : ''}
-                        ${m.status === 'sent' ? '<span style="color:var(--text-dim);">✓</span>' : ''}
-                        ${m.status === 'delivered' ? '<span style="color:var(--text-secondary);">✓✓</span>' : ''}
-                        ${m.status === 'read' ? '<span class="ack-read">✓✓</span>' : ''}
-                      </span>
-                    ` : ''}
-                  </span>
-                </div>
-              </div>
-            `).join('')}
+            ` : this.messages.map((m, idx) => this.renderChatBubble(m, idx)).join('')}
           </div>
 
           <!-- Quick Strategy Prompt Pills -->
@@ -1663,7 +1954,7 @@ export class FloatingWidget {
               👁️
             </button>
             <input type="text" class="input-glass" id="nb-input" placeholder="Type a hint, code snippet, or ||spoiler||..." />
-            <button type="submit" class="btn-send">
+            <button type="submit" class="btn-send" aria-label="Send message" title="Send message">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <line x1="22" y1="2" x2="11" y2="13"></line>
                 <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
@@ -1712,9 +2003,8 @@ export class FloatingWidget {
               </div>
             </div>
 
-            <div id="nb-timer-time" style="font-family:var(--font-mono);font-size:42px;font-weight:800;color:#ffffff;letter-spacing:-1px;line-height:1;margin-top:12px;">
-              ${this.formatTimerTime(this.timerState.timeLeftSec)}
-            </div>
+            <input id="nb-timer-time" aria-label="Timer value" title="Edit using minutes, MM:SS, or H:MM:SS" value="${this.formatTimerTime(this.timerState.timeLeftSec)}" style="width:180px;box-sizing:border-box;border:1px solid transparent;border-radius:8px;background:transparent;padding:2px 6px;font-family:var(--font-mono);font-size:42px;font-weight:800;color:#ffffff;text-align:center;letter-spacing:-1px;line-height:1;margin-top:12px;outline:none;" />
+            <div id="nb-timer-edit-error" role="alert" aria-live="polite" style="min-height:13px;margin-top:4px;color:#fca5a5;font-size:var(--font-size-2xs);line-height:1.2;text-align:center;"></div>
 
             <!-- Racing Track Waypoints -->
             <div style="display:flex;justify-content:space-between;width:100%;font-size: var(--font-size-2xs);color:var(--text-muted);margin-top:8px;padding:0 2px;">
@@ -1746,7 +2036,7 @@ export class FloatingWidget {
       <!-- FAB Controls Row: Standalone Rocket Racing Timer FAB + Main Synqto FAB -->
       <div class="fab-row" style="display:flex;align-items:center;gap:8px;position:relative;">
         <!-- 1. Separate Standalone Rocket Racing Focus Timer FAB (Shown when timer is on/enabled) -->
-        ${(this.timerConfig.enabled || this.timerState.isRunning) ? `
+        ${this.settings.showTimerFab !== false && this.settings.enableTimer !== false && (this.timerConfig.enabled || this.timerState.isRunning) ? `
           <button class="timer-fab-button" id="nb-timer-fab-trigger" title="Focus Timer (Click to open, click play icon to toggle)">
             <span style="font-size: var(--font-size-md);">${this.timerState.mode === 'pomodoro' ? '🍅' : this.timerState.mode === 'short_break' ? '☕' : this.timerState.mode === 'long_break' ? '🌴' : '⏱️'}</span>
             <span class="timer-fab-rocket" style="animation:${this.timerState.isRunning ? 'rocketThrust 0.8s ease-in-out infinite alternate' : 'none'};">🚀</span>
@@ -1764,12 +2054,12 @@ export class FloatingWidget {
         ` : ''}
 
         <!-- 2. Main Synqto App FAB -->
-        <button class="fab-button" id="nb-fab-trigger" title="Drag anywhere or click to open Synqto">
+        ${this.settings.showMainFab !== false ? `<button class="fab-button" id="nb-fab-trigger" title="Drag anywhere or click to open Synqto">
           <span class="drag-grip">⠿</span>
           ${isLive ? `<span class="live-dot"></span>` : `<span>${fabIcon}</span>`}
           <span>${fabLabel}</span>
           ${this.unreadCount > 0 ? `<span class="fab-badge" id="nb-fab-badge">${this.unreadCount}</span>` : ''}
-        </button>
+        </button>` : ''}
       </div>
     `;
 
@@ -1844,6 +2134,7 @@ export class FloatingWidget {
     }
 
     bodyNode.innerHTML = bodyHtml;
+    this.applyTimerPosition();
 
     this.attachEventListeners();
     if (isWhiteboardTab) {
@@ -1852,6 +2143,90 @@ export class FloatingWidget {
   }
 
 
+
+
+  /**
+   * Renders ONE chat bubble.
+   *
+   * Extracted from the render template so the same markup serves two callers: the full
+   * render (which maps over every message) and appendChatBubble (which adds a single new
+   * one). Before this, the only way to show a new message was to rebuild the entire popup —
+   * so every message sent or received destroyed the canvas, the scroll position and every
+   * listener, and repainted the empty intermediate state. During an active conversation that
+   * is a rebuild per message.
+   *
+   * One definition, two call sites: the incremental path cannot drift from the full one.
+   */
+  private renderChatBubble(m: any, idx: number): string {
+    return `
+              <div class="chat-bubble ${m.isSelf ? 'self' : 'other'}" id="nb-msg-${this.escapeHtml(m.id)}">
+                ${m.replyPreview ? `
+                  <div class="wa-quote-box">
+                    <div style="font-weight:700;color:var(--primary);">${this.escapeHtml(m.replyPreview.split(':')[0] || 'Reply')}</div>
+                    <div style="color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this.escapeHtml(m.replyPreview)}</div>
+                  </div>
+                ` : ''}
+
+                ${!m.isSelf ? `
+                  <div class="chat-header">
+                    <div class="chat-author">
+                      <!-- from.avatar and from.color are as remote as from.nickname beside
+                           them: all three arrive on the sender's packet identity. Only the
+                           nickname was escaped, leaving avatar as an HTML sink and color as
+                           a CSS-declaration sink in the adjacent style attribute. -->
+                      <span>${this.escapeHtml(m.from?.avatar || '👤')}</span>
+                      <span style="color:${safeCssColor(m.from?.color, 'var(--primary)')};">
+                        ${this.escapeHtml(m.from?.nickname || 'Buddy')}
+                      </span>
+                    </div>
+                    <button class="icon-btn nb-reply-trigger" data-id="${this.escapeHtml(m.id)}" data-text="${this.escapeHtml(m.text.slice(0, 35))}" data-nick="${this.escapeHtml(m.from?.nickname || 'Buddy')}" style="padding:0;width:18px;height:18px;" title="Reply">
+                      ↩
+                    </button>
+                  </div>
+                ` : ''}
+
+                <div class="chat-body">
+                  ${this.renderFormattedText(m.text, idx, m)}
+
+                  <span class="chat-meta">
+                    <span>${this.formatTimestamp(m.timestamp)}</span>
+                    ${m.isSelf ? `
+                      <span class="ack-icon">
+                        ${m.status === 'pending' ? '⏳' : ''}
+                        ${m.status === 'sent' ? '<span style="color:var(--text-dim);">✓</span>' : ''}
+                        ${m.status === 'delivered' ? '<span style="color:var(--text-secondary);">✓✓</span>' : ''}
+                        ${m.status === 'read' ? '<span class="ack-read">✓✓</span>' : ''}
+                      </span>
+                    ` : ''}
+                  </span>
+                </div>
+              </div>
+    `;
+  }
+
+  /**
+   * Appends a single new message to the live chat list without touching anything else.
+   *
+   * Falls back to a full render when the list is not currently mounted (the whiteboard tab
+   * is showing, or the popup has never been opened), because there is nothing to append to.
+   */
+  private appendChatBubble(m: any): boolean {
+    if (!this.shadow) return false;
+    const list = this.shadow.getElementById('nb-messages');
+    if (!list) return false;
+
+    // The empty state is a sibling of the bubbles inside the same container, so the first
+    // real message has to replace it rather than append after it — otherwise "No messages
+    // yet" stays on screen above the conversation.
+    if (this.messages.length === 1) return false;
+
+    const holder = document.createElement('div');
+    holder.innerHTML = this.renderChatBubble(m, this.messages.length - 1);
+    const node = holder.firstElementChild;
+    if (!node) return false;
+    list.appendChild(node);
+    return true;
+  }
 
   /**
    * Applies state that is expressible as a class or attribute, WITHOUT rebuilding the DOM.
@@ -1912,6 +2287,11 @@ export class FloatingWidget {
 
   private attachEventListeners() {
     if (!this.shadow) return;
+    this.activeDragCleanup?.();
+    this.activeDragCleanup = null;
+    if (this.wbClearArmTimer !== null) clearTimeout(this.wbClearArmTimer);
+    this.wbClearArmTimer = null;
+    this.wbClearArmed = false;
 
     // Draggable FAB Implementation
     const fabBtn = this.shadow.getElementById('nb-fab-trigger');
@@ -1942,13 +2322,18 @@ export class FloatingWidget {
         }
       };
 
+      const cleanupDrag = () => {
+        window.removeEventListener('mousemove', onPointerMove);
+        window.removeEventListener('mouseup', onPointerUp);
+        window.removeEventListener('touchmove', onPointerMove);
+        window.removeEventListener('touchend', onPointerUp);
+        if (this.activeDragCleanup === cleanupDrag) this.activeDragCleanup = null;
+      };
+
       const onPointerUp = () => {
         if (this.isDragging) {
           this.isDragging = false;
-          window.removeEventListener('mousemove', onPointerMove);
-          window.removeEventListener('mouseup', onPointerUp);
-          window.removeEventListener('touchmove', onPointerMove);
-          window.removeEventListener('touchend', onPointerUp);
+          cleanupDrag();
 
           if (this.dragMoved) {
             // If permanent mode, persist to storage
@@ -1956,10 +2341,14 @@ export class FloatingWidget {
               const updatedSettings: FabSettings = {
                 ...this.settings,
                 savedPosition: { ...this.currentPosition },
+                savedMainPosition: { ...this.currentPosition },
               };
               this.settings = updatedSettings;
               if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-                chrome.storage.local.set({ [FAB_STORAGE_KEY]: updatedSettings });
+                chrome.storage.local.set({
+                  [FAB_STORAGE_KEY]: updatedSettings,
+                  [SYNQTO_FAB_STORAGE_KEY]: updatedSettings,
+                });
               }
             }
 
@@ -1979,6 +2368,8 @@ export class FloatingWidget {
         initialRight = this.currentPosition.right;
         initialBottom = this.currentPosition.bottom;
 
+        this.activeDragCleanup?.();
+        this.activeDragCleanup = cleanupDrag;
         window.addEventListener('mousemove', onPointerMove, { passive: true });
         window.addEventListener('mouseup', onPointerUp);
         window.addEventListener('touchmove', onPointerMove, { passive: true });
@@ -2012,6 +2403,70 @@ export class FloatingWidget {
     // Separate Standalone Focus Timer FAB Events
     const timerFabBtn = this.shadow.getElementById('nb-timer-fab-trigger');
     const timerFabToggleBtn = this.shadow.getElementById('nb-timer-fab-toggle-btn');
+    let timerDragging = false;
+    let timerDragMoved = false;
+    let timerStartX = 0;
+    let timerStartY = 0;
+    let timerInitialRight = 140;
+    let timerInitialBottom = 24;
+
+    const onTimerPointerMove = (event: MouseEvent | TouchEvent) => {
+      if (!timerDragging) return;
+      const clientX = 'touches' in event ? event.touches[0].clientX : event.clientX;
+      const clientY = 'touches' in event ? event.touches[0].clientY : event.clientY;
+      const dx = clientX - timerStartX;
+      const dy = clientY - timerStartY;
+      if (Math.hypot(dx, dy) <= 4) return;
+      timerDragMoved = true;
+      this.timerPosition = { right: timerInitialRight - dx, bottom: timerInitialBottom - dy };
+      this.applyTimerPosition();
+    };
+
+    const cleanupTimerDrag = () => {
+      window.removeEventListener('mousemove', onTimerPointerMove);
+      window.removeEventListener('mouseup', onTimerPointerUp);
+      window.removeEventListener('touchmove', onTimerPointerMove);
+      window.removeEventListener('touchend', onTimerPointerUp);
+      if (this.activeDragCleanup === cleanupTimerDrag) this.activeDragCleanup = null;
+    };
+
+    const onTimerPointerUp = () => {
+      if (!timerDragging) return;
+      timerDragging = false;
+      cleanupTimerDrag();
+      if (timerDragMoved && this.settings.positionMode === 'permanent') {
+        const updatedSettings: FabSettings = {
+          ...this.settings,
+          savedTimerPosition: { ...this.timerPosition },
+        };
+        this.settings = updatedSettings;
+        chrome.storage?.local?.set({
+          [FAB_STORAGE_KEY]: updatedSettings,
+          [SYNQTO_FAB_STORAGE_KEY]: updatedSettings,
+        });
+      }
+      setTimeout(() => { timerDragMoved = false; }, 80);
+    };
+
+    const onTimerPointerDown = (event: MouseEvent | TouchEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('#nb-timer-fab-toggle-btn')) return;
+      timerDragging = true;
+      timerDragMoved = false;
+      timerStartX = 'touches' in event ? event.touches[0].clientX : event.clientX;
+      timerStartY = 'touches' in event ? event.touches[0].clientY : event.clientY;
+      timerInitialRight = this.timerPosition.right;
+      timerInitialBottom = this.timerPosition.bottom;
+      this.activeDragCleanup?.();
+      this.activeDragCleanup = cleanupTimerDrag;
+      window.addEventListener('mousemove', onTimerPointerMove, { passive: true });
+      window.addEventListener('mouseup', onTimerPointerUp);
+      window.addEventListener('touchmove', onTimerPointerMove, { passive: true });
+      window.addEventListener('touchend', onTimerPointerUp);
+    };
+
+    timerFabBtn?.addEventListener('mousedown', onTimerPointerDown);
+    timerFabBtn?.addEventListener('touchstart', onTimerPointerDown, { passive: true });
 
     timerFabToggleBtn?.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -2019,6 +2474,7 @@ export class FloatingWidget {
     });
 
     timerFabBtn?.addEventListener('click', () => {
+      if (timerDragMoved) return;
       this.isTimerOpen = !this.isTimerOpen;
       this.render();
     });
@@ -2055,7 +2511,9 @@ export class FloatingWidget {
     const openPanelBtn = this.shadow.getElementById('nb-open-sidepanel');
     openPanelBtn?.addEventListener('click', () => {
       this.isOpen = false;
-      this.render();
+      // Closing is a class toggle; a full render here would blink the popup out on the way
+      // to opening the side panel.
+      this.applyLightweightState();
       this.requestOpenSidePanel();
     });
 
@@ -2066,7 +2524,9 @@ export class FloatingWidget {
     const openCoFocusBtn = this.shadow.getElementById('nb-open-cofocus');
     openCoFocusBtn?.addEventListener('click', () => {
       this.isOpen = false;
-      this.render();
+      // Closing is a class toggle; a full render here would blink the popup out on the way
+      // to opening the side panel.
+      this.applyLightweightState();
       this.requestOpenSidePanel({ openCoFocus: true });
     });
 
@@ -2115,11 +2575,51 @@ export class FloatingWidget {
       });
     });
 
+    const timerTimeInput = this.shadow.getElementById('nb-timer-time') as HTMLInputElement | null;
+    timerTimeInput?.addEventListener('focus', () => {
+      timerTimeInput.select();
+      timerTimeInput.removeAttribute('aria-invalid');
+      this.setTimerEditError('');
+    });
+    timerTimeInput?.addEventListener('input', () => {
+      timerTimeInput.removeAttribute('aria-invalid');
+      this.setTimerEditError('');
+    });
+    timerTimeInput?.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        if (this.commitTimerInput(timerTimeInput)) {
+          timerTimeInput.dataset.skipBlurCommit = 'true';
+          timerTimeInput.blur();
+        }
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        timerTimeInput.value = this.formatTimerTime(this.timerState.timeLeftSec);
+        timerTimeInput.dataset.skipBlurCommit = 'true';
+        timerTimeInput.removeAttribute('aria-invalid');
+        this.setTimerEditError('');
+        timerTimeInput.blur();
+      }
+    });
+    timerTimeInput?.addEventListener('blur', () => {
+      if (timerTimeInput.dataset.skipBlurCommit === 'true') {
+        delete timerTimeInput.dataset.skipBlurCommit;
+        return;
+      }
+      if (!this.commitTimerInput(timerTimeInput)) {
+        // Invalid blur is a cancel: keep the last valid persisted value and leave an
+        // actionable error beside it. Enter keeps focus so the user can correct in place.
+        timerTimeInput.value = this.formatTimerTime(this.timerState.timeLeftSec);
+      }
+    });
+
     // Live Tune In Button
     const liveTuneIn = this.shadow.getElementById('nb-live-tunein');
     liveTuneIn?.addEventListener('click', () => {
       this.isOpen = false;
-      this.render();
+      // Closing is a class toggle; a full render here would blink the popup out on the way
+      // to opening the side panel.
+      this.applyLightweightState();
       this.requestOpenSidePanel();
     });
 
@@ -2127,7 +2627,9 @@ export class FloatingWidget {
     const offlineReconnect = this.shadow.getElementById('nb-offline-sidepanel-reconnect');
     offlineReconnect?.addEventListener('click', () => {
       this.isOpen = false;
-      this.render();
+      // Closing is a class toggle; a full render here would blink the popup out on the way
+      // to opening the side panel.
+      this.applyLightweightState();
       this.requestOpenSidePanel();
     });
 
@@ -2277,14 +2779,12 @@ export class FloatingWidget {
 
     // Popout Standalone Popup Window
     this.shadow.getElementById('nb-wb-popout')?.addEventListener('click', () => {
-      if (typeof chrome !== 'undefined' && chrome.windows?.create) {
-        chrome.windows.create({
-          url: chrome.runtime.getURL('sidepanel.html?view=whiteboard'),
-          type: 'popup',
-          width: 900,
-          height: 650,
-        });
-      } else this.safeSendMessage({ type: 'OPEN_STANDALONE_WHITEBOARD' });
+      const preset = this.popupSize === 'fullscreen'
+        ? 'near-maximized'
+        : this.popupSize === 'compact'
+          ? 'small'
+          : this.popupSize;
+      this.safeSendMessage({ type: 'OPEN_WHITEBOARD_POPUP', preset });
     });
 
     // Privacy Mode Selector (Collab vs Personal)
@@ -2293,8 +2793,10 @@ export class FloatingWidget {
       btn.addEventListener('click', (e) => {
         const mode = (e.currentTarget as HTMLElement).getAttribute('data-wbprivacy') as any;
         if (mode) {
+          this.persistWhiteboardDocument(this.wbPrivacyMode);
           this.wbPrivacyMode = mode;
-          this.saveInPagePersonalBoard();
+          this.persistWhiteboardDocument(mode);
+          this.safeSendMessage({ type: 'WHITEBOARD_PRIVACY_LOCAL', mode });
           privacyBtns.forEach((b) => {
             const bMode = (b as HTMLElement).getAttribute('data-wbprivacy');
             (b as HTMLElement).style.background =
@@ -2459,6 +2961,31 @@ export class FloatingWidget {
       this.drawWbCanvas();
     });
 
+    this.shadow.getElementById('nb-wb-sel-label')?.addEventListener('click', () => {
+      const activeList = this.wbPrivacyMode === 'personal' ? this.wbPersonalStrokes : this.wbStrokes;
+      const stroke = this.wbSelectedStrokeIds.length === 1
+        ? activeList.find((candidate) => candidate.id === this.wbSelectedStrokeIds[0])
+        : undefined;
+      if (stroke && isLabelableWhiteboardTool(stroke.tool)) this.openWbLabelEditor(stroke);
+    });
+
+    const wbLabelInput = this.shadow.getElementById('nb-wb-label-input') as HTMLInputElement | null;
+    wbLabelInput?.addEventListener('keydown', (event) => {
+      event.stopPropagation();
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        this.commitWbLabel();
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        this.closeWbLabelEditor();
+      }
+    });
+    wbLabelInput?.addEventListener('blur', () => this.commitWbLabel());
+    this.shadow.getElementById('nb-wb-label-save')?.addEventListener('mousedown', (event) => event.preventDefault());
+    this.shadow.getElementById('nb-wb-label-save')?.addEventListener('click', () => this.commitWbLabel());
+    this.shadow.getElementById('nb-wb-label-skip')?.addEventListener('mousedown', (event) => event.preventDefault());
+    this.shadow.getElementById('nb-wb-label-skip')?.addEventListener('click', () => this.closeWbLabelEditor());
+
     // Undo / Redo / Clear / Export
     this.shadow.getElementById('nb-wb-undo')?.addEventListener('click', () => {
       const activeList = this.wbPrivacyMode === 'personal' ? this.wbPersonalStrokes : this.wbStrokes;
@@ -2478,8 +3005,8 @@ export class FloatingWidget {
           this.activeRedoStack().push(removed);
           if (this.wbPrivacyMode === 'personal') {
             this.saveInPagePersonalBoard();
-          } else if (this.wbPrivacyMode === 'collaborative' && typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
-            chrome.runtime.sendMessage({ type: 'WHITEBOARD_UNDO_LOCAL', strokeId: removed.id });
+          } else if (this.wbPrivacyMode === 'collaborative') {
+            this.safeSendMessage({ type: 'WHITEBOARD_UNDO_LOCAL', strokeId: removed.id });
           }
           this.drawWbCanvas();
         }
@@ -2522,7 +3049,7 @@ export class FloatingWidget {
         // a bare string, permanently emptying the button after the first click.
         const disarmClear = () => {
           this.wbClearArmed = false;
-          if (this.wbClearArmTimer) {
+          if (this.wbClearArmTimer !== null) {
             clearTimeout(this.wbClearArmTimer);
             this.wbClearArmTimer = null;
           }
@@ -2544,7 +3071,7 @@ export class FloatingWidget {
             // too, so the armed state is perceivable without seeing the hue shift.
             btn.style.color = '#fbbf24';
           }
-          if (this.wbClearArmTimer) clearTimeout(this.wbClearArmTimer);
+          if (this.wbClearArmTimer !== null) clearTimeout(this.wbClearArmTimer);
           this.wbClearArmTimer = setTimeout(disarmClear, 4000);
           return;
         }
@@ -2593,6 +3120,35 @@ export class FloatingWidget {
 
     setTimeout(setupDimensions, 30);
 
+    // Keep the canvas BACKING STORE in step with its CSS box, whatever changed it.
+    //
+    // A canvas has two sizes: the CSS box the layout gives it, and the pixel buffer it draws
+    // into. setupDimensions() derives the second from the first — but it only ran once, at
+    // init. So when the popup was resized (S/M/L/XL) the box grew while the buffer stayed at
+    // its old dimensions, and the browser scaled the old bitmap to fill the new box: the
+    // board appeared to ZOOM rather than reveal more canvas. Switching to chat and back
+    // "fixed" it only because that path re-ran init.
+    //
+    // A ResizeObserver removes the need for any caller to remember: the buffer is a function
+    // of the box, recomputed whenever the box changes, no matter which code path or user
+    // action caused it. That is also the sizing rule the rest of this refactor follows —
+    // dimensions derive from the parent rather than being set once and assumed.
+    if (typeof ResizeObserver !== 'undefined') {
+      this.wbResizeObserver?.disconnect();
+      this.wbResizeObserver = new ResizeObserver(() => {
+        // Coalesce to one recompute per frame: a drag-resize fires continuously, and each
+        // run reallocates the pixel buffer and repaints every stroke.
+        if (this.wbResizeScheduled) return;
+        this.wbResizeScheduled = true;
+        requestAnimationFrame(() => {
+          this.wbResizeScheduled = false;
+          const r = canvas.getBoundingClientRect();
+          if (r.width > 0 && r.height > 0) setupDimensions();
+        });
+      });
+      this.wbResizeObserver.observe(canvas);
+    }
+
     // Pointer Event Listeners
     const getCoords = (e: MouseEvent | TouchEvent): WhiteboardPoint => {
       const rect = canvas.getBoundingClientRect();
@@ -2621,12 +3177,9 @@ export class FloatingWidget {
 
     const isStrokeIntersecting = (s: InPageStroke, eraserPt: WhiteboardPoint, radius: number): boolean => {
       if (s.geometry) {
-        const { x1, y1, x2, y2 } = s.geometry;
-        const minX = Math.min(x1, x2) - radius;
-        const maxX = Math.max(x1, x2) + radius;
-        const minY = Math.min(y1, y2) - radius;
-        const maxY = Math.max(y1, y2) + radius;
-        return eraserPt.x >= minX && eraserPt.x <= maxX && eraserPt.y >= minY && eraserPt.y <= maxY;
+        const bounds = getStrokeBounds(s);
+        return eraserPt.x >= bounds.minX - radius && eraserPt.x <= bounds.maxX + radius &&
+          eraserPt.y >= bounds.minY - radius && eraserPt.y <= bounds.maxY + radius;
       }
       if (s.points && s.points.length > 0) {
         const hitRadius = radius + s.width / 2;
@@ -2641,6 +3194,17 @@ export class FloatingWidget {
       // Select Tool Handlers
       if (this.wbTool === 'select') {
         const activeList = this.wbPrivacyMode === 'personal' ? this.wbPersonalStrokes : this.wbStrokes;
+        const labelTarget = [...activeList].reverse().find((s) => {
+          const b = getStrokeBounds(s);
+          return pt.x >= b.minX - 4 && pt.x <= b.maxX + 4 && pt.y >= b.minY - 4 && pt.y <= b.maxY + 4;
+        });
+        if (e.detail >= 2 && labelTarget && isLabelableWhiteboardTool(labelTarget.tool)) {
+          this.wbSelectedStrokeIds = [labelTarget.id];
+          this.updateSelectionBar();
+          this.openWbLabelEditor(labelTarget);
+          this.drawWbCanvas();
+          return;
+        }
         const clickedOnSelected =
           this.wbSelectedStrokeIds.length > 0 &&
           activeList.some((s) => {
@@ -2809,6 +3373,8 @@ export class FloatingWidget {
             if (updated.length > 0) {
               this.safeSendMessage({ type: 'WHITEBOARD_UPDATE_STROKES_LOCAL', strokes: updated });
             }
+          } else {
+            this.saveInPagePersonalBoard();
           }
         }
         if (this.wbIsMarqueeSelecting) {
@@ -2823,6 +3389,7 @@ export class FloatingWidget {
       if (this.wbTool === 'eraser') {
         this.isWbDrawing = false;
         this.wbEraserPos = null;
+        if (this.wbPrivacyMode === 'personal') this.saveInPagePersonalBoard();
         this.drawWbCanvas();
         return;
       }
@@ -2861,6 +3428,7 @@ export class FloatingWidget {
         this.tempDisappearingStrokes.push({ stroke, createdAt: Date.now(), durationMs: 3000 });
       } else if (this.wbPrivacyMode === 'personal') {
         this.wbPersonalStrokes.push(stroke);
+        this.saveInPagePersonalBoard();
       } else {
         this.wbStrokes.push(stroke);
         this.safeSendMessage({ type: 'WHITEBOARD_STROKE_LOCAL', stroke });
@@ -2872,6 +3440,11 @@ export class FloatingWidget {
       this.wbCurrentPoints = [];
       this.wbStartPoint = null;
       this.drawWbCanvas();
+      if (isGeom && isLabelableWhiteboardTool(stroke.tool)) {
+        // The object has already been stored/synchronized. Its label is a second safe edit,
+        // so Skip or Escape leaves a valid unlabeled object rather than cancelling placement.
+        this.openWbLabelEditor(stroke);
+      }
     };
 
     canvas.addEventListener('mouseup', handleMouseUp);
@@ -2883,6 +3456,12 @@ export class FloatingWidget {
     const bar = this.shadow.getElementById('nb-wb-selection-floating-bar');
     if (!bar) return;
     const count = this.wbSelectedStrokeIds.length;
+    const activeList = this.wbPrivacyMode === 'personal' ? this.wbPersonalStrokes : this.wbStrokes;
+    const labelButton = this.shadow.getElementById('nb-wb-sel-label') as HTMLElement | null;
+    const labelTarget = count === 1
+      ? activeList.find((stroke) => stroke.id === this.wbSelectedStrokeIds[0] && isLabelableWhiteboardTool(stroke.tool))
+      : undefined;
+    if (labelButton) labelButton.style.display = labelTarget ? '' : 'none';
     if (count > 0) {
       bar.style.display = 'flex';
       // Targeted by id, not by querySelector('span').
@@ -2899,6 +3478,49 @@ export class FloatingWidget {
     } else {
       bar.style.display = 'none';
     }
+  }
+
+  private openWbLabelEditor(stroke: InPageStroke) {
+    if (!this.shadow || !stroke.geometry) return;
+    const anchor = getWhiteboardLabelAnchor(stroke);
+    const editor = this.shadow.getElementById('nb-wb-label-editor') as HTMLElement | null;
+    const input = this.shadow.getElementById('nb-wb-label-input') as HTMLInputElement | null;
+    const canvas = this.shadow.getElementById('nb-whiteboard-canvas') as HTMLCanvasElement | null;
+    const container = editor?.parentElement;
+    if (!anchor || !editor || !input || !canvas || !container) return;
+
+    const canvasRect = canvas.getBoundingClientRect();
+    const containerRect = container.getBoundingClientRect();
+    editor.style.left = `${Math.max(6, Math.min(containerRect.width - 230, canvasRect.left - containerRect.left + anchor.x - 90))}px`;
+    editor.style.top = `${Math.max(6, canvasRect.top - containerRect.top + anchor.y - 42)}px`;
+    editor.style.display = 'flex';
+    this.wbLabelEditorStrokeId = stroke.id;
+    input.value = stroke.geometry.label || '';
+    input.focus();
+    input.select();
+  }
+
+  private closeWbLabelEditor() {
+    const editor = this.shadow?.getElementById('nb-wb-label-editor') as HTMLElement | null;
+    if (editor) editor.style.display = 'none';
+    this.wbLabelEditorStrokeId = null;
+  }
+
+  private commitWbLabel() {
+    if (!this.shadow || !this.wbLabelEditorStrokeId) return;
+    const input = this.shadow.getElementById('nb-wb-label-input') as HTMLInputElement | null;
+    const activeList = this.wbPrivacyMode === 'personal' ? this.wbPersonalStrokes : this.wbStrokes;
+    const index = activeList.findIndex((stroke) => stroke.id === this.wbLabelEditorStrokeId);
+    if (index !== -1 && input) {
+      activeList[index] = withWhiteboardLabel(activeList[index], input.value);
+      if (this.wbPrivacyMode === 'personal') {
+        this.saveInPagePersonalBoard();
+      } else {
+        this.safeSendMessage({ type: 'WHITEBOARD_UPDATE_STROKES_LOCAL', strokes: [activeList[index]] });
+      }
+      this.drawWbCanvas();
+    }
+    this.closeWbLabelEditor();
   }
 
   private triggerWbAnimationLoop() {
@@ -3757,11 +4379,26 @@ export class FloatingWidget {
 
   private listenForRuntimeMessages() {
     if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
-      chrome.runtime.onMessage.addListener((msg) => {
+      if (this.runtimeMessageListener) return;
+      this.runtimeMessageListener = (msg) => {
+        if (this.contextInvalidated) return;
+        if (
+          typeof msg.type === 'string' &&
+          msg.type.startsWith('WHITEBOARD_') &&
+          !messageBelongsToRoom(msg.roomId, this.currentProblem?.roomId)
+        ) {
+          return;
+        }
         if (msg.type === 'FAB_SETTINGS_UPDATED' && msg.payload) {
           this.settings = { ...DEFAULT_FAB_SETTINGS, ...msg.payload };
-          if (this.settings.positionMode === 'permanent' && this.settings.savedPosition) {
-            this.currentPosition = { ...this.settings.savedPosition };
+          if (this.settings.showMainFab === false) this.isOpen = false;
+          if (this.settings.showTimerFab === false) this.isTimerOpen = false;
+          if (this.settings.positionMode === 'permanent') {
+            this.currentPosition = { ...(this.settings.savedMainPosition || this.settings.savedPosition || { right: 24, bottom: 24 }) };
+            this.timerPosition = { ...(this.settings.savedTimerPosition || { right: 140, bottom: 24 }) };
+          } else {
+            this.currentPosition = { right: 24, bottom: 24 };
+            this.timerPosition = { right: 140, bottom: 24 };
           }
           this.checkVisibilityAndRender();
           if (this.hostElement) {
@@ -3806,7 +4443,8 @@ export class FloatingWidget {
             if (this.activeTab === 'whiteboard') this.drawWbCanvas();
           }
         }
-      });
+      };
+      chrome.runtime.onMessage.addListener(this.runtimeMessageListener);
     }
   }
 
@@ -3931,7 +4569,9 @@ export class FloatingWidget {
 
     this.messages.push(myMsg);
     this.messages = this.deduplicateMessages(this.messages);
-    this.render();
+    // Append the one new bubble; fall back to a full render only when there is no list to
+    // append to (whiteboard tab showing, or the very first message replacing the empty state).
+    if (!this.appendChatBubble(myMsg)) this.render();
     this.scrollToBottom();
 
     if (this.currentRoomStorageKey && typeof chrome !== 'undefined' && chrome.storage?.local) {
@@ -3981,12 +4621,28 @@ export class FloatingWidget {
 
   private listenToStorageChanges() {
     if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) {
-      chrome.storage.onChanged.addListener((changes, area) => {
+      if (this.storageChangeListener) return;
+      this.storageChangeListener = (changes, area) => {
+        if (this.contextInvalidated) return;
         if (area === 'local') {
+          const panelFlag = changes.synqto_sidepanel_open || changes.nerd_buddy_sidepanel_open;
+          if (panelFlag) {
+            const nowOpen = Boolean(panelFlag.newValue);
+            // Handover of timer ownership. Re-read the persisted state when the panel closes
+            // so this widget resumes from the panel's last written value rather than from a
+            // local copy that stopped advancing while the panel owned the countdown.
+            if (this.sidePanelOpen && !nowOpen) {
+              this.loadTimerState();
+            }
+            this.sidePanelOpen = nowOpen;
+          }
           if (changes.nerd_buddy_sidepanel_open) {
             if (changes.nerd_buddy_sidepanel_open.newValue === true && this.isOpen) {
+              // The side panel opened, so the in-page popup yields. Class toggle only —
+              // this fires while the panel is animating in, and a full rebuild here made
+              // the popup flash rather than simply disappear.
               this.isOpen = false;
-              this.render();
+              this.applyLightweightState();
             }
           }
           if (changes.synqto_live_stage || changes.nerd_buddy_live_stage) {
@@ -4000,8 +4656,14 @@ export class FloatingWidget {
             const raw = (changes[SYNQTO_FAB_STORAGE_KEY] || changes[FAB_STORAGE_KEY])?.newValue;
             if (raw) {
               this.settings = { ...DEFAULT_FAB_SETTINGS, ...raw };
-              if (this.settings.positionMode === 'permanent' && this.settings.savedPosition) {
-                this.currentPosition = { ...this.settings.savedPosition };
+              if (this.settings.showMainFab === false) this.isOpen = false;
+              if (this.settings.showTimerFab === false) this.isTimerOpen = false;
+              if (this.settings.positionMode === 'permanent') {
+                this.currentPosition = { ...(this.settings.savedMainPosition || this.settings.savedPosition || { right: 24, bottom: 24 }) };
+                this.timerPosition = { ...(this.settings.savedTimerPosition || { right: 140, bottom: 24 }) };
+              } else {
+                this.currentPosition = { right: 24, bottom: 24 };
+                this.timerPosition = { right: 140, bottom: 24 };
               }
               this.checkVisibilityAndRender();
               if (this.hostElement) {
@@ -4010,9 +4672,15 @@ export class FloatingWidget {
             }
           }
           if (changes.synqto_active_problem || changes.nerd_buddy_active_problem) {
-            this.currentProblem = (changes.synqto_active_problem || changes.nerd_buddy_active_problem).newValue;
-            this.currentRoomStorageKey = `synqto_chat_${this.currentProblem?.roomId || ''}`;
-            this.loadMessages();
+            // active_problem belongs to the browser's foreground tab. Every content script
+            // observes that global storage key, including widgets in background tabs, so
+            // adopting it here silently moved those widgets into another tab's room. Rebind
+            // from this document's own URL instead; the service worker separately tracks the
+            // active tab for side-panel detection.
+            this.detectCurrentPageProblem();
+            void this.loadWhiteboardDocuments().then(() => {
+              if (this.activeTab === 'whiteboard') this.drawWbCanvas();
+            });
             this.checkVisibilityAndRender();
           }
           if (changes.nerd_buddy_peer_count) {
@@ -4040,52 +4708,56 @@ export class FloatingWidget {
             }
             this.render();
           }
+          if (changes.synqto_server_url || changes.nerd_buddy_server_url) {
+            const raw = changes.synqto_server_url || changes.nerd_buddy_server_url;
+            if (typeof raw.newValue === 'string' && raw.newValue.trim()) {
+              this.serverUrl = raw.newValue.trim();
+              this.render();
+            }
+          }
           if (changes[THEME_SETTINGS_STORAGE_KEY]) {
             this.themeSettings = changes[THEME_SETTINGS_STORAGE_KEY].newValue;
             this.render();
           }
-          if (changes.synqto_collab_notebook) {
-            const nb = changes.synqto_collab_notebook.newValue;
-            if (nb && Array.isArray(nb.pages)) {
-              const activePage = nb.pages.find((p: any) => p.id === nb.activePageId) || nb.pages[0];
-              if (activePage) {
-                this.wbStrokes = activePage.strokes || [];
-                if (activePage.background) this.wbTheme = activePage.background;
-                if (activePage.bgColor) this.wbBgColor = activePage.bgColor;
-                if (this.activeTab === 'whiteboard') this.drawWbCanvas();
-              }
-            }
+          const collabKey = this.collabNotebookStorageKey();
+          if (collabKey && changes[collabKey]?.newValue?.pages?.length) {
+            this.applyNotebookToBoard('collaborative', changes[collabKey].newValue as InPageNotebook);
+            if (this.activeTab === 'whiteboard' && this.wbPrivacyMode === 'collaborative') this.drawWbCanvas();
           }
-          if (changes.synqto_inpage_personal_board) {
-            const board = changes.synqto_inpage_personal_board.newValue;
-            if (board) {
-              if (Array.isArray(board.strokes)) this.wbPersonalStrokes = board.strokes;
-              if (board.theme) this.wbPersonalTheme = board.theme;
-              if (board.bgColor) this.wbPersonalBgColor = board.bgColor;
-              if (this.activeTab === 'whiteboard' && this.wbPrivacyMode === 'personal') {
-                this.drawWbCanvas();
-              }
-            }
+          if (changes.synqto_personal_notebook?.newValue?.pages?.length) {
+            this.applyNotebookToBoard('personal', changes.synqto_personal_notebook.newValue as InPageNotebook);
+            if (this.activeTab === 'whiteboard' && this.wbPrivacyMode === 'personal') this.drawWbCanvas();
+          }
+          if (changes.synqto_whiteboard_privacy_mode?.newValue) {
+            this.wbPrivacyMode = changes.synqto_whiteboard_privacy_mode.newValue;
+            if (this.activeTab === 'whiteboard') this.render();
           }
           if (changes[POMODORO_CONFIG_STORAGE_KEY]) {
             const newCfg = changes[POMODORO_CONFIG_STORAGE_KEY].newValue;
             if (newCfg) {
-              this.timerConfig = { ...DEFAULT_POMODORO_CONFIG, ...newCfg };
+              this.timerConfig = normalizePomodoroConfig(newCfg);
               this.render();
             }
           }
           if (changes[POMODORO_STATE_STORAGE_KEY]) {
             const incomingState = changes[POMODORO_STATE_STORAGE_KEY].newValue;
             if (incomingState) {
-              this.timerState = incomingState;
+              this.timerState = normalizeTimerState(incomingState);
+              // Targeted updates only.
+              //
+              // This previously called render() whenever the popup was open — and the timer
+              // owner persists its state every few seconds while running, so an open popup
+              // was rebuilding its entire DOM on a timer. That is the steady background
+              // "the whole window re-renders" symptom: it happens with no user interaction
+              // at all, just a running clock, and it takes the canvas, the chat scroll
+              // position and every listener with it each time.
               this.updateTimerDisplay();
-              if (this.isOpen) {
-                this.render();
-              }
+              this.updateTimerControls();
             }
           }
         }
-      });
+      };
+      chrome.storage.onChanged.addListener(this.storageChangeListener);
     }
   }
 
@@ -4141,22 +4813,10 @@ export class FloatingWidget {
           POMODORO_STATE_STORAGE_KEY,
         ]);
         if (res[POMODORO_CONFIG_STORAGE_KEY]) {
-          this.timerConfig = { ...DEFAULT_POMODORO_CONFIG, ...res[POMODORO_CONFIG_STORAGE_KEY] };
+          this.timerConfig = normalizePomodoroConfig(res[POMODORO_CONFIG_STORAGE_KEY]);
         }
         if (res[POMODORO_STATE_STORAGE_KEY]) {
-          const saved: TimerState = res[POMODORO_STATE_STORAGE_KEY];
-          if (saved.isRunning) {
-            const elapsed = Math.floor((Date.now() - saved.lastUpdated) / 1000);
-            if (saved.mode === 'stopwatch') {
-              saved.timeLeftSec += elapsed;
-            } else {
-              saved.timeLeftSec = Math.max(0, saved.timeLeftSec - elapsed);
-              if (saved.timeLeftSec === 0) {
-                saved.isRunning = false;
-              }
-            }
-          }
-          this.timerState = saved;
+          this.timerState = normalizeTimerState(res[POMODORO_STATE_STORAGE_KEY] as TimerState);
         }
       } catch (e) {}
     }
@@ -4170,36 +4830,68 @@ export class FloatingWidget {
     }
   }
 
+  /**
+   * Refreshes the countdown — but ONLY when this widget is the timer's owner.
+   *
+   * Both surfaces now derive the visible value from the same targetEndTime/startedAt. A
+   * callback is only a repaint request; it never represents a second of elapsed time. This
+   * means browser throttling, sleep, and delayed callbacks cannot make the timer drift.
+   *
+   * The side panel remains the completion owner while open so a deadline crossing produces
+   * one chime/mode transition rather than two. `synqto_sidepanel_open` tracks that handoff.
+   */
   private startTimerTickLoop() {
-    if (this.timerInterval) clearInterval(this.timerInterval);
+    if (this.timerInterval !== null) clearInterval(this.timerInterval);
     this.timerInterval = setInterval(() => {
+      if (this.sidePanelOpen) return; // the panel owns the countdown while it is open
       if (this.timerState.isRunning) {
-        if (this.timerState.mode === 'stopwatch') {
-          this.timerState.timeLeftSec += 1;
-          this.timerState.lastUpdated = Date.now();
-          this.updateTimerDisplay();
-        } else {
-          if (this.timerState.timeLeftSec > 0) {
-            this.timerState.timeLeftSec -= 1;
-            this.timerState.lastUpdated = Date.now();
-            this.updateTimerDisplay();
-
-            if (this.timerState.timeLeftSec === 0) {
-              this.handleTimerSessionComplete();
-            } else if (this.timerState.timeLeftSec % 5 === 0) {
-              this.saveTimerState();
-            }
-          }
+        this.timerState.timeLeftSec = computeTimerTime(this.timerState);
+        this.updateTimerDisplay();
+        if (this.timerState.mode !== 'stopwatch' && this.timerState.timeLeftSec === 0) {
+          this.handleTimerSessionComplete();
         }
       }
     }, 1000);
   }
 
+  /**
+   * Updates the timer's CONTROLS in place — the parts updateTimerDisplay does not cover.
+   *
+   * Every timer operation (start, pause, reset, add time, change mode) used to end in
+   * this.render(), rebuilding the whole popup to change a button label and a couple of
+   * highlight colours. That destroyed the canvas, the chat scroll position and every
+   * listener, and repainted the empty intermediate state — a visible flash on each timer
+   * click. Combined with updateTimerDisplay, these two cover everything a timer operation
+   * can change, so none of them needs a rebuild.
+   */
+  private updateTimerControls() {
+    if (!this.shadow) return;
+
+    const toggle = this.shadow.getElementById('nb-timer-toggle');
+    if (toggle) {
+      const running = this.timerState.isRunning;
+      const label = toggle.querySelector('span');
+      if (label) label.textContent = running ? '⏸ Pause' : '▶ Start Focus';
+      toggle.setAttribute('aria-pressed', String(running));
+      toggle.style.background = running ? '#ef4444' : 'linear-gradient(135deg, #4f46e5, #7c3aed)';
+    }
+
+    // Mode buttons: reflect the active mode without re-emitting their markup.
+    this.shadow.querySelectorAll('.timer-mode-btn[data-tmode]').forEach((el) => {
+      const btn = el as HTMLElement;
+      const isActive = btn.getAttribute('data-tmode') === this.timerState.mode;
+      btn.classList.toggle('active', isActive);
+      btn.setAttribute('aria-pressed', String(isActive));
+      btn.style.color = isActive ? '#fff' : 'var(--text-muted)';
+      if (!isActive) btn.style.background = 'transparent';
+    });
+  }
+
   private updateTimerDisplay() {
     if (!this.shadow) return;
-    const timeEl = this.shadow.getElementById('nb-timer-time');
-    if (timeEl) {
-      timeEl.textContent = this.formatTimerTime(this.timerState.timeLeftSec);
+    const timeEl = this.shadow.getElementById('nb-timer-time') as HTMLInputElement | null;
+    if (timeEl && this.shadow.activeElement !== timeEl) {
+      timeEl.value = this.formatTimerTime(this.timerState.timeLeftSec);
     }
     const timerFabTime = this.shadow.getElementById('nb-timer-fab-time');
     if (timerFabTime) {
@@ -4225,6 +4917,9 @@ export class FloatingWidget {
 
   private handleTimerSessionComplete() {
     this.timerState.isRunning = false;
+    this.timerState.targetEndTime = undefined;
+    this.timerState.startedAt = undefined;
+    this.timerState.pausedRemainingSec = undefined;
     this.timerState.lastUpdated = Date.now();
 
     if (this.timerConfig.soundAlerts) {
@@ -4238,18 +4933,24 @@ export class FloatingWidget {
       this.resetTimerToMode(nextMode);
 
       if (this.timerConfig.autoStartBreaks) {
-        this.timerState.isRunning = true;
+        this.timerState = startTimerState(this.timerState);
       }
     } else {
       this.resetTimerToMode('pomodoro');
     }
 
     this.saveTimerState();
-    this.render();
+    // Targeted update, not a rebuild — see updateTimerControls.
+    this.updateTimerDisplay();
+    this.updateTimerControls();
   }
 
   private resetTimerToMode(mode: TimerMode) {
     this.timerState.mode = mode;
+    this.timerState.isRunning = false;
+    this.timerState.targetEndTime = undefined;
+    this.timerState.startedAt = undefined;
+    this.timerState.pausedRemainingSec = undefined;
     let durationSec = 25 * 60;
     if (mode === 'pomodoro') {
       durationSec = (this.timerConfig.workDurationMin || 25) * 60;
@@ -4266,41 +4967,75 @@ export class FloatingWidget {
   }
 
   private toggleTimer() {
-    this.timerState.isRunning = !this.timerState.isRunning;
-    this.timerState.lastUpdated = Date.now();
+    this.timerState = this.timerState.isRunning
+      ? pauseTimerState(this.timerState)
+      : startTimerState(this.timerState);
     this.saveTimerState();
-    this.render();
+    // Targeted update, not a rebuild — see updateTimerControls.
+    this.updateTimerDisplay();
+    this.updateTimerControls();
   }
 
   private resetTimer() {
     this.timerState.isRunning = false;
     this.resetTimerToMode(this.timerState.mode);
     this.saveTimerState();
-    this.render();
+    // Targeted update, not a rebuild — see updateTimerControls.
+    this.updateTimerDisplay();
+    this.updateTimerControls();
   }
 
   private setTimerMode(mode: TimerMode) {
     this.timerState.isRunning = false;
     this.resetTimerToMode(mode);
     this.saveTimerState();
-    this.render();
+    // Targeted update, not a rebuild — see updateTimerControls.
+    this.updateTimerDisplay();
+    this.updateTimerControls();
   }
 
   private addTimerTime(seconds: number) {
-    if (this.timerState.mode !== 'stopwatch') {
-      this.timerState.timeLeftSec = Math.max(0, this.timerState.timeLeftSec + seconds);
-      this.timerState.targetDurationSec = Math.max(this.timerState.timeLeftSec, this.timerState.targetDurationSec + seconds);
-    } else {
-      this.timerState.timeLeftSec = Math.max(0, this.timerState.timeLeftSec + seconds);
-    }
+    const result = adjustTimerState(this.timerState, seconds);
+    if (!result.ok) return;
+    this.timerState = result.state;
     this.saveTimerState();
-    this.render();
+    // Targeted update, not a rebuild — see updateTimerControls.
+    this.updateTimerDisplay();
+    this.updateTimerControls();
   }
 
+  private setTimerEditError(message: string) {
+    const errorEl = this.shadow?.getElementById('nb-timer-edit-error');
+    if (errorEl) errorEl.textContent = message;
+  }
+
+  private commitTimerInput(input: HTMLInputElement): boolean {
+    const parsed = parseTimerInput(input.value);
+    if (!parsed.ok) {
+      input.setAttribute('aria-invalid', 'true');
+      this.setTimerEditError(parsed.error);
+      return false;
+    }
+    const result = editTimerState(this.timerState, parsed.seconds);
+    if (!result.ok) {
+      input.setAttribute('aria-invalid', 'true');
+      this.setTimerEditError(result.error);
+      return false;
+    }
+
+    this.timerState = result.state;
+    input.value = this.formatTimerTime(this.timerState.timeLeftSec);
+    input.removeAttribute('aria-invalid');
+    this.setTimerEditError('');
+    this.saveTimerState();
+    this.updateTimerDisplay();
+    this.updateTimerControls();
+    return true;
+  }
+
+  /** Delegates to the shared formatter so the widget and the panel cannot drift apart. */
   private formatTimerTime(sec: number): string {
-    const mins = Math.floor(sec / 60);
-    const secs = sec % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    return sharedFormatTimerTime(sec);
   }
 
   private playTimerChime() {

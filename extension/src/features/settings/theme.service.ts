@@ -729,6 +729,14 @@ export class ThemeService {
   private settings: CustomThemeSettings = { ...DEFAULT_THEME_SETTINGS };
   private listeners: Set<(settings: CustomThemeSettings) => void> = new Set();
   private mediaQuery: MediaQueryList | null = null;
+  private initialized = false;
+  private pendingInitializationPatch: Partial<CustomThemeSettings> | null = null;
+  private destroyed = false;
+  private readonly handleSystemThemeChange = () => {
+    if (!this.destroyed && this.settings.mode === 'system') {
+      this.applyAllSettings(this.settings);
+    }
+  };
 
   private constructor() {
     this.init();
@@ -741,14 +749,10 @@ export class ThemeService {
     return ThemeService.instance;
   }
 
-  private async init() {
+  private init() {
     if (typeof window !== 'undefined') {
       this.mediaQuery = window.matchMedia('(prefers-color-scheme: light)');
-      this.mediaQuery.addEventListener('change', () => {
-        if (this.settings.mode === 'system') {
-          this.applyAllSettings(this.settings);
-        }
-      });
+      this.mediaQuery.addEventListener('change', this.handleSystemThemeChange);
     }
 
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
@@ -759,20 +763,29 @@ export class ThemeService {
           const legacyMode = res[THEME_STORAGE_KEY] as ThemeMode;
           const legacyAccent = res[ACCENT_STORAGE_KEY] as AccentColor;
 
-          this.settings = {
+          const loaded = {
             ...DEFAULT_THEME_SETTINGS,
             ...(savedSettings || {}),
             ...(legacyMode ? { mode: legacyMode } : {}),
             ...(legacyAccent ? { accent: legacyAccent } : {}),
           };
-
-          this.applyAllSettings(this.settings);
-          this.emitChange();
+          this.completeInitialization(loaded);
         }
       );
     } else {
-      this.applyAllSettings(this.settings);
+      this.completeInitialization({ ...DEFAULT_THEME_SETTINGS });
     }
+  }
+
+  private completeInitialization(loaded: CustomThemeSettings): void {
+    if (this.destroyed || this.initialized) return;
+    const pending = this.pendingInitializationPatch;
+    this.settings = { ...loaded, ...(pending || {}) };
+    this.pendingInitializationPatch = null;
+    this.initialized = true;
+    this.applyAllSettings(this.settings);
+    if (pending) this.saveSettings();
+    this.emitChange();
   }
 
   public getSettings(): CustomThemeSettings {
@@ -788,9 +801,16 @@ export class ThemeService {
   }
 
   public updateSettings(partial: Partial<CustomThemeSettings>) {
+    if (this.destroyed) return;
+    if (!this.initialized) {
+      this.pendingInitializationPatch = {
+        ...(this.pendingInitializationPatch || {}),
+        ...partial,
+      };
+    }
     this.settings = { ...this.settings, ...partial };
     this.applyAllSettings(this.settings);
-    this.saveSettings();
+    if (this.initialized) this.saveSettings();
     this.emitChange();
   }
 
@@ -868,9 +888,13 @@ export class ThemeService {
   }
 
   public resetToDefaults() {
+    if (this.destroyed) return;
+    if (!this.initialized) {
+      this.pendingInitializationPatch = { ...DEFAULT_THEME_SETTINGS };
+    }
     this.settings = { ...DEFAULT_THEME_SETTINGS };
     this.applyAllSettings(this.settings);
-    this.saveSettings();
+    if (this.initialized) this.saveSettings();
     this.emitChange();
   }
 
@@ -1031,5 +1055,15 @@ export class ThemeService {
     return () => {
       this.listeners.delete(listener);
     };
+  }
+
+  public destroy(): void {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    this.mediaQuery?.removeEventListener('change', this.handleSystemThemeChange);
+    this.mediaQuery = null;
+    this.pendingInitializationPatch = null;
+    this.listeners.clear();
+    if (ThemeService.instance === this) ThemeService.instance = null;
   }
 }

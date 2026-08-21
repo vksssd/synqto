@@ -1,6 +1,15 @@
 // ─── In-Page LeetCode & Coding Platform Collaborative Editor Sync ───
 
 import { safeCssColor, safeDisplayText, escapeHtml } from '@/core/security/sanitize';
+import { detectRoutedResource, messageBelongsToRoom } from '@/core/runtime/tab-room-context';
+
+function isExtensionValid(): boolean {
+  try {
+    return Boolean(typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id);
+  } catch {
+    return false;
+  }
+}
 
 export interface RemotePeerCursor {
   peerId: string;
@@ -24,6 +33,16 @@ export class InPageEditorSync {
   private lastSentCode: string = '';
   private lastSentCursor: { line: number; ch: number } = { line: 1, ch: 1 };
   private cleanupInterval: any = null;
+  private dragResetTimer: ReturnType<typeof setTimeout> | null = null;
+  private destroyed = false;
+  private pageMessageListener: ((event: MessageEvent) => void) | null = null;
+  private runtimeMessageListener: ((...args: any[]) => boolean | void) | null = null;
+  private storageListener: ((changes: Record<string, any>, area: string) => void) | null = null;
+  private activeDragCleanup: (() => void) | null = null;
+
+  private getCurrentRoomId(): string {
+    return detectRoutedResource(window.location.href, document.title)?.roomId || '';
+  }
 
   constructor() {
     this.init();
@@ -38,6 +57,7 @@ export class InPageEditorSync {
         'synqto_fab_settings',
         'nerd_buddy_fab_settings',
       ]);
+      if (this.destroyed) return;
       this.isEnabled = res.synqto_code_together_enabled !== false;
       const fabSettings = res.synqto_fab_settings || res.nerd_buddy_fab_settings;
       this.showDock = Boolean(res.synqto_code_together_dock_visible || fabSettings?.showCodeTogetherDock);
@@ -45,6 +65,8 @@ export class InPageEditorSync {
         this.dockPosition = { ...fabSettings.savedCodeTogetherPosition };
       }
     }
+
+    if (this.destroyed) return;
 
     // 2. Inject the main-world bridge into page DOM
     this.injectMainWorldBridge();
@@ -68,8 +90,8 @@ export class InPageEditorSync {
 
     // Request initial code state from extension if available
     if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
-      chrome.runtime.sendMessage({ type: 'CODE_GET_STATE' }, (resp) => {
-        if (resp && resp.code && this.isEnabled) {
+      chrome.runtime.sendMessage({ type: 'CODE_GET_STATE', roomId: this.getCurrentRoomId() }, (resp) => {
+        if (!this.destroyed && resp && resp.code && this.isEnabled) {
           this.applyRemoteCodeToPage(resp.code, resp.language || 'python', resp.lastEditedBy, 1, 1);
         }
       });
@@ -79,7 +101,8 @@ export class InPageEditorSync {
   private setupStorageListeners() {
     if (typeof chrome === 'undefined' || !chrome.storage?.onChanged) return;
 
-    chrome.storage.onChanged.addListener((changes, area) => {
+    this.storageListener = (changes, area) => {
+      if (this.destroyed) return;
       if (area !== 'local') return;
 
       let changed = false;
@@ -112,7 +135,8 @@ export class InPageEditorSync {
           this.containerEl = null;
         }
       }
-    });
+    };
+    chrome.storage.onChanged.addListener(this.storageListener);
   }
 
   // ─── Main-World Bridge Injection (CSP Compliant) ───
@@ -141,7 +165,8 @@ export class InPageEditorSync {
 
   // ─── PostMessage Bridge Listeners ───
   private setupPageMessageListeners() {
-    window.addEventListener('message', (event) => {
+    this.pageMessageListener = (event: MessageEvent) => {
+      if (this.destroyed) return;
       if (!event.data || event.data.source !== 'SYNQTO_EDITOR_BRIDGE') return;
 
       const { type, payload } = event.data;
@@ -163,6 +188,7 @@ export class InPageEditorSync {
           if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
             chrome.runtime.sendMessage({
               type: 'CODE_DELTA_LOCAL',
+              roomId: this.getCurrentRoomId(),
               payload: {
                 code,
                 cursorLine: line,
@@ -180,19 +206,22 @@ export class InPageEditorSync {
           if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
             chrome.runtime.sendMessage({
               type: 'CODE_CURSOR_LOCAL',
+              roomId: this.getCurrentRoomId(),
               payload: { line, ch },
             }).catch(() => {});
           }
         }
       }
-    });
+    };
+    window.addEventListener('message', this.pageMessageListener);
   }
 
   // ─── Runtime Message Listeners from Extension & Mesh ───
   private setupRuntimeListeners() {
     if (typeof chrome === 'undefined' || !chrome.runtime?.onMessage) return;
 
-    chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    this.runtimeMessageListener = (message, _sender, sendResponse) => {
+      if (this.destroyed) return;
       // Answer the panel's probe even when sync is disabled, so the panel can state
       // accurately whether this tab has a real editor to collaborate in.
       if (message?.type === 'CODE_EDITOR_PROBE') {
@@ -203,6 +232,7 @@ export class InPageEditorSync {
       if (!this.isEnabled) return;
 
       if (message.type === 'CODE_DELTA_REMOTE' || message.type === 'CODE_SYNC_REMOTE') {
+        if (!messageBelongsToRoom(message.roomId, this.getCurrentRoomId())) return;
         const { code, language, cursorLine, cursorCol, sender, lastEditedBy } = message.payload;
         this.applyRemoteCodeToPage(
           code,
@@ -224,6 +254,7 @@ export class InPageEditorSync {
           this.updateFloatingDock();
         }
       } else if (message.type === 'CODE_CURSOR_REMOTE') {
+        if (!messageBelongsToRoom(message.roomId, this.getCurrentRoomId())) return;
         const { peerId, nickname, color, line, ch } = message.payload;
         this.applyRemoteCursorToPage(peerId, nickname, color, line, ch);
 
@@ -237,7 +268,8 @@ export class InPageEditorSync {
         });
         this.updateFloatingDock();
       }
-    });
+    };
+    chrome.runtime.onMessage.addListener(this.runtimeMessageListener);
   }
 
   /** True when this tab has a real page editor to collaborate in. */
@@ -346,10 +378,7 @@ export class InPageEditorSync {
       if (this.isDragging) {
         this.isDragging = false;
         if (this.containerEl) this.containerEl.style.cursor = 'grab';
-        window.removeEventListener('mousemove', onPointerMove);
-        window.removeEventListener('mouseup', onPointerUp);
-        window.removeEventListener('touchmove', onPointerMove);
-        window.removeEventListener('touchend', onPointerUp);
+        cleanupDrag();
 
         if (this.dragMoved) {
           if (typeof chrome !== 'undefined' && chrome.storage?.local) {
@@ -364,11 +393,21 @@ export class InPageEditorSync {
             });
           }
 
-          setTimeout(() => {
+          if (this.dragResetTimer !== null) clearTimeout(this.dragResetTimer);
+          this.dragResetTimer = setTimeout(() => {
             this.dragMoved = false;
+            this.dragResetTimer = null;
           }, 60);
         }
       }
+    };
+
+    const cleanupDrag = () => {
+      window.removeEventListener('mousemove', onPointerMove);
+      window.removeEventListener('mouseup', onPointerUp);
+      window.removeEventListener('touchmove', onPointerMove);
+      window.removeEventListener('touchend', onPointerUp);
+      if (this.activeDragCleanup === cleanupDrag) this.activeDragCleanup = null;
     };
 
     const onPointerDown = (e: MouseEvent | TouchEvent) => {
@@ -380,6 +419,8 @@ export class InPageEditorSync {
       initialRight = this.dockPosition.right;
       initialTop = this.dockPosition.top;
 
+      this.activeDragCleanup?.();
+      this.activeDragCleanup = cleanupDrag;
       window.addEventListener('mousemove', onPointerMove, { passive: true });
       window.addEventListener('mouseup', onPointerUp);
       window.addEventListener('touchmove', onPointerMove, { passive: true });
@@ -443,8 +484,12 @@ export class InPageEditorSync {
   }
 
   private startCursorCleanup() {
-    if (this.cleanupInterval) clearInterval(this.cleanupInterval);
+    if (this.cleanupInterval !== null) clearInterval(this.cleanupInterval);
     this.cleanupInterval = setInterval(() => {
+      if (!isExtensionValid()) {
+        this.destroy();
+        return;
+      }
       const now = Date.now();
       let changed = false;
       this.activePeers.forEach((cursor, peerId) => {
@@ -460,5 +505,36 @@ export class InPageEditorSync {
       });
       if (changed) this.updateFloatingDock();
     }, 4000);
+  }
+
+  public destroy(): void {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    if (this.cleanupInterval !== null) clearInterval(this.cleanupInterval);
+    if (this.dragResetTimer !== null) clearTimeout(this.dragResetTimer);
+    this.cleanupInterval = null;
+    this.dragResetTimer = null;
+    this.activeDragCleanup?.();
+    this.activeDragCleanup = null;
+    if (this.pageMessageListener && typeof window !== 'undefined') {
+      window.removeEventListener('message', this.pageMessageListener);
+    }
+    try {
+      if (this.runtimeMessageListener && chrome.runtime?.onMessage) {
+        chrome.runtime.onMessage.removeListener(this.runtimeMessageListener);
+      }
+      if (this.storageListener && chrome.storage?.onChanged) {
+        chrome.storage.onChanged.removeListener(this.storageListener);
+      }
+    } catch {
+      // Listener removal can throw after the owning extension context is invalidated.
+    }
+    this.pageMessageListener = null;
+    this.runtimeMessageListener = null;
+    this.storageListener = null;
+    this.containerEl?.remove();
+    this.containerEl = null;
+    this.activePeers.clear();
+    this.attachedEditorKind = null;
   }
 }

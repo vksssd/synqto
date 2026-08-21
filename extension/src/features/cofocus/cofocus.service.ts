@@ -38,6 +38,11 @@ export class CoFocusService {
   private partnerArrivalTimer: any = null;
   private unsubscribeLobby: Array<() => void> = [];
   private unsubscribeTopology: (() => void) | null = null;
+  private unsubscribeRoom: (() => void) | null = null;
+  private unsubscribePartnerEnd: (() => void) | null = null;
+  private operationGeneration = 0;
+  private destroyed = false;
+  private completionAudioContexts: Set<AudioContext> = new Set();
 
   /** Retained so an auto-requeue after a vanished partner can repeat the original request. */
   private lastRequest: { mode: CoFocusMode; subjectTag?: string; sessionLengthSec?: number } | null = null;
@@ -60,16 +65,27 @@ export class CoFocusService {
    * countdown running. Only an explicit announcement is treated as final.
    */
   private bindPartnerEndListener(): void {
-    this.network.on<{ reason?: string; endedBy?: string; roomId?: string }>(
-      'cofocus:session_end',
-      (payload, packet) => {
+    this.unsubscribePartnerEnd = this.network.on<{
+      reason?: string;
+      endedBy?: string;
+      roomId?: string;
+    }>('cofocus:session_end', (payload, packet) => {
+        if (this.destroyed) return;
         // Ignore our own broadcast and anything for a room we are not in — a stale packet
         // arriving after a room switch must not end the session the user just started.
         const me = this.currentPeerId();
         if (packet.from?.peerId === me) return;
         if (!this.state.roomId || payload?.roomId !== this.state.roomId) return;
-        if (this.state.phase !== 'active' && this.state.phase !== 'matched') return;
+        if (
+          this.state.phase !== 'active' &&
+          this.state.phase !== 'matched' &&
+          this.state.phase !== 'completed'
+        ) {
+          return;
+        }
 
+        const endedRoomId = this.state.roomId;
+        this.operationGeneration++;
         this.clearTimers();
         this.detachTopologyWatch();
 
@@ -82,9 +98,12 @@ export class CoFocusService {
               : `${who} ended the session.`,
         });
 
-        if (this.state.roomId) this.roomService.leaveCurrentRoom();
-      }
-    );
+        // setState() intentionally erased the session room. Compare against the captured room
+        // so this packet can leave its own room without ever evicting a newer session.
+        if (this.roomService.getCurrentRoom()?.roomId === endedRoomId) {
+          this.roomService.leaveCurrentRoom();
+        }
+      });
   }
 
   /**
@@ -98,7 +117,8 @@ export class CoFocusService {
    * had already left.
    */
   private bindRoomReconciliation(): void {
-    this.roomService.onChange((room) => {
+    this.unsubscribeRoom = this.roomService.onChange((room) => {
+      if (this.destroyed) return;
       // Only an ESTABLISHED session can be displaced.
       //
       // Restricting to active/completed is deliberate and load-bearing, not conservatism:
@@ -124,6 +144,7 @@ export class CoFocusService {
       // extension keeps the mesh alive long enough for the message to land, which covers the
       // common case the End button never did.
       this.announceSessionEnd('ended');
+      this.operationGeneration++;
       this.clearTimers();
       this.detachTopologyWatch();
       this.setState({ ...INITIAL_COFOCUS_STATE });
@@ -141,12 +162,16 @@ export class CoFocusService {
 
   /** Queue for a silent, camera-only Watcher session against anyone else waiting. */
   public async startWatcher(sessionLengthSec: number): Promise<void> {
-    return this.enqueue('WATCHER', undefined, sessionLengthSec);
+    if (this.destroyed) return;
+    const generation = this.beginOperation();
+    return this.enqueue('WATCHER', undefined, sessionLengthSec, undefined, generation);
   }
 
   /** Queue for a full-collaboration Together session on a subject. */
   public async startTogetherRandom(subjectTag: string, sessionLengthSec: number): Promise<void> {
-    return this.enqueue('TOGETHER', subjectTag, sessionLengthSec);
+    if (this.destroyed) return;
+    const generation = this.beginOperation();
+    return this.enqueue('TOGETHER', subjectTag, sessionLengthSec, undefined, generation);
   }
 
   /**
@@ -157,6 +182,8 @@ export class CoFocusService {
    * has exactly the same topology guarantees as a matched one.
    */
   public async startTogetherInvite(inviteCode: string, sessionLengthSec: number): Promise<void> {
+    if (this.destroyed) return;
+    const generation = this.beginOperation();
     const roomId = this.roomIdFromInviteCode(inviteCode);
     this.lastRequest = { mode: 'TOGETHER', sessionLengthSec };
 
@@ -168,14 +195,21 @@ export class CoFocusService {
       sessionLengthSec,
     });
 
-    await this.roomService.joinCoFocusRoom(roomId, {
-      mode: 'TOGETHER',
-      sessionLengthSec,
-    });
+    try {
+      await this.roomService.joinCoFocusRoom(roomId, {
+        mode: 'TOGETHER',
+        sessionLengthSec,
+      });
+    } catch (err) {
+      this.failOperation(generation, roomId, this.describeJoinFailure(err));
+      return;
+    }
+
+    if (!this.isOperationCurrent(generation, roomId) || this.state.phase !== 'matched') return;
 
     // An invite carries no matchmaking guarantee that anyone is on the other side, so the same
     // partner-arrival watch applies — it just surfaces "nobody joined" instead of requeueing.
-    this.watchForPartner({ autoRequeueOnTimeout: false });
+    this.watchForPartner({ autoRequeueOnTimeout: false }, generation, roomId);
   }
 
   /** Generates a shareable invite code for a Together session. */
@@ -203,13 +237,16 @@ export class CoFocusService {
    * undo everything it started, not just the queue.
    */
   public cancelQueue(): void {
+    if (this.destroyed) return;
+    this.operationGeneration++;
+    const roomId = this.state.roomId;
     this.lobby.leaveQueue();
     this.clearTimers();
     this.detachTopologyWatch();
-    if (this.state.roomId) {
+    this.setState({ ...INITIAL_COFOCUS_STATE });
+    if (roomId && this.roomService.getCurrentRoom()?.roomId === roomId) {
       this.roomService.leaveCurrentRoom();
     }
-    this.setState({ ...INITIAL_COFOCUS_STATE });
   }
 
   /**
@@ -227,14 +264,17 @@ export class CoFocusService {
    * absence path, which is the correct behaviour for an unannounced departure anyway.
    */
   public endSession(): void {
+    if (this.destroyed) return;
+    const roomId = this.state.roomId;
     this.announceSessionEnd('ended');
+    this.operationGeneration++;
     this.clearTimers();
     this.detachTopologyWatch();
     this.lobby.leaveQueue();
-    if (this.state.roomId) {
+    this.setState({ ...INITIAL_COFOCUS_STATE });
+    if (roomId && this.roomService.getCurrentRoom()?.roomId === roomId) {
       this.roomService.leaveCurrentRoom();
     }
-    this.setState({ ...INITIAL_COFOCUS_STATE });
   }
 
   /** Tells the partner why the session is ending, while the channel is still up. */
@@ -253,13 +293,16 @@ export class CoFocusService {
 
   /** Adds time to a running session (used by the "keep going" action at completion). */
   public extendSession(additionalSec: number): void {
+    if (this.destroyed) return;
     if (this.state.phase !== 'active' && this.state.phase !== 'completed') return;
     this.setState({
       ...this.state,
       phase: 'active',
       remainingSec: Math.max(0, this.state.remainingSec) + additionalSec,
     });
-    this.startCountdown();
+    if (this.state.roomId) {
+      this.startCountdown(this.operationGeneration, this.state.roomId);
+    }
   }
 
   public getState(): CoFocusSessionState {
@@ -290,9 +333,18 @@ export class CoFocusService {
     mode: CoFocusMode,
     subjectTag: string | undefined,
     sessionLengthSec: number,
-    carryError?: string
+    carryError: string | undefined,
+    generation: number
   ): Promise<void> {
-    const identity = await this.identityService.getOrCreateIdentity();
+    let identity;
+    try {
+      identity = await this.identityService.getOrCreateIdentity();
+    } catch (err) {
+      this.failOperation(generation, undefined, `Could not load your identity: ${this.errorMessage(err)}`);
+      return;
+    }
+    if (!this.isOperationCurrent(generation)) return;
+
     this.lastRequest = { mode, subjectTag, sessionLengthSec };
 
     this.setState({
@@ -316,6 +368,7 @@ export class CoFocusService {
   private bindLobbyListeners(): void {
     this.unsubscribeLobby.push(
       this.lobby.on('waiting', (data: LobbyWaitingData) => {
+        if (this.destroyed) return;
         if (this.state.phase !== 'queued') return;
         this.setState({
           ...this.state,
@@ -327,12 +380,17 @@ export class CoFocusService {
 
     this.unsubscribeLobby.push(
       this.lobby.on('matched', (data: LobbyMatchedData) => {
-        void this.handleMatched(data);
+        if (this.destroyed) return;
+        if (this.state.phase !== 'queued') return;
+        void this.handleMatched(data, this.operationGeneration);
       })
     );
 
     this.unsubscribeLobby.push(
       this.lobby.on('timeout', () => {
+        if (this.destroyed) return;
+        if (this.state.phase !== 'queued') return;
+        this.operationGeneration++;
         this.setState({
           ...INITIAL_COFOCUS_STATE,
           error: 'No study partner found right now. Try again, or pick a broader subject.',
@@ -342,6 +400,9 @@ export class CoFocusService {
 
     this.unsubscribeLobby.push(
       this.lobby.on('error', (data: LobbyErrorData) => {
+        if (this.destroyed) return;
+        if (this.state.phase !== 'queued') return;
+        this.operationGeneration++;
         this.setState({
           ...INITIAL_COFOCUS_STATE,
           error: data.message || `Matchmaking failed (${data.reason}).`,
@@ -351,9 +412,11 @@ export class CoFocusService {
 
     this.unsubscribeLobby.push(
       this.lobby.on('closed', () => {
+        if (this.destroyed) return;
         // Only meaningful while queued: a close after matching is the normal end of the lobby
         // connection, and LobbyService already suppresses that case.
         if (this.state.phase === 'queued') {
+          this.operationGeneration++;
           this.setState({
             ...INITIAL_COFOCUS_STATE,
             error: 'Lost connection to the matchmaking server.',
@@ -363,7 +426,8 @@ export class CoFocusService {
     );
   }
 
-  private async handleMatched(data: LobbyMatchedData): Promise<void> {
+  private async handleMatched(data: LobbyMatchedData, generation: number): Promise<void> {
+    if (!this.isOperationCurrent(generation) || this.state.phase !== 'queued') return;
     this.setState({
       ...this.state,
       phase: 'matched',
@@ -379,14 +443,21 @@ export class CoFocusService {
       error: undefined,
     });
 
-    await this.roomService.joinCoFocusRoom(data.roomId, {
-      mode: data.mode,
-      sessionLengthSec: data.sessionLengthSec,
-      subjectTag: data.subjectTag,
-      partnerPeerId: data.partnerPeerId,
-    });
+    try {
+      await this.roomService.joinCoFocusRoom(data.roomId, {
+        mode: data.mode,
+        sessionLengthSec: data.sessionLengthSec,
+        subjectTag: data.subjectTag,
+        partnerPeerId: data.partnerPeerId,
+      });
+    } catch (err) {
+      this.failOperation(generation, data.roomId, this.describeJoinFailure(err));
+      return;
+    }
 
-    this.watchForPartner({ autoRequeueOnTimeout: true });
+    if (!this.isOperationCurrent(generation, data.roomId)) return;
+
+    this.watchForPartner({ autoRequeueOnTimeout: true }, generation, data.roomId);
   }
 
   /**
@@ -396,11 +467,16 @@ export class CoFocusService {
    * guarantees both actually complete the room join. Without this, a matched user would sit
    * alone in a room forever with no explanation.
    */
-  private watchForPartner(opts: { autoRequeueOnTimeout: boolean }): void {
+  private watchForPartner(
+    opts: { autoRequeueOnTimeout: boolean },
+    generation: number,
+    roomId: string
+  ): void {
     this.detachTopologyWatch();
     this.clearPartnerArrivalTimer();
 
     this.unsubscribeTopology = this.network.onTopologyChange((topology) => {
+      if (!this.isOperationCurrent(generation, roomId)) return;
       const me = this.currentPeerId();
 
       // Prefer an exact identity check. For a matched session the lobby told us precisely who
@@ -433,7 +509,7 @@ export class CoFocusService {
         });
 
         if (isFirstArrival) {
-          this.startCountdown();
+          this.startCountdown(generation, roomId);
         }
         return;
       }
@@ -447,11 +523,15 @@ export class CoFocusService {
       }
     });
 
-    this.partnerArrivalTimer = setTimeout(() => {
+    const arrivalTimer = setTimeout(() => {
+      if (this.partnerArrivalTimer === arrivalTimer) this.partnerArrivalTimer = null;
+      if (!this.isOperationCurrent(generation, roomId)) return;
       if (this.state.partnerPresent) return;
 
       this.detachTopologyWatch();
-      this.roomService.leaveCurrentRoom();
+      if (this.roomService.getCurrentRoom()?.roomId === roomId) {
+        this.roomService.leaveCurrentRoom();
+      }
 
       if (opts.autoRequeueOnTimeout && this.lastRequest) {
         // Re-enter the queue rather than dumping the user back to the launcher: they asked to
@@ -459,19 +539,23 @@ export class CoFocusService {
         // The message is passed THROUGH enqueue rather than set before it, because enqueue
         // resets to INITIAL and would otherwise erase it.
         const { mode, subjectTag, sessionLengthSec } = this.lastRequest;
+        const nextGeneration = this.beginOperation();
         void this.enqueue(
           mode,
           subjectTag,
           sessionLengthSec || 0,
-          'Your match did not join — finding someone else.'
+          'Your match did not join — finding someone else.',
+          nextGeneration
         );
       } else {
+        this.operationGeneration++;
         this.setState({
           ...INITIAL_COFOCUS_STATE,
           error: 'Nobody joined this session.',
         });
       }
     }, PARTNER_ARRIVAL_TIMEOUT_MS);
+    this.partnerArrivalTimer = arrivalTimer;
   }
 
   private currentPeerId(): string {
@@ -489,13 +573,20 @@ export class CoFocusService {
    * Wall-clock based rather than tick-counting so a throttled background tab (Chrome heavily
    * throttles timers in inactive tabs) cannot make the countdown drift behind real time.
    */
-  private startCountdown(): void {
+  private startCountdown(generation: number, roomId: string): void {
     this.clearCountdown();
     if (!this.state.remainingSec || this.state.remainingSec <= 0) return;
 
     const endsAt = Date.now() + this.state.remainingSec * 1000;
 
-    this.countdownTimer = setInterval(() => {
+    const countdownTimer = setInterval(() => {
+      if (!this.isOperationCurrent(generation, roomId)) {
+        if (this.countdownTimer === countdownTimer) {
+          clearInterval(countdownTimer);
+          this.countdownTimer = null;
+        }
+        return;
+      }
       const remaining = Math.max(0, Math.ceil((endsAt - Date.now()) / 1000));
 
       if (remaining <= 0) {
@@ -509,17 +600,18 @@ export class CoFocusService {
 
       this.setState({ ...this.state, remainingSec: remaining });
     }, 1000);
+    this.countdownTimer = countdownTimer;
   }
 
   private clearCountdown(): void {
-    if (this.countdownTimer) {
+    if (this.countdownTimer !== null) {
       clearInterval(this.countdownTimer);
       this.countdownTimer = null;
     }
   }
 
   private clearPartnerArrivalTimer(): void {
-    if (this.partnerArrivalTimer) {
+    if (this.partnerArrivalTimer !== null) {
       clearTimeout(this.partnerArrivalTimer);
       this.partnerArrivalTimer = null;
     }
@@ -537,6 +629,41 @@ export class CoFocusService {
     }
   }
 
+  private beginOperation(): number {
+    const generation = ++this.operationGeneration;
+    this.lobby.leaveQueue();
+    this.clearTimers();
+    this.detachTopologyWatch();
+    return generation;
+  }
+
+  private isOperationCurrent(generation: number, roomId?: string): boolean {
+    return (
+      !this.destroyed &&
+      generation === this.operationGeneration &&
+      (!roomId || this.state.roomId === roomId)
+    );
+  }
+
+  private failOperation(generation: number, roomId: string | undefined, message: string): void {
+    if (!this.isOperationCurrent(generation, roomId)) return;
+    this.operationGeneration++;
+    this.clearTimers();
+    this.detachTopologyWatch();
+    this.setState({ ...INITIAL_COFOCUS_STATE, error: message });
+    if (roomId && this.roomService.getCurrentRoom()?.roomId === roomId) {
+      this.roomService.leaveCurrentRoom();
+    }
+  }
+
+  private errorMessage(err: unknown): string {
+    return err instanceof Error && err.message ? err.message : 'unknown error';
+  }
+
+  private describeJoinFailure(err: unknown): string {
+    return `Could not join the focus session: ${this.errorMessage(err)}`;
+  }
+
   private setState(next: CoFocusSessionState): void {
     this.state = next;
     const snapshot = this.getState();
@@ -551,39 +678,73 @@ export class CoFocusService {
 
   /** Gentle chime at session end. Mirrors TimerService's tone so the app sounds consistent. */
   private playCompletionChime(): void {
+    let ctx: AudioContext | null = null;
     try {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
       if (!AudioCtx) return;
-      const ctx = new AudioCtx();
+      const audioContext = new AudioCtx() as AudioContext;
+      ctx = audioContext;
+      this.completionAudioContexts.add(audioContext);
 
-      const playTone = (freq: number, start: number, duration: number) => {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
+      const playTone = (freq: number, start: number, duration: number, closesContext = false) => {
+        const osc = audioContext.createOscillator();
+        const gain = audioContext.createGain();
         osc.type = 'sine';
-        osc.frequency.setValueAtTime(freq, ctx.currentTime + start);
-        gain.gain.setValueAtTime(0, ctx.currentTime + start);
-        gain.gain.linearRampToValueAtTime(0.25, ctx.currentTime + start + 0.05);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + duration);
+        osc.frequency.setValueAtTime(freq, audioContext.currentTime + start);
+        gain.gain.setValueAtTime(0, audioContext.currentTime + start);
+        gain.gain.linearRampToValueAtTime(0.25, audioContext.currentTime + start + 0.05);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + start + duration);
         osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start(ctx.currentTime + start);
-        osc.stop(ctx.currentTime + start + duration);
+        gain.connect(audioContext.destination);
+        if (closesContext) {
+          osc.onended = () => {
+            this.closeCompletionAudioContext(audioContext);
+          };
+        }
+        osc.start(audioContext.currentTime + start);
+        osc.stop(audioContext.currentTime + start + duration);
       };
 
       playTone(523.25, 0, 1.2);
       playTone(659.25, 0.15, 1.2);
       playTone(783.99, 0.3, 1.5);
-      playTone(1046.5, 0.45, 2.0);
+      playTone(1046.5, 0.45, 2.0, true);
     } catch {
+      if (ctx) this.closeCompletionAudioContext(ctx);
       /* Web Audio unavailable — the visual state change is enough. */
     }
   }
 
+  private closeCompletionAudioContext(ctx: AudioContext): void {
+    this.completionAudioContexts.delete(ctx);
+    try {
+      void ctx.close().catch(() => {});
+    } catch {
+      // Some browser shims throw synchronously while their context is already closing.
+    }
+  }
+
   public destroy(): void {
+    if (this.destroyed) return;
+    const roomId = this.state.roomId;
+    if (roomId) this.announceSessionEnd('ended');
+    this.destroyed = true;
+    this.operationGeneration++;
+    this.lobby.leaveQueue();
     this.clearTimers();
     this.detachTopologyWatch();
     this.unsubscribeLobby.forEach((fn) => fn());
     this.unsubscribeLobby = [];
+    this.unsubscribeRoom?.();
+    this.unsubscribeRoom = null;
+    this.unsubscribePartnerEnd?.();
+    this.unsubscribePartnerEnd = null;
+    [...this.completionAudioContexts].forEach((ctx) => this.closeCompletionAudioContext(ctx));
     this.listeners.clear();
+    this.state = { ...INITIAL_COFOCUS_STATE };
+    if (roomId && this.roomService.getCurrentRoom()?.roomId === roomId) {
+      this.roomService.leaveCurrentRoom();
+    }
+    if (CoFocusService.instance === this) CoFocusService.instance = null;
   }
 }

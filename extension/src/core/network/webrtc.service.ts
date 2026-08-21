@@ -30,6 +30,24 @@ export interface NegotiationRecord {
   at: number;
 }
 
+export interface WebRTCConnectionDiagnostic {
+  kind:
+    | 'signal-stage'
+    | 'ice-candidate-stage'
+    | 'ice-gathering-state'
+    | 'ice-state'
+    | 'peer-connection-state'
+    | 'dtls-state'
+    | 'sctp-state'
+    | 'data-channel-state';
+  remotePeerId: string;
+  state: string;
+  channel?: 'control' | 'bulk';
+  generation?: number;
+  reason?: NegotiationReason;
+  candidateType?: 'host' | 'srflx' | 'prflx' | 'relay' | 'unknown';
+}
+
 export interface PeerConnectionWrapper {
   peerId: string;
   /**
@@ -127,6 +145,12 @@ export class WebRTCService {
   private signalNeededListeners: Set<
     (targetPeerId: string, type: 'offer' | 'answer' | 'ice', payload: any) => void
   > = new Set();
+  private diagnosticListeners: Set<(event: WebRTCConnectionDiagnostic) => void> = new Set();
+  /** One-shot stages already reported for a peer-connection generation. */
+  private emittedDiagnosticMilestones: Set<string> = new Set();
+  private static readonly MAX_DIAGNOSTIC_MILESTONES = 2_000;
+  private observedDtlsTransports: WeakSet<object> = new WeakSet();
+  private observedSctpTransports: WeakSet<object> = new WeakSet();
 
   private iceServers: RTCIceServer[] = [
     // 1. Google Public STUN
@@ -219,10 +243,13 @@ export class WebRTCService {
   }
 
   /** Marks peers that have historically needed TURN, so ICE can skip direct attempts. */
-  public async loadRelayHints(peerIds: string[]): Promise<void> {
+  public async loadRelayHints(peerIds: string[], isCurrent: () => boolean = () => true): Promise<void> {
     for (const peerId of peerIds) {
+      if (!isCurrent()) return;
       try {
-        if (await this.identityStore.shouldForceRelay(peerId)) {
+        const shouldForceRelay = await this.identityStore.shouldForceRelay(peerId);
+        if (!isCurrent()) return;
+        if (shouldForceRelay) {
           this.forceRelayPeers.add(peerId);
         }
       } catch {
@@ -258,6 +285,82 @@ export class WebRTCService {
   ): () => void {
     this.signalNeededListeners.add(fn);
     return () => this.signalNeededListeners.delete(fn);
+  }
+
+  public onDiagnostic(fn: (event: WebRTCConnectionDiagnostic) => void): () => void {
+    this.diagnosticListeners.add(fn);
+    return () => this.diagnosticListeners.delete(fn);
+  }
+
+  private emitDiagnostic(event: WebRTCConnectionDiagnostic): void {
+    const generation =
+      event.generation ??
+      this.connections.get(event.remotePeerId)?.generation ??
+      this.generations.get(event.remotePeerId) ??
+      0;
+    const correlatedEvent = { ...event, generation };
+    this.diagnosticListeners.forEach((fn) => {
+      try {
+        fn(correlatedEvent);
+      } catch {
+        // Diagnostics must never affect negotiation.
+      }
+    });
+  }
+
+  /** Emits a milestone once per peer-connection generation to keep candidate-heavy traces bounded. */
+  private emitMilestone(event: WebRTCConnectionDiagnostic): void {
+    const generation =
+      event.generation ??
+      this.connections.get(event.remotePeerId)?.generation ??
+      this.generations.get(event.remotePeerId) ??
+      0;
+    const key = [
+      event.remotePeerId,
+      generation,
+      event.kind,
+      event.state,
+      event.channel || '',
+      event.reason || '',
+      event.candidateType || '',
+    ].join('|');
+    if (this.emittedDiagnosticMilestones.has(key)) return;
+    this.emittedDiagnosticMilestones.add(key);
+    if (this.emittedDiagnosticMilestones.size > WebRTCService.MAX_DIAGNOSTIC_MILESTONES) {
+      const oldest = this.emittedDiagnosticMilestones.values().next().value;
+      if (oldest !== undefined) this.emittedDiagnosticMilestones.delete(oldest);
+    }
+    this.emitDiagnostic({ ...event, generation });
+  }
+
+  /**
+   * Observes the transports browsers normally hide behind the aggregate connection state.
+   * ICE succeeding does not prove DTLS or SCTP succeeded; recording each layer prevents a
+   * failed SCTP start from being misreported as a generic WebRTC disconnect.
+   */
+  private observeTransportStates(remotePeerId: string, pc: RTCPeerConnection): void {
+    const sctp = pc.sctp;
+    if (!sctp) return;
+
+    const reportSctp = () => {
+      this.emitMilestone({ kind: 'sctp-state', remotePeerId, state: sctp.state });
+    };
+    const dtls = sctp.transport;
+    const reportDtls = () => {
+      this.emitMilestone({ kind: 'dtls-state', remotePeerId, state: dtls.state });
+    };
+
+    reportSctp();
+    reportDtls();
+
+    if (!this.observedSctpTransports.has(sctp)) {
+      this.observedSctpTransports.add(sctp);
+      sctp.addEventListener('statechange', reportSctp);
+    }
+    if (!this.observedDtlsTransports.has(dtls)) {
+      this.observedDtlsTransports.add(dtls);
+      dtls.addEventListener('statechange', reportDtls);
+    }
   }
 
   public setCallbacks(callbacks: {
@@ -316,6 +419,7 @@ export class WebRTCService {
           if (audioTx.sender.track !== trackToSet) {
             await audioTx.sender.replaceTrack(trackToSet).catch(() => {});
             audioTx.direction = trackToSet ? 'sendrecv' : 'recvonly';
+            needsRenegotiation = true;
           }
         }
       }
@@ -355,8 +459,21 @@ export class WebRTCService {
     try {
       wrapper.makingOffer = true;
       const offer = await wrapper.pc.createOffer();
+      this.emitMilestone({
+        kind: 'signal-stage',
+        remotePeerId,
+        state: 'offer-created',
+        reason,
+      });
       if ((wrapper.pc.signalingState as string) === 'closed') return;
       await wrapper.pc.setLocalDescription(offer);
+      this.emitMilestone({
+        kind: 'signal-stage',
+        remotePeerId,
+        state: 'offer-local-applied',
+        reason,
+      });
+      this.observeTransportStates(remotePeerId, wrapper.pc);
 
       this.noteOffer(remotePeerId, reason);
       this.signalNeededListeners.forEach((fn) => fn(remotePeerId, 'offer', offer));
@@ -379,8 +496,21 @@ export class WebRTCService {
     try {
       wrapper.makingOffer = true;
       const offer = await wrapper.pc.createOffer({ iceRestart: true });
+      this.emitMilestone({
+        kind: 'signal-stage',
+        remotePeerId,
+        state: 'offer-created',
+        reason: 'ICE_RESTART',
+      });
       if ((wrapper.pc.signalingState as string) === 'closed') return;
       await wrapper.pc.setLocalDescription(offer);
+      this.emitMilestone({
+        kind: 'signal-stage',
+        remotePeerId,
+        state: 'offer-local-applied',
+        reason: 'ICE_RESTART',
+      });
+      this.observeTransportStates(remotePeerId, wrapper.pc);
 
       this.noteOffer(remotePeerId, 'ICE_RESTART');
       this.signalNeededListeners.forEach((fn) => fn(remotePeerId, 'offer', offer));
@@ -436,11 +566,36 @@ export class WebRTCService {
       connectingSince: Date.now(),
     };
     this.connections.set(remotePeerId, wrapper);
+    this.emitMilestone({
+      kind: 'data-channel-state',
+      remotePeerId,
+      state: 'created',
+      channel: 'control',
+    });
+    this.emitMilestone({
+      kind: 'data-channel-state',
+      remotePeerId,
+      state: 'created',
+      channel: 'bulk',
+    });
 
     try {
       wrapper.makingOffer = true;
       const offer = await pc.createOffer();
+      this.emitMilestone({
+        kind: 'signal-stage',
+        remotePeerId,
+        state: 'offer-created',
+        reason: 'INITIAL',
+      });
       await pc.setLocalDescription(offer);
+      this.emitMilestone({
+        kind: 'signal-stage',
+        remotePeerId,
+        state: 'offer-local-applied',
+        reason: 'INITIAL',
+      });
+      this.observeTransportStates(remotePeerId, pc);
 
       this.noteOffer(remotePeerId, 'INITIAL');
       this.signalNeededListeners.forEach((fn) => fn(remotePeerId, 'offer', offer));
@@ -460,6 +615,12 @@ export class WebRTCService {
         try {
           if (c.candidate) {
             await pc.addIceCandidate(new RTCIceCandidate(c));
+            this.emitMilestone({
+              kind: 'ice-candidate-stage',
+              remotePeerId,
+              state: 'applied',
+              candidateType: this.candidateType(c),
+            });
           }
         } catch (err) {
           console.warn(`[WebRTCService] Failed to flush queued ICE candidate for ${remotePeerId}:`, err);
@@ -480,10 +641,12 @@ export class WebRTCService {
 
     // Handle existing connection renegotiation / offer collision
     if (wrapper && wrapper.pc && wrapper.pc.signalingState !== 'closed') {
+      this.emitMilestone({ kind: 'signal-stage', remotePeerId, state: 'offer-received' });
       const offerCollision = wrapper.makingOffer || wrapper.pc.signalingState !== 'stable';
       wrapper.ignoreOffer = !isPolite && offerCollision;
 
       if (wrapper.ignoreOffer) {
+        this.emitMilestone({ kind: 'signal-stage', remotePeerId, state: 'offer-ignored' });
         console.log(`[WebRTCService] Impolite peer ignoring colliding offer from ${remotePeerId}`);
         return;
       }
@@ -491,14 +654,20 @@ export class WebRTCService {
       if (offerCollision) {
         try {
           await wrapper.pc.setLocalDescription({ type: 'rollback' });
+          this.emitMilestone({ kind: 'signal-stage', remotePeerId, state: 'offer-rollback' });
         } catch (e) {}
       }
 
       try {
         await wrapper.pc.setRemoteDescription(new RTCSessionDescription(offer));
+        this.emitMilestone({ kind: 'signal-stage', remotePeerId, state: 'offer-remote-applied' });
+        this.observeTransportStates(remotePeerId, wrapper.pc);
         await this.flushPendingIce(remotePeerId, wrapper.pc);
         const answer = await wrapper.pc.createAnswer();
+        this.emitMilestone({ kind: 'signal-stage', remotePeerId, state: 'answer-created' });
         await wrapper.pc.setLocalDescription(answer);
+        this.emitMilestone({ kind: 'signal-stage', remotePeerId, state: 'answer-local-applied' });
+        this.observeTransportStates(remotePeerId, wrapper.pc);
 
         this.recordAnswer(remotePeerId);
         this.signalNeededListeners.forEach((fn) => fn(remotePeerId, 'answer', answer));
@@ -528,12 +697,18 @@ export class WebRTCService {
       connectingSince: Date.now(),
     };
     this.connections.set(remotePeerId, wrapper);
+    this.emitMilestone({ kind: 'signal-stage', remotePeerId, state: 'offer-received' });
 
     try {
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      this.emitMilestone({ kind: 'signal-stage', remotePeerId, state: 'offer-remote-applied' });
+      this.observeTransportStates(remotePeerId, pc);
       await this.flushPendingIce(remotePeerId, pc);
       const answer = await pc.createAnswer();
+      this.emitMilestone({ kind: 'signal-stage', remotePeerId, state: 'answer-created' });
       await pc.setLocalDescription(answer);
+      this.emitMilestone({ kind: 'signal-stage', remotePeerId, state: 'answer-local-applied' });
+      this.observeTransportStates(remotePeerId, pc);
 
       this.recordAnswer(remotePeerId);
       this.signalNeededListeners.forEach((fn) => fn(remotePeerId, 'answer', answer));
@@ -554,7 +729,10 @@ export class WebRTCService {
     if (!wrapper || !wrapper.pc || wrapper.pc.signalingState === 'closed') return;
 
     try {
+      this.emitMilestone({ kind: 'signal-stage', remotePeerId, state: 'answer-received' });
       await wrapper.pc.setRemoteDescription(new RTCSessionDescription(answer));
+      this.emitMilestone({ kind: 'signal-stage', remotePeerId, state: 'answer-remote-applied' });
+      this.observeTransportStates(remotePeerId, wrapper.pc);
       await this.flushPendingIce(remotePeerId, wrapper.pc);
     } catch (err) {
       console.error(`[WebRTCService] Failed to set remote description for ${remotePeerId}:`, err);
@@ -568,6 +746,13 @@ export class WebRTCService {
     remotePeerId: string,
     candidate: RTCIceCandidateInit
   ): Promise<void> {
+    const candidateType = this.candidateType(candidate);
+    this.emitMilestone({
+      kind: 'ice-candidate-stage',
+      remotePeerId,
+      state: 'received',
+      candidateType,
+    });
     const wrapper = this.connections.get(remotePeerId);
     if (!wrapper || !wrapper.pc || !wrapper.pc.remoteDescription || wrapper.pc.signalingState === 'closed') {
       // Buffer until the remote description exists — but bounded on both axes, because this
@@ -577,6 +762,12 @@ export class WebRTCService {
         this.pendingIceCandidates.size >= WebRTCService.MAX_ICE_PEERS
       ) {
         this.iceDropped++;
+        this.emitMilestone({
+          kind: 'ice-candidate-stage',
+          remotePeerId,
+          state: 'dropped',
+          candidateType,
+        });
         return;
       }
       if (!this.pendingIceCandidates.has(remotePeerId)) {
@@ -591,6 +782,12 @@ export class WebRTCService {
         this.iceDropped++;
       }
       queue.push(candidate);
+      this.emitMilestone({
+        kind: 'ice-candidate-stage',
+        remotePeerId,
+        state: 'queued',
+        candidateType,
+      });
       return;
     }
 
@@ -598,8 +795,20 @@ export class WebRTCService {
       if (candidate.candidate) {
         await wrapper.pc.addIceCandidate(new RTCIceCandidate(candidate));
         this.noteIce(remotePeerId, 'received');
+        this.emitMilestone({
+          kind: 'ice-candidate-stage',
+          remotePeerId,
+          state: 'applied',
+          candidateType,
+        });
       }
     } catch (err) {
+      this.emitMilestone({
+        kind: 'ice-candidate-stage',
+        remotePeerId,
+        state: 'rejected',
+        candidateType,
+      });
       console.warn(`[WebRTCService] Failed to add ICE candidate for ${remotePeerId}:`, err);
     }
   }
@@ -644,13 +853,38 @@ export class WebRTCService {
         // peer-identity-store.ts.
         this.noteIce(remotePeerId, 'sent');
         this.noteGatheredCandidate(remotePeerId, event.candidate!);
+        this.emitMilestone({
+          kind: 'ice-candidate-stage',
+          remotePeerId,
+          state: 'gathered',
+          candidateType: this.candidateType(event.candidate),
+        });
         this.signalNeededListeners.forEach((fn) => fn(remotePeerId, 'ice', event.candidate!.toJSON()));
+      } else {
+        this.emitMilestone({
+          kind: 'ice-candidate-stage',
+          remotePeerId,
+          state: 'end-of-candidates',
+        });
       }
-      // event.candidate === null means gathering is complete; nothing to send.
+    };
+
+    pc.onicegatheringstatechange = () => {
+      this.emitDiagnostic({
+        kind: 'ice-gathering-state',
+        remotePeerId,
+        state: pc.iceGatheringState,
+      });
     };
 
     pc.onconnectionstatechange = () => {
       const state = pc.connectionState;
+      this.emitDiagnostic({
+        kind: 'peer-connection-state',
+        remotePeerId,
+        state,
+      });
+      this.observeTransportStates(remotePeerId, pc);
 
       if (state === 'connected') {
         // Record how this connection was actually established, so the next attempt to this
@@ -679,6 +913,8 @@ export class WebRTCService {
 
     pc.oniceconnectionstatechange = () => {
       const iceState = pc.iceConnectionState;
+      this.emitDiagnostic({ kind: 'ice-state', remotePeerId, state: iceState });
+      this.observeTransportStates(remotePeerId, pc);
       if (iceState === 'failed' || iceState === 'disconnected') {
         const wrapper = this.connections.get(remotePeerId);
         if (wrapper && wrapper.status === 'connected') {
@@ -700,6 +936,12 @@ export class WebRTCService {
           wrapper.controlChannel = dc;
         }
       }
+      this.emitMilestone({
+        kind: 'data-channel-state',
+        remotePeerId,
+        state: 'created',
+        channel: kind,
+      });
       this.setupDataChannel(remotePeerId, dc, kind);
     };
 
@@ -727,10 +969,17 @@ export class WebRTCService {
     return pc;
   }
 
-  private setupDataChannel(remotePeerId: string, dc: RTCDataChannel, _kind: 'control' | 'bulk') {
+  private setupDataChannel(remotePeerId: string, dc: RTCDataChannel, kind: 'control' | 'bulk') {
     const handleOpen = () => {
+      this.emitDiagnostic({
+        kind: 'data-channel-state',
+        remotePeerId,
+        state: 'open',
+        channel: kind,
+      });
       const wrapper = this.connections.get(remotePeerId);
       if (wrapper) {
+        this.observeTransportStates(remotePeerId, wrapper.pc);
         wrapper.status = 'connected';
         this.connectionStateListeners.forEach((fn) => fn(remotePeerId, 'connected'));
       }
@@ -750,6 +999,12 @@ export class WebRTCService {
     };
 
     dc.onclose = () => {
+      this.emitDiagnostic({
+        kind: 'data-channel-state',
+        remotePeerId,
+        state: 'closed',
+        channel: kind,
+      });
       const wrapper = this.connections.get(remotePeerId);
       if (wrapper) {
         const isStillConnected = Boolean(
@@ -762,7 +1017,14 @@ export class WebRTCService {
       }
     };
 
-    dc.onerror = () => {};
+    dc.onerror = () => {
+      this.emitDiagnostic({
+        kind: 'data-channel-state',
+        remotePeerId,
+        state: 'error',
+        channel: kind,
+      });
+    };
   }
 
   /**
@@ -887,6 +1149,11 @@ export class WebRTCService {
     return result;
   }
 
+  /** Correlates topology-level signal routing events with this peer's current PC attempt. */
+  public getConnectionGeneration(remotePeerId: string): number {
+    return this.connections.get(remotePeerId)?.generation ?? this.generations.get(remotePeerId) ?? 0;
+  }
+
   private recordAnswer(peerId: string): void {
     const wrapper = this.connections.get(peerId);
     const gen = wrapper?.generation ?? this.generations.get(peerId) ?? 0;
@@ -933,6 +1200,18 @@ export class WebRTCService {
   public closeAll() {
     const peerIds = Array.from(this.connections.keys());
     peerIds.forEach((id) => this.closeConnection(id));
+    // ICE can arrive before an offer creates a wrapper. Those peer IDs are absent from
+    // `connections`, so iterating live wrappers alone leaves their candidate queues behind
+    // across rooms. The remaining maps are also session diagnostics, not durable identity
+    // hints; retaining them would grow one peer/generation entry per room forever.
+    this.pendingIceCandidates.clear();
+    this.generations.clear();
+    this.pcStats.clear();
+    this.recentNegotiations = [];
+    this.emittedDiagnosticMilestones.clear();
+    this.observedDtlsTransports = new WeakSet();
+    this.observedSctpTransports = new WeakSet();
+    this.iceDropped = 0;
   }
 
   /**
@@ -1097,6 +1376,21 @@ export class WebRTCService {
     else stat.gathered.host++;
   }
 
+  /** Returns only the non-sensitive candidate category; addresses and ports never enter logs. */
+  private candidateType(
+    candidate: RTCIceCandidate | RTCIceCandidateInit
+  ): 'host' | 'srflx' | 'prflx' | 'relay' | 'unknown' {
+    const parsed = (candidate as RTCIceCandidate).type;
+    if (parsed === 'host' || parsed === 'srflx' || parsed === 'prflx' || parsed === 'relay') {
+      return parsed;
+    }
+    const raw = typeof candidate.candidate === 'string' ? candidate.candidate : '';
+    const token = /\btyp\s+(host|srflx|prflx|relay)\b/i.exec(raw)?.[1]?.toLowerCase();
+    return token === 'host' || token === 'srflx' || token === 'prflx' || token === 'relay'
+      ? token
+      : 'unknown';
+  }
+
   private noteIce(peerId: string, direction: 'sent' | 'received'): void {
     const wrapper = this.connections.get(peerId);
     const gen = wrapper?.generation ?? this.generations.get(peerId) ?? 0;
@@ -1159,4 +1453,3 @@ export class WebRTCService {
     this.connectionStateListeners.forEach((fn) => fn(remotePeerId, 'failed'));
   }
 }
-

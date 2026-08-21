@@ -18,7 +18,7 @@ interface PendingMessage {
   maxAttempts: number;
   initialSentAt: number;
   lastSentAt: number;
-  timer: any;
+  timer: ReturnType<typeof setTimeout> | null;
   resolve: (receipt: DeliveryReceipt) => void;
   // No `reject` field.
   //
@@ -133,7 +133,7 @@ export class ReliableTransport {
   }
 
   private scheduleRetry(item: PendingMessage): void {
-    if (item.timer) clearTimeout(item.timer);
+    if (item.timer !== null) clearTimeout(item.timer);
 
     // Exponential backoff: RTO * (1.8 ^ (attempts - 1)) * congestion + jitter.
     //
@@ -148,6 +148,7 @@ export class ReliableTransport {
     );
 
     item.timer = setTimeout(() => {
+      item.timer = null;
       if (!this.pending.has(item.packet.id)) return;
 
       if (item.attempts >= item.maxAttempts) {
@@ -191,7 +192,7 @@ export class ReliableTransport {
     const item = this.pending.get(ack.ackFor);
     if (!item) return;
 
-    if (item.timer) clearTimeout(item.timer);
+    if (item.timer !== null) clearTimeout(item.timer);
     this.pending.delete(ack.ackFor);
 
     const now = Date.now();
@@ -242,7 +243,7 @@ export class ReliableTransport {
       item.attempts += 1;
 
       if (item.attempts >= item.maxAttempts) {
-        if (item.timer) clearTimeout(item.timer);
+        if (item.timer !== null) clearTimeout(item.timer);
         this.pending.delete(nack.nackFor);
         item.resolve({
           messageId: nack.nackFor,
@@ -259,7 +260,7 @@ export class ReliableTransport {
     }
 
     // Terminal rejection
-    if (item.timer) clearTimeout(item.timer);
+    if (item.timer !== null) clearTimeout(item.timer);
     this.pending.delete(nack.nackFor);
 
     item.resolve({
@@ -387,7 +388,7 @@ export class ReliableTransport {
     // worth fixing — it is a trap armed for whoever writes the first `await`. clear() is
     // called on room change, so that await would hang on an ordinary user action.
     this.pending.forEach((item) => {
-      if (item.timer) clearTimeout(item.timer);
+      if (item.timer !== null) clearTimeout(item.timer);
       item.resolve({
         messageId: item.packet.id,
         status: 'rejected',

@@ -1,9 +1,9 @@
-// ─── Zero-Dependency Chrome Web Store ZIP Packager for Nerd Buddy ───
+// ─── Zero-Dependency Chrome Web Store ZIP Packager for Synqto ───
 
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -50,14 +50,18 @@ if (fs.existsSync(zipFilePath)) {
   fs.unlinkSync(zipFilePath);
 }
 
-// Compress dist contents directly into root of ZIP
+// Compress dist contents directly into the root of the ZIP.
+//
+// Do not shell through `powershell -Command Compress-Archive`: Windows PowerShell and
+// PowerShell 7 have different module installations, and on otherwise healthy machines the
+// legacy Archive module can fail to autoload. Passing an argv array also avoids path quoting
+// and command-injection bugs when a workspace contains spaces or shell metacharacters.
 const isWin = process.platform === 'win32';
 if (isWin) {
-  const psCmd = `powershell -Command "Compress-Archive -Path '${distDir}\\*' -DestinationPath '${zipFilePath}' -Force"`;
-  execSync(psCmd, { stdio: 'inherit' });
+  // Windows 10+ ships libarchive as tar.exe; `-a` selects ZIP from the destination suffix.
+  execFileSync('tar.exe', ['-a', '-c', '-f', zipFilePath, '-C', distDir, '.'], { stdio: 'inherit' });
 } else {
-  // Use standard unix zip utility
-  execSync(`cd "${distDir}" && zip -r "${zipFilePath}" .`, { stdio: 'inherit' });
+  execFileSync('zip', ['-r', zipFilePath, '.'], { cwd: distDir, stdio: 'inherit' });
 }
 
 // Copy to website/downloads and root downloads
@@ -69,15 +73,8 @@ const copyTargets = [
 const aliasNames = [
   `synqto-v${version4}.zip`,
   `synqto-v${version3}.zip`,
-  `synqto-v0.0.0.0.zip`,
-  `synqme-v${version4}.zip`,
-  `synqme-v${version3}.zip`,
-  `synqme-v0.0.0.0.zip`,
-  `nerd-buddy-v${version4}.zip`,
-  `nerd-buddy-v${version3}.zip`,
-  `nerd-buddy-v0.0.0.0.zip`,
 ];
-const latestAliases = ['synqto-latest.zip', 'synqme-latest.zip', 'nerd-buddy-latest.zip'];
+const latestAliases = ['synqto-latest.zip'];
 
 for (const dir of copyTargets) {
   if (!fs.existsSync(dir)) {

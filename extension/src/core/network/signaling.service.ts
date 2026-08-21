@@ -34,10 +34,45 @@ export interface ServerMessage {
   payload?: any;
   /** Signaling wire-protocol version. Present on join; echoed by the server on roster. */
   v?: number;
+  /** Correlates all frames actually sent by one WebSocket connection attempt. */
+  connectionAttemptId?: string;
+}
+
+export interface ConnectionTracePayload {
+  kind:
+    | 'join-stage'
+    | 'signal-stage'
+    | 'ice-candidate-stage'
+    | 'ice-gathering-state'
+    | 'peer-connection-state'
+    | 'ice-state'
+    | 'dtls-state'
+    | 'sctp-state'
+    | 'data-channel-state'
+    | 'application-received'
+    | 'application-stage';
+  remotePeerId?: string;
+  state?: string;
+  channel?: 'control' | 'bulk';
+  packetType?: string;
+  connectedLinks?: number;
+  requiredLinks?: number;
+  generation?: number;
+  reason?: 'INITIAL' | 'NEGOTIATION_NEEDED' | 'ICE_RESTART' | 'TRACK_CHANGE' | 'RECOVERY';
+  transport?: 'direct' | 'peer-relay' | 'server' | 'dropped';
+  candidateType?: 'host' | 'srflx' | 'prflx' | 'relay' | 'unknown';
+}
+
+export interface StreamAdmissionResponse {
+  requestId: string;
+  granted: boolean;
+  reason?: string;
+  activeBroadcasters: number;
+  maxBroadcasters: number;
 }
 
 interface QueuedSignalingMessage {
-  raw: string;
+  message: ServerMessage;
   timestamp: number;
 }
 
@@ -53,7 +88,7 @@ const RECONNECT_MIN_DELAY_MS = 250;
  * server faces a spread of installed client versions. Without a version on the wire there
  * is no negotiation path and a payload-shape change silently breaks older clients.
  */
-export const SIGNALING_PROTOCOL_VERSION = 1;
+export const SIGNALING_PROTOCOL_VERSION = 2;
 
 export class SignalingService {
   private static instance: SignalingService | null = null;
@@ -63,12 +98,14 @@ export class SignalingService {
   private peerId = '';
   private nickname = '';
   private isConnected = false;
+  private isRoomRegistered = false;
+  private serverProtocolVersion = 0;
   private reconnectAttempts = 0;
   private connectionGeneration = 0;
   private activeAttemptId: string | null = null;
-  private reconnectTimer: any = null;
-  private pingInterval: any = null;
-  private pongTimeoutTimer: any = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private pingInterval: ReturnType<typeof setInterval> | null = null;
+  private pongTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
   private messageQueue: QueuedSignalingMessage[] = [];
   private listeners: Map<string, Set<(data: any) => void>> = new Map();
 
@@ -165,12 +202,30 @@ export class SignalingService {
   }
 
   public reconnect(roomId?: string, peerId?: string, nickname?: string) {
+    const targetRoomId = roomId || this.currentRoomId;
+    const targetPeerId = peerId || this.peerId;
+
+    // Collapse concurrent retry requests. The first call replaces an OPEN socket; any second
+    // call arriving while that replacement is still CONNECTING must not replace it again.
+    // This is common when the reconnect button and an automatic retry fire together.
+    if (
+      this.ws?.readyState === WebSocket.CONNECTING &&
+      targetRoomId === this.currentRoomId &&
+      targetPeerId === this.peerId
+    ) {
+      return;
+    }
+
     this.reconnectAttempts = 0;
-    if (this.reconnectTimer) {
+    if (this.reconnectTimer !== null) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
-    this.cleanupState(true);
+    // A brief reconnect of the same logical owner may replay fresh queued signaling. A room
+    // or peer switch must not: those frames contain the previous roomId/from identity and
+    // would otherwise be flushed through the replacement socket.
+    const sameOwner = targetRoomId === this.currentRoomId && targetPeerId === this.peerId;
+    this.cleanupState(sameOwner);
 
     if (roomId) this.currentRoomId = roomId;
     if (peerId) this.peerId = peerId;
@@ -257,7 +312,7 @@ export class SignalingService {
         while (this.messageQueue.length > 0 && this.ws?.readyState === WebSocket.OPEN) {
           const item = this.messageQueue.shift();
           if (item && now - item.timestamp < 30000) {
-            this.ws.send(item.raw);
+            this.ws.send(this.serializeMessage(item.message));
           }
         }
 
@@ -334,9 +389,25 @@ export class SignalingService {
   }
 
   private handleIncomingMessage(msg: ServerMessage) {
+    // The socket URL scopes a connection to one room, but the envelope is still untrusted
+    // protocol input. Reject a missing/wrong room and misdirected unicast before it can mark
+    // registration complete, mutate topology, or deliver SDP/ICE to the current session.
+    if (
+      !msg ||
+      typeof msg.type !== 'string' ||
+      typeof msg.roomId !== 'string' ||
+      msg.roomId !== this.currentRoomId ||
+      (msg.to !== undefined && msg.to !== '' && msg.to !== this.peerId)
+    ) {
+      return;
+    }
+
     switch (msg.type) {
       case 'room:roster':
+        this.serverProtocolVersion = msg.v || 1;
+        this.isRoomRegistered = true;
         this.emit('roster', msg.payload as RosterData);
+        this.emit('room:registered', { roomId: this.currentRoomId });
         break;
       case 'leader:promote':
         this.emit('promote', msg.payload as PromoteData);
@@ -358,8 +429,11 @@ export class SignalingService {
           this.emit('relay:packet', msg.payload);
         }
         break;
+      case 'stream:admission_response':
+        this.emit('stream:admission_response', msg.payload as StreamAdmissionResponse);
+        break;
       case 'pong':
-        if (this.pongTimeoutTimer) {
+        if (this.pongTimeoutTimer !== null) {
           clearTimeout(this.pongTimeoutTimer);
           this.pongTimeoutTimer = null;
         }
@@ -409,17 +483,62 @@ export class SignalingService {
     });
   }
 
+  /**
+   * Reports a browser-only connection milestone to the server diagnostics ring.
+   * Diagnostics are best-effort and never occupy the signaling queue: an offline trace must
+   * not crowd out the offer/answer/ICE messages needed to recover the connection it describes.
+   */
+  public sendConnectionTrace(payload: ConnectionTracePayload): boolean {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return false;
+    return this.sendRaw({
+      type: 'connection:trace',
+      from: this.peerId,
+      roomId: this.currentRoomId,
+      payload,
+    });
+  }
+
+  public requestStreamAdmission(requestId: string): boolean {
+    if (
+      !this.isRoomRegistered ||
+      this.serverProtocolVersion < 2 ||
+      !this.ws ||
+      this.ws.readyState !== WebSocket.OPEN
+    ) return false;
+    return this.sendRaw({
+      type: 'stream:admission_request',
+      from: this.peerId,
+      roomId: this.currentRoomId,
+      payload: { requestId },
+    });
+  }
+
+  public releaseStreamAdmission(): boolean {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return false;
+    return this.sendRaw({
+      type: 'stream:admission_release',
+      from: this.peerId,
+      roomId: this.currentRoomId,
+    });
+  }
+
   private sendRaw(msg: ServerMessage): boolean {
-    const raw = JSON.stringify(msg);
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(raw);
+      this.ws.send(this.serializeMessage(msg));
       return true;
     } else {
       if (this.messageQueue.length < 100) {
-        this.messageQueue.push({ raw, timestamp: Date.now() });
+        this.messageQueue.push({ message: { ...msg }, timestamp: Date.now() });
       }
       return false;
     }
+  }
+
+  private serializeMessage(msg: ServerMessage): string {
+    return JSON.stringify({
+      ...msg,
+      ...(this.activeAttemptId ? { connectionAttemptId: this.activeAttemptId } : {}),
+    });
   }
 
   private startHeartbeat() {
@@ -442,11 +561,11 @@ export class SignalingService {
   }
 
   private stopHeartbeat() {
-    if (this.pingInterval) {
+    if (this.pingInterval !== null) {
       clearInterval(this.pingInterval);
       this.pingInterval = null;
     }
-    if (this.pongTimeoutTimer) {
+    if (this.pongTimeoutTimer !== null) {
       clearTimeout(this.pongTimeoutTimer);
       this.pongTimeoutTimer = null;
     }
@@ -454,7 +573,7 @@ export class SignalingService {
 
   private scheduleReconnect() {
     if (!this.currentRoomId) return;
-    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    if (this.reconnectTimer !== null) clearTimeout(this.reconnectTimer);
 
     // TRUE full-jitter exponential backoff (AWS "Full Jitter"): sleep = random(0, window),
     // where window grows exponentially and is capped.
@@ -473,6 +592,13 @@ export class SignalingService {
     this.reconnectAttempts++;
 
     this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (
+        this.ws &&
+        (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)
+      ) {
+        return;
+      }
       this.prewarmServer();
       this.establishConnection();
     }, delay);
@@ -480,6 +606,8 @@ export class SignalingService {
 
   private cleanupState(preserveRecentQueue = false) {
     this.isConnected = false;
+    this.isRoomRegistered = false;
+    this.serverProtocolVersion = 0;
     this.stopHeartbeat();
     if (!preserveRecentQueue) {
       this.messageQueue = [];
@@ -503,7 +631,13 @@ export class SignalingService {
   }
 
   public disconnect() {
-    if (this.reconnectTimer) {
+    // Invalidate callbacks that the browser may already have queued from the retiring
+    // socket. Nulling onopen/onclose prevents future dispatch, but it cannot retract a
+    // callback already placed on the task queue; generation fencing makes that callback
+    // inert instead of letting it resurrect a disconnected session.
+    this.connectionGeneration++;
+    this.activeAttemptId = null;
+    if (this.reconnectTimer !== null) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
@@ -521,5 +655,13 @@ export class SignalingService {
 
   public getIsConnected(): boolean {
     return this.isConnected;
+  }
+
+  public getIsRoomRegistered(): boolean {
+    return this.isRoomRegistered;
+  }
+
+  public supportsStreamAdmission(): boolean {
+    return this.serverProtocolVersion >= 2;
   }
 }

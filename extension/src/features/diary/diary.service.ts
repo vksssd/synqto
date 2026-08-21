@@ -5,19 +5,36 @@ import { uuid } from '@/shared/utils';
 
 const STORAGE_KEY = 'synqto_diaries_v1';
 
+function cloneDiaryState(state: DiaryState): DiaryState {
+  if (typeof structuredClone === 'function') return structuredClone(state);
+  return JSON.parse(JSON.stringify(state)) as DiaryState;
+}
+
 export class DiaryService {
   private static instance: DiaryService | null = null;
 
   private state: DiaryState = {
     activeDiaryId: 'diary-problem-log',
     activeEntryId: 'entry-welcome',
-    diaries: DEFAULT_DIARIES,
+    diaries: cloneDiaryState({
+      activeDiaryId: 'diary-problem-log',
+      activeEntryId: 'entry-welcome',
+      diaries: DEFAULT_DIARIES,
+    }).diaries,
   };
 
   private listeners: Set<(state: DiaryState) => void> = new Set();
+  private hydrated = false;
+  private dirtyBeforeHydration = false;
+  private touchedDiaryIds = new Set<string>();
+  private createdDiaryIds = new Set<string>();
+  private deletedDiaryIds = new Set<string>();
+  private touchedEntryKeys = new Set<string>();
+  private createdEntryKeys = new Set<string>();
+  private deletedEntryKeys = new Set<string>();
 
   private constructor() {
-    this.loadFromStorage();
+    void this.loadFromStorage();
   }
 
   public static getInstance(): DiaryService {
@@ -28,26 +45,34 @@ export class DiaryService {
   }
 
   private async loadFromStorage() {
+    let loaded: DiaryState | null = null;
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       try {
         const res = await chrome.storage.local.get([STORAGE_KEY]);
         if (res[STORAGE_KEY] && Array.isArray(res[STORAGE_KEY].diaries) && res[STORAGE_KEY].diaries.length > 0) {
-          this.state = res[STORAGE_KEY];
-          this.notify();
+          loaded = res[STORAGE_KEY];
         }
       } catch (e) {}
     } else if (typeof localStorage !== 'undefined') {
       try {
         const saved = localStorage.getItem(STORAGE_KEY);
         if (saved) {
-          this.state = JSON.parse(saved);
-          this.notify();
+          loaded = JSON.parse(saved);
         }
       } catch (e) {}
     }
+    this.completeHydration(loaded);
   }
 
   private saveToStorage() {
+    if (!this.hydrated) {
+      this.dirtyBeforeHydration = true;
+      return;
+    }
+    this.persistState();
+  }
+
+  private persistState(): void {
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       try {
         chrome.storage.local.set({ [STORAGE_KEY]: this.state });
@@ -57,6 +82,102 @@ export class DiaryService {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
       } catch (e) {}
     }
+  }
+
+  private entryKey(diaryId: string, entryId: string): string {
+    return `${diaryId}\u0000${entryId}`;
+  }
+
+  private completeHydration(loaded: DiaryState | null): void {
+    if (this.hydrated) return;
+    if (loaded) {
+      this.state = this.dirtyBeforeHydration
+        ? this.mergeHydratedState(loaded, this.state)
+        : cloneDiaryState(loaded);
+    }
+    this.hydrated = true;
+    if (this.dirtyBeforeHydration) this.persistState();
+    this.dirtyBeforeHydration = false;
+    this.touchedDiaryIds.clear();
+    this.createdDiaryIds.clear();
+    this.deletedDiaryIds.clear();
+    this.touchedEntryKeys.clear();
+    this.createdEntryKeys.clear();
+    this.deletedEntryKeys.clear();
+    this.notify();
+  }
+
+  private mergeHydratedState(stored: DiaryState, local: DiaryState): DiaryState {
+    const merged = cloneDiaryState(stored);
+    merged.diaries = merged.diaries.filter((diary) => !this.deletedDiaryIds.has(diary.id));
+
+    const ensureLocalDiary = (diaryId: string): DiaryBook | null => {
+      const localDiary = local.diaries.find((diary) => diary.id === diaryId);
+      if (!localDiary || this.deletedDiaryIds.has(diaryId)) return null;
+      let target = merged.diaries.find((diary) => diary.id === diaryId);
+      if (!target) {
+        target = cloneDiaryState({
+          activeDiaryId: localDiary.id,
+          activeEntryId: localDiary.entries[0]?.id || null,
+          diaries: [localDiary],
+        }).diaries[0];
+        merged.diaries.push(target);
+      }
+      return target;
+    };
+
+    for (const diaryId of new Set([...this.createdDiaryIds, ...this.touchedDiaryIds])) {
+      const localDiary = local.diaries.find((diary) => diary.id === diaryId);
+      const target = ensureLocalDiary(diaryId);
+      if (!localDiary || !target) continue;
+      const entries = target.entries;
+      Object.assign(target, cloneDiaryState({
+        activeDiaryId: localDiary.id,
+        activeEntryId: null,
+        diaries: [{ ...localDiary, entries: [] }],
+      }).diaries[0]);
+      target.entries = entries;
+    }
+
+    for (const key of new Set([...this.createdEntryKeys, ...this.touchedEntryKeys])) {
+      const separator = key.indexOf('\u0000');
+      const diaryId = key.slice(0, separator);
+      const entryId = key.slice(separator + 1);
+      if (this.deletedEntryKeys.has(key)) continue;
+      const localEntry = local.diaries
+        .find((diary) => diary.id === diaryId)
+        ?.entries.find((entry) => entry.id === entryId);
+      const targetDiary = ensureLocalDiary(diaryId);
+      if (!localEntry || !targetDiary) continue;
+      const clonedEntry = cloneDiaryState({
+        activeDiaryId: diaryId,
+        activeEntryId: entryId,
+        diaries: [{
+          id: diaryId,
+          title: '',
+          icon: '',
+          color: '',
+          entries: [localEntry],
+          createdAt: 0,
+          updatedAt: 0,
+        }],
+      }).diaries[0].entries[0];
+      const index = targetDiary.entries.findIndex((entry) => entry.id === entryId);
+      if (index === -1) targetDiary.entries.push(clonedEntry);
+      else targetDiary.entries[index] = clonedEntry;
+    }
+
+    for (const key of this.deletedEntryKeys) {
+      const separator = key.indexOf('\u0000');
+      const diaryId = key.slice(0, separator);
+      const entryId = key.slice(separator + 1);
+      const diary = merged.diaries.find((item) => item.id === diaryId);
+      if (diary) diary.entries = diary.entries.filter((entry) => entry.id !== entryId);
+    }
+
+    merged.activeDiaryId = local.activeDiaryId;
+    merged.activeEntryId = local.activeEntryId;
+    return merged;
   }
 
   public getState(): DiaryState {
@@ -109,6 +230,8 @@ export class DiaryService {
     };
 
     this.state.diaries.push(newDiary);
+    this.createdDiaryIds.add(newDiary.id);
+    this.touchedDiaryIds.add(newDiary.id);
     this.state.activeDiaryId = newDiary.id;
     this.state.activeEntryId = null;
     this.saveToStorage();
@@ -123,6 +246,7 @@ export class DiaryService {
       if (icon) diary.icon = icon;
       if (color) diary.color = color;
       diary.updatedAt = Date.now();
+      this.touchedDiaryIds.add(diaryId);
       this.saveToStorage();
       this.notify();
     }
@@ -130,6 +254,7 @@ export class DiaryService {
 
   public deleteDiary(diaryId: string) {
     if (this.state.diaries.length <= 1) return; // Keep at least 1 diary
+    this.deletedDiaryIds.add(diaryId);
     this.state.diaries = this.state.diaries.filter((d) => d.id !== diaryId);
     if (this.state.activeDiaryId === diaryId) {
       this.state.activeDiaryId = this.state.diaries[0].id;
@@ -165,6 +290,7 @@ export class DiaryService {
 
     diary.entries.unshift(newEntry);
     diary.updatedAt = Date.now();
+    this.createdEntryKeys.add(this.entryKey(diary.id, newEntry.id));
     this.state.activeDiaryId = diary.id;
     this.state.activeEntryId = newEntry.id;
 
@@ -181,6 +307,7 @@ export class DiaryService {
     if (entry) {
       Object.assign(entry, updates, { updatedAt: Date.now() });
       diary.updatedAt = Date.now();
+      this.touchedEntryKeys.add(this.entryKey(diaryId, entryId));
       this.saveToStorage();
       this.notify();
     }
@@ -192,6 +319,7 @@ export class DiaryService {
 
     diary.entries = diary.entries.filter((e) => e.id !== entryId);
     diary.updatedAt = Date.now();
+    this.deletedEntryKeys.add(this.entryKey(diaryId, entryId));
     if (this.state.activeEntryId === entryId) {
       this.state.activeEntryId = diary.entries[0]?.id || null;
     }

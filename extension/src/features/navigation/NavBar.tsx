@@ -87,6 +87,7 @@ export const NavBar: React.FC<NavBarProps> = ({
             className={`nav-tab ${isActive ? 'active' : ''}`}
             onClick={() => onSelectTab(tab.id)}
             title={tab.title}
+            aria-label={tab.label}
           >
             <tab.Icon
               size={17}
@@ -95,7 +96,11 @@ export const NavBar: React.FC<NavBarProps> = ({
               color={isActive ? 'var(--primary)' : undefined}
               aria-hidden={true}
             />
-            <span>{tab.label}</span>
+            {/* The label collapses at narrow widths (see .nav-tab-label). aria-label on the
+                button carries the name once the text is hidden, so the tab is still
+                identifiable to a screen reader and to anyone who does not recognise the
+                glyph — which is the whole precondition for dropping the text at all. */}
+            <span className="nav-tab-label">{tab.label}</span>
 
             {showWhiteboardHint && (
               <span

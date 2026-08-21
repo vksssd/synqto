@@ -16,11 +16,15 @@ export class GroupService {
   private groups: StudyGroup[] = [];
   private listeners: Set<(groups: StudyGroup[]) => void> = new Set();
   private initialized = false;
+  private initializationPromise: Promise<void> | null = null;
+  private initializationResolver: (() => void) | null = null;
+  private pendingMutations: Array<() => void> = [];
+  private destroyed = false;
 
   private constructor() {
     this.roomService = RoomService.getInstance();
     this.identityService = IdentityService.getInstance();
-    this.loadFromStorage();
+    void this.loadFromStorage();
   }
 
   public static getInstance(): GroupService {
@@ -30,28 +34,50 @@ export class GroupService {
     return GroupService.instance;
   }
 
-  private async loadFromStorage(): Promise<void> {
-    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-      chrome.storage.local.get([STORAGE_KEY, LEGACY_STORAGE_KEY], (res) => {
-        const saved = res[STORAGE_KEY] || res[LEGACY_STORAGE_KEY];
-        if (saved && Array.isArray(saved)) {
-          this.groups = saved;
-        } else {
-          // Add default initial sample study squads
-          this.groups = this.getDefaultGroups();
-          this.saveToStorage();
-        }
-        this.initialized = true;
-        this.emitChange();
-      });
-    } else {
-      this.groups = this.getDefaultGroups();
+  private loadFromStorage(): Promise<void> {
+    if (this.destroyed || this.initialized) return Promise.resolve();
+    if (this.initializationPromise) return this.initializationPromise;
+
+    const finish = (saved: StudyGroup[] | null): void => {
+      if (this.destroyed || this.initialized) return;
+      const usedDefaults = !saved;
+      this.groups = saved || this.getDefaultGroups();
       this.initialized = true;
+      const pending = this.pendingMutations.splice(0);
+      pending.forEach((mutation) => {
+        try {
+          mutation();
+        } catch (err) {
+          console.error('[GroupService] deferred mutation failed:', err);
+        }
+      });
+      if (usedDefaults) this.saveToStorage();
       this.emitChange();
+    };
+
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      const attempt = new Promise<void>((resolve) => {
+        this.initializationResolver = resolve;
+        chrome.storage.local.get([STORAGE_KEY, LEGACY_STORAGE_KEY], (res) => {
+          const saved = res[STORAGE_KEY] || res[LEGACY_STORAGE_KEY];
+          finish(Array.isArray(saved) ? saved : null);
+          if (this.initializationResolver === resolve) this.initializationResolver = null;
+          resolve();
+        });
+      });
+      this.initializationPromise = attempt;
+      void attempt.finally(() => {
+        if (this.initializationPromise === attempt) this.initializationPromise = null;
+      });
+      return attempt;
+    } else {
+      finish(null);
+      return Promise.resolve();
     }
   }
 
   private saveToStorage(): void {
+    if (this.destroyed || !this.initialized) return;
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       chrome.storage.local.set({
         [STORAGE_KEY]: this.groups,
@@ -90,10 +116,15 @@ export class GroupService {
   }
 
   public async getGroups(): Promise<StudyGroup[]> {
-    if (!this.initialized) {
-      await this.loadFromStorage();
-    }
-    return this.groups;
+    await this.loadFromStorage();
+    return [...this.groups];
+  }
+
+  private deferUntilInitialized(mutation: () => void): boolean {
+    if (this.destroyed) return true;
+    if (this.initialized) return false;
+    if (this.pendingMutations.length < 100) this.pendingMutations.push(mutation);
+    return true;
   }
 
   /**
@@ -134,6 +165,7 @@ export class GroupService {
    * creator, which misrepresents ownership in the UI.
    */
   public markAsJoinedNotCreated(groupId: string): void {
+    if (this.deferUntilInitialized(() => this.markAsJoinedNotCreated(groupId))) return;
     const g = this.groups.find((grp) => grp.id === groupId);
     if (!g || !g.isCreator) return;
     g.isCreator = false;
@@ -207,6 +239,8 @@ export class GroupService {
   public async joinByHandle(
     nameOrHandle: string
   ): Promise<{ success: boolean; group?: StudyGroup; error?: string }> {
+    await this.loadFromStorage();
+    if (this.destroyed) return { success: false, error: 'Group service is unavailable' };
     if (!GroupService.isValidHandle(nameOrHandle)) {
       return {
         success: false,
@@ -227,6 +261,7 @@ export class GroupService {
     }
 
     const identity = await this.identityService.getOrCreateIdentity();
+    if (this.destroyed) return { success: false, error: 'Group service is unavailable' };
     const stub: StudyGroup = {
       id: uuid(),
       name: nameOrHandle.trim().replace(/^@+/, '') || handle,
@@ -260,6 +295,8 @@ export class GroupService {
   }
 
   public async createGroup(params: CreateGroupParams): Promise<StudyGroup> {
+    await this.loadFromStorage();
+    if (this.destroyed) throw new Error('Group service is unavailable');
     const cleanSlug = GroupService.toHandle(params.name);
 
     let roomId = '';
@@ -277,6 +314,7 @@ export class GroupService {
     }
 
     const identity = await this.identityService.getOrCreateIdentity();
+    if (this.destroyed) throw new Error('Group service is unavailable');
 
     const newGroup: StudyGroup = {
       id: uuid(),
@@ -321,6 +359,8 @@ export class GroupService {
     group: StudyGroup,
     password?: string
   ): Promise<{ success: boolean; error?: string }> {
+    await this.loadFromStorage();
+    if (this.destroyed) return { success: false, error: 'Group service is unavailable' };
     let targetRoomId = group.roomId;
 
     if (group.isPrivate) {
@@ -344,6 +384,8 @@ export class GroupService {
         }
       }
     }
+
+    if (this.destroyed) return { success: false, error: 'Group service is unavailable' };
 
     const updatedGroup: StudyGroup = {
       ...group,
@@ -380,6 +422,8 @@ export class GroupService {
    * User is removed from permanent membership unless they explicitly rejoin.
    */
   public async leaveGroup(groupId: string): Promise<void> {
+    await this.loadFromStorage();
+    if (this.destroyed) return;
     const target = this.groups.find((g) => g.id === groupId || g.roomId === groupId);
     if (!target) return;
 
@@ -387,6 +431,7 @@ export class GroupService {
     const currentRoom = this.roomService.getCurrentRoom();
     if (currentRoom && currentRoom.roomId === target.roomId) {
       await this.roomService.leaveCurrentRoom();
+      if (this.destroyed) return;
     }
 
     // If it's a default group or problem group, mark isMember: false; otherwise remove it
@@ -419,6 +464,7 @@ export class GroupService {
     canonicalUrl: string;
     roomId: string;
   }): void {
+    if (this.deferUntilInitialized(() => this.registerProblemGroup({ ...problem }))) return;
     const existingIndex = this.groups.findIndex(
       (g) => g.roomId === problem.roomId || g.slug === problem.slug
     );
@@ -469,6 +515,8 @@ export class GroupService {
    * Deletes / removes a group from saved study squads.
    */
   public async deleteGroup(groupId: string): Promise<void> {
+    await this.loadFromStorage();
+    if (this.destroyed) return;
     this.groups = this.groups.filter((g) => g.id !== groupId);
     this.saveToStorage();
     this.emitChange();
@@ -537,6 +585,7 @@ export class GroupService {
   }
 
   public onChange(listener: (groups: StudyGroup[]) => void): () => void {
+    if (this.destroyed) return () => {};
     this.listeners.add(listener);
     listener(this.groups);
     return () => {
@@ -545,6 +594,18 @@ export class GroupService {
   }
 
   private emitChange(): void {
+    if (this.destroyed) return;
     this.listeners.forEach((fn) => fn(this.groups));
+  }
+
+  public destroy(): void {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    this.pendingMutations = [];
+    this.listeners.clear();
+    this.initializationResolver?.();
+    this.initializationResolver = null;
+    this.initializationPromise = null;
+    if (GroupService.instance === this) GroupService.instance = null;
   }
 }

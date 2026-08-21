@@ -15,6 +15,10 @@ export interface TabContextInfo {
   lastActiveAt: number;
 }
 
+export interface SerializedTabContextInfo extends Omit<TabContextInfo, 'capabilities'> {
+  capabilities: Capability[];
+}
+
 export class ContextRegistry {
   private static instance: ContextRegistry | null = null;
   private contexts: Map<TabId, TabContextInfo> = new Map();
@@ -112,5 +116,59 @@ export class ContextRegistry {
         this.contexts.delete(tabId);
       }
     });
+  }
+
+  /** JSON-safe snapshot for chrome.storage.session across MV3 service-worker restarts. */
+  public snapshot(): SerializedTabContextInfo[] {
+    return Array.from(this.contexts.values()).map((ctx) => ({
+      ...ctx,
+      capabilities: Array.from(ctx.capabilities),
+    }));
+  }
+
+  /**
+   * Merges a persisted snapshot without overwriting a context reported more recently by a
+   * live content script during startup hydration.
+   */
+  public hydrate(entries: unknown, liveTabIds?: ReadonlySet<TabId>): void {
+    if (!Array.isArray(entries)) return;
+
+    for (const raw of entries) {
+      if (!raw || typeof raw !== 'object') continue;
+      const entry = raw as Partial<SerializedTabContextInfo>;
+      if (!Number.isInteger(entry.tabId) || (entry.tabId as number) < 0) continue;
+      const tabId = entry.tabId as TabId;
+      if (liveTabIds && !liveTabIds.has(tabId)) continue;
+      if (!Array.isArray(entry.capabilities)) continue;
+
+      const capabilities = entry.capabilities.filter(
+        (capability): capability is Capability =>
+          capability === 'cursor' ||
+          capability === 'code' ||
+          capability === 'whiteboard' ||
+          capability === 'chat' ||
+          capability === 'timer' ||
+          capability === 'voice' ||
+          capability === 'stage'
+      );
+      const restored: TabContextInfo = {
+        tabId,
+        url: typeof entry.url === 'string' ? entry.url : undefined,
+        roomId: typeof entry.roomId === 'string' ? entry.roomId : undefined,
+        peerId: typeof entry.peerId === 'string' ? entry.peerId : undefined,
+        sessionId: typeof entry.sessionId === 'string' ? entry.sessionId : undefined,
+        contextType: entry.contextType === 'CONTENT_SCRIPT' ? entry.contextType : 'CONTENT_SCRIPT',
+        capabilities: new Set(capabilities),
+        isProblemTab: entry.isProblemTab === true,
+        registeredAt:
+          typeof entry.registeredAt === 'number' ? entry.registeredAt : Date.now(),
+        lastActiveAt: typeof entry.lastActiveAt === 'number' ? entry.lastActiveAt : Date.now(),
+      };
+
+      const existing = this.contexts.get(tabId);
+      if (!existing || restored.lastActiveAt > existing.lastActiveAt) {
+        this.contexts.set(tabId, restored);
+      }
+    }
   }
 }

@@ -1,6 +1,6 @@
 // ─── Synqto Rich Chat Card ───
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Check,
   CheckCheck,
@@ -18,6 +18,7 @@ import {
 
 import { ChatMessageItem } from './chat.service';
 import { PeerIdentity } from '@/core/network/packet';
+import { OwnedTimeouts } from '@/shared/owned-timeouts';
 import '../../app/synqtoDesign.css';
 
 // interface ChatCardProps {
@@ -76,6 +77,20 @@ export const ChatCard: React.FC<ChatCardProps> = ({
     Record<string, boolean>
   >({});
   const [showQuizExplanation, setShowQuizExplanation] = useState(false);
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
+  const timeoutsRef = useRef<OwnedTimeouts | null>(null);
+  if (timeoutsRef.current === null) timeoutsRef.current = new OwnedTimeouts();
+  const timeouts = timeoutsRef.current;
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      timeouts.clearAll();
+      copiedTimerRef.current = null;
+    };
+  }, [timeouts]);
 
   const formatTimestamp = (ts: number) => {
     const d = new Date(ts);
@@ -361,13 +376,12 @@ const renderReplyPreview = () => {
                 await navigator.clipboard.writeText(
                   codeData.code
                 );
-
+                if (!mountedRef.current) return;
                 setCopiedCode(true);
-
-                setTimeout(
-                  () => setCopiedCode(false),
-                  1500
-                );
+                copiedTimerRef.current = timeouts.replace(copiedTimerRef.current, () => {
+                  copiedTimerRef.current = null;
+                  setCopiedCode(false);
+                }, 1500);
               } catch {
                 // Clipboard may be unavailable in preview mode.
               }

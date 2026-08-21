@@ -59,6 +59,13 @@ import {
   WhiteboardNotebook,
   Point,
 } from './whiteboard.types';
+import {
+  getWhiteboardLabelAnchor,
+  getWhiteboardRenderedBounds,
+  isLabelableWhiteboardTool,
+  withWhiteboardLabel,
+} from './whiteboard-label';
+import { OwnedTimeouts } from '@/shared/owned-timeouts';
 
 const PEN_COLORS = [
   '#6366f1', // Indigo
@@ -153,16 +160,8 @@ function distanceToLineSegment(px: number, py: number, x1: number, y1: number, x
 }
 
 function getStrokeBounds(stroke: WhiteboardStroke): { minX: number; minY: number; maxX: number; maxY: number } {
-  if (stroke.text && stroke.geometry) {
-    return { minX: stroke.geometry.x1, minY: stroke.geometry.y1 - 20, maxX: stroke.geometry.x1 + 100, maxY: stroke.geometry.y1 + 10 };
-  }
-  if (stroke.geometry) {
-    const minX = Math.min(stroke.geometry.x1, stroke.geometry.x2);
-    const maxX = Math.max(stroke.geometry.x1, stroke.geometry.x2);
-    const minY = Math.min(stroke.geometry.y1, stroke.geometry.y2);
-    const maxY = Math.max(stroke.geometry.y1, stroke.geometry.y2);
-    return { minX, minY, maxX, maxY };
-  }
+  const renderedBounds = getWhiteboardRenderedBounds(stroke);
+  if (renderedBounds) return renderedBounds;
   if (stroke.points && stroke.points.length > 0) {
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const p of stroke.points) {
@@ -209,20 +208,13 @@ function isStrokeIntersectingEraser(stroke: WhiteboardStroke, eraserPt: Point, r
 
   if (stroke.geometry) {
     const { x1, y1, x2, y2 } = stroke.geometry;
-    const minX = Math.min(x1, x2) - radius;
-    const maxX = Math.max(x1, x2) + radius;
-    const minY = Math.min(y1, y2) - radius;
-    const maxY = Math.max(y1, y2) + radius;
-
-    if (eraserPt.x < minX || eraserPt.x > maxX || eraserPt.y < minY || eraserPt.y > maxY) {
-      return false;
-    }
-
     if (stroke.tool === 'line' || stroke.tool === 'arrow' || stroke.tool === 'arrow_bi' || stroke.tool === 'async_arrow' || stroke.tool === 'two_pointers') {
       return distanceToLineSegment(eraserPt.x, eraserPt.y, x1, y1, x2, y2) <= radius + stroke.width;
     }
 
-    return true;
+    const bounds = getStrokeBounds(stroke);
+    return eraserPt.x >= bounds.minX - radius && eraserPt.x <= bounds.maxX + radius &&
+      eraserPt.y >= bounds.minY - radius && eraserPt.y <= bounds.maxY + radius;
   }
 
   if (stroke.points && stroke.points.length > 0) {
@@ -303,6 +295,31 @@ export const WhiteboardCanvas: React.FC = () => {
   // Toast / Notification for Undo on Clear / Copy
   const [undoToast, setUndoToast] = useState<string | null>(null);
   const [copiedToast, setCopiedToast] = useState(false);
+  const undoToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const copiedToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
+  const timeoutsRef = useRef<OwnedTimeouts | null>(null);
+  if (timeoutsRef.current === null) timeoutsRef.current = new OwnedTimeouts();
+  const timeouts = timeoutsRef.current;
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      timeouts.clearAll();
+      undoToastTimerRef.current = null;
+      copiedToastTimerRef.current = null;
+    };
+  }, [timeouts]);
+
+  const showCopiedToast = useCallback((durationMs: number) => {
+    if (!mountedRef.current) return;
+    setCopiedToast(true);
+    copiedToastTimerRef.current = timeouts.replace(copiedToastTimerRef.current, () => {
+      copiedToastTimerRef.current = null;
+      setCopiedToast(false);
+    }, durationMs);
+  }, [timeouts]);
 
   // Disappearing / Temporary Ink Strokes Pool
   const [tempStrokes, setTempStrokes] = useState<{ stroke: WhiteboardStroke; createdAt: number; durationMs: number }[]>([]);
@@ -310,6 +327,8 @@ export const WhiteboardCanvas: React.FC = () => {
   // Text Tool State
   const [textModalPos, setTextModalPos] = useState<{ x: number; y: number } | null>(null);
   const [textInput, setTextInput] = useState('');
+  const [shapeLabelEditor, setShapeLabelEditor] = useState<{ strokeId: string; x: number; y: number } | null>(null);
+  const skipLabelBlurRef = useRef(false);
 
   // Collapsible drawers for toolbars
   const [showArchDrawer, setShowArchDrawer] = useState(false);
@@ -339,9 +358,8 @@ export const WhiteboardCanvas: React.FC = () => {
     const selected = strokes.filter((s) => selectedStrokeIds.includes(s.id));
     if (selected.length === 0) return;
     setClipboardStrokes(selected);
-    setCopiedToast(true);
-    setTimeout(() => setCopiedToast(false), 2000);
-  }, [selectedStrokeIds, whiteboardService]);
+    showCopiedToast(2000);
+  }, [selectedStrokeIds, showCopiedToast, whiteboardService]);
 
   // Paste copied strokes
   const handlePasteSelected = useCallback(() => {
@@ -1607,6 +1625,16 @@ export const WhiteboardCanvas: React.FC = () => {
       // Check if clicked directly on any stroke
       const hitStroke = [...strokes].reverse().find((s) => isStrokeIntersectingEraser(s, pt, 12));
       if (hitStroke) {
+        if ('detail' in e && e.detail >= 2 && isLabelableWhiteboardTool(hitStroke.tool)) {
+          const anchor = getWhiteboardLabelAnchor(hitStroke);
+          if (anchor) {
+            skipLabelBlurRef.current = false;
+            setShapeLabelEditor({ strokeId: hitStroke.id, ...anchor });
+            setTextInput(hitStroke.geometry?.label || '');
+            setSelectedStrokeIds([hitStroke.id]);
+            return;
+          }
+        }
         const isShift = (e as React.MouseEvent).shiftKey;
         if (isShift) {
           setSelectedStrokeIds((prev) => prev.includes(hitStroke.id) ? prev.filter((id) => id !== hitStroke.id) : [...prev, hitStroke.id]);
@@ -1628,6 +1656,7 @@ export const WhiteboardCanvas: React.FC = () => {
     }
 
     if (activeTool === 'text') {
+      skipLabelBlurRef.current = false;
       setTextModalPos(pt);
       setTextInput('');
       return;
@@ -1781,7 +1810,7 @@ export const WhiteboardCanvas: React.FC = () => {
     const strokeWidth = activeTool === 'highlighter' ? 22 : activeWidth;
 
     if (isShapeTool && startPoint) {
-      whiteboardService.addStroke(
+      const stroke = whiteboardService.addStroke(
         activeTool,
         activeColor,
         strokeWidth,
@@ -1793,6 +1822,16 @@ export const WhiteboardCanvas: React.FC = () => {
           y2: endPt.y,
         }
       );
+      if (isLabelableWhiteboardTool(stroke.tool)) {
+        const anchor = getWhiteboardLabelAnchor(stroke);
+        if (anchor) {
+          // Placement is already committed and synchronized. Labeling is a second safe,
+          // non-blocking edit, so Skip/Escape can leave a valid unlabeled object behind.
+          skipLabelBlurRef.current = false;
+          setShapeLabelEditor({ strokeId: stroke.id, ...anchor });
+          setTextInput('');
+        }
+      }
     } else if (currentPoints.length > 0) {
       whiteboardService.addStroke(activeTool, activeColor, strokeWidth, currentPoints);
     }
@@ -1803,6 +1842,17 @@ export const WhiteboardCanvas: React.FC = () => {
 
   // Add Text Note on Canvas
   const handleConfirmText = () => {
+    if (skipLabelBlurRef.current) {
+      skipLabelBlurRef.current = false;
+      return;
+    }
+    if (shapeLabelEditor) {
+      const stroke = whiteboardService.getStrokes().find((candidate) => candidate.id === shapeLabelEditor.strokeId);
+      if (stroke?.geometry) whiteboardService.updateStrokes([withWhiteboardLabel(stroke, textInput)]);
+      setShapeLabelEditor(null);
+      setTextInput('');
+      return;
+    }
     if (!textModalPos || !textInput.trim()) {
       setTextModalPos(null);
       return;
@@ -1821,6 +1871,13 @@ export const WhiteboardCanvas: React.FC = () => {
     setTextInput('');
   };
 
+  const handleSkipLabel = () => {
+    skipLabelBlurRef.current = true;
+    setShapeLabelEditor(null);
+    setTextModalPos(null);
+    setTextInput('');
+  };
+
   // Background Pattern Selector
   const handleSelectBackground = (bg: WhiteboardBackgroundType) => {
     setBackgroundType(bg);
@@ -1835,13 +1892,8 @@ export const WhiteboardCanvas: React.FC = () => {
 
   // Standalone Popup Window Popout
   const handleOpenPopupStandaloneWindow = () => {
-    if (typeof chrome !== 'undefined' && chrome.windows) {
-      chrome.windows.create({
-        url: chrome.runtime.getURL('sidepanel.html?view=whiteboard'),
-        type: 'popup',
-        width: 960,
-        height: 720,
-      });
+    if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+      void chrome.runtime.sendMessage({ type: 'OPEN_WHITEBOARD_POPUP', preset: 'large' });
     } else {
       window.open(window.location.href, '_blank', 'width=960,height=720');
     }
@@ -1853,7 +1905,8 @@ export const WhiteboardCanvas: React.FC = () => {
     if (strokeCount === 0) return;
     whiteboardService.clearAll();
     setUndoToast(`Canvas cleared (${strokeCount} items removed)`);
-    setTimeout(() => {
+    undoToastTimerRef.current = timeouts.replace(undoToastTimerRef.current, () => {
+      undoToastTimerRef.current = null;
       setUndoToast(null);
     }, 5000);
   };
@@ -1875,10 +1928,12 @@ export const WhiteboardCanvas: React.FC = () => {
     if (!canvas) return;
     try {
       canvas.toBlob(async (blob) => {
-        if (blob && navigator.clipboard?.write) {
+        if (!blob || !navigator.clipboard?.write || !mountedRef.current) return;
+        try {
           await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-          setCopiedToast(true);
-          setTimeout(() => setCopiedToast(false), 2500);
+          if (mountedRef.current) showCopiedToast(2500);
+        } catch (error) {
+          console.warn('Clipboard copy not supported in this context', error);
         }
       });
     } catch (e) {
@@ -2671,6 +2726,9 @@ export const WhiteboardCanvas: React.FC = () => {
         {selectedStrokeIds.length > 0 && (() => {
           const b = getSelectedBounds();
           if (!b) return null;
+          const selectedLabelStroke = selectedStrokeIds.length === 1
+            ? whiteboardService.getStrokes().find((stroke) => stroke.id === selectedStrokeIds[0] && isLabelableWhiteboardTool(stroke.tool))
+            : undefined;
           const screenX = Math.max(10, Math.min((containerRef.current?.clientWidth || 400) - 240, b.minX * zoom + panOffset.x));
           const screenY = Math.max(10, b.minY * zoom + panOffset.y - 36);
 
@@ -2695,6 +2753,31 @@ export const WhiteboardCanvas: React.FC = () => {
               <span style={{ fontSize: 'var(--font-size-2xs)', fontWeight: 700, color: 'var(--primary)', paddingRight: '2px' }}>
                 {selectedStrokeIds.length} sel
               </span>
+              {selectedLabelStroke && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const anchor = getWhiteboardLabelAnchor(selectedLabelStroke);
+                    if (!anchor) return;
+                    skipLabelBlurRef.current = false;
+                    setShapeLabelEditor({ strokeId: selectedLabelStroke.id, ...anchor });
+                    setTextInput(selectedLabelStroke.geometry?.label || '');
+                  }}
+                  title="Edit object label"
+                  aria-label="Edit object label"
+                  style={{
+                    background: 'var(--bg-hover)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: '4px',
+                    color: 'var(--text-primary)',
+                    fontSize: 'var(--font-size-xs)',
+                    padding: '2px 6px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Label
+                </button>
+              )}
               <button
                 type="button"
                 onClick={handleCopySelected}
@@ -2873,12 +2956,14 @@ export const WhiteboardCanvas: React.FC = () => {
         </div>
 
         {/* Inline On-Canvas Text Input Tool Popover */}
-        {textModalPos && (
+        {(textModalPos || shapeLabelEditor) && (() => {
+          const editorPos = shapeLabelEditor || textModalPos!;
+          return (
           <div
             style={{
               position: 'absolute',
-              left: `${Math.min(textModalPos.x * zoom + panOffset.x, (containerRef.current?.clientWidth || 300) - 220)}px`,
-              top: `${Math.max(10, textModalPos.y * zoom + panOffset.y - 38)}px`,
+              left: `${Math.max(8, Math.min(editorPos.x * zoom + panOffset.x, (containerRef.current?.clientWidth || 300) - 240))}px`,
+              top: `${Math.max(10, editorPos.y * zoom + panOffset.y - 38)}px`,
               zIndex: 50,
               background: 'rgba(15, 23, 42, 0.95)',
               border: '1px solid var(--border-subtle)',
@@ -2896,8 +2981,9 @@ export const WhiteboardCanvas: React.FC = () => {
               onChange={(e) => setTextInput(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') handleConfirmText();
-                if (e.key === 'Escape') setTextModalPos(null);
+                if (e.key === 'Escape') handleSkipLabel();
               }}
+              onBlur={handleConfirmText}
               autoFocus
               style={{
                 background: 'rgba(0,0,0,0.5)',
@@ -2915,12 +3001,25 @@ export const WhiteboardCanvas: React.FC = () => {
               type="button"
               className="btn btn-primary btn-sm"
               onClick={handleConfirmText}
+              onMouseDown={(e) => e.preventDefault()}
               style={{ fontSize: 'var(--font-size-2xs)', padding: '2px 6px' }}
             >
-              Add
+              {shapeLabelEditor ? 'Save' : 'Add'}
             </button>
+            {shapeLabelEditor && (
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={handleSkipLabel}
+                style={{ fontSize: 'var(--font-size-2xs)', padding: '2px 6px' }}
+              >
+                Skip
+              </button>
+            )}
           </div>
-        )}
+          );
+        })()}
       </div>
     </div>
   );

@@ -1,6 +1,8 @@
 // ─── Collaborative & Personal Whiteboard Service (Multi-Page Notebook, Multi-Window Sync & P2P Collab Mesh) ───
 
 import { NetworkService } from '@/core/network/network.service';
+import { NetworkPacket, PacketType } from '@/core/network/packet';
+import { messageBelongsToRoom } from '@/core/runtime/tab-room-context';
 import { globalClock, compareHLC } from '@/core/network/hybrid-clock';
 import { IdentityService } from '@/features/identity/identity.service';
 import {
@@ -64,6 +66,18 @@ export class WhiteboardService {
    * pad and is meant to follow them across rooms.
    */
   private currentRoomId = '';
+  private roomGeneration = 0;
+  private collabRoomHydrated = false;
+  private collabDirtyBeforeHydration = false;
+  private personalNotebookHydrated = false;
+  private personalDirtyBeforeHydration = false;
+  private privacyModeHydrated = false;
+  private privacyModeChangedBeforeHydration = false;
+  private pendingStorageWrites = new Map<string, Array<{ signature: string; expiresAt: number }>>();
+  private networkUnsubscribers: Array<() => void> = [];
+  private runtimeMessageListener: ((...args: any[]) => any) | null = null;
+  private storageChangeListener: ((...args: any[]) => void) | null = null;
+  private destroyed = false;
 
   // Collaborative Notebook State
   private collabNotebook: WhiteboardNotebook = {
@@ -114,10 +128,10 @@ export class WhiteboardService {
     this.identityService = IdentityService.getInstance();
     this.setupLocalBus();
     this.setupRuntimeMessageListener();
+    this.setupStorageListener();
     this.setupNetworkListeners();
-    this.loadPrivacyMode();
-    this.loadPersonalNotebook();
-    this.loadCollabNotebook();
+    void this.loadPrivacyMode();
+    void this.loadPersonalNotebook();
   }
 
   public static getInstance(): WhiteboardService {
@@ -136,8 +150,17 @@ export class WhiteboardService {
     try {
       this.localBus = new BroadcastChannel('synqto:wb:local_bus');
       this.localBus.onmessage = (event) => {
+        if (this.destroyed) return;
         const data = event.data;
         if (!data || data.fromInstanceId === this.instanceId) return;
+        if (data.scope !== 'personal' && data.scope !== 'collaborative') return;
+        if (data.scope !== this.privacyMode) return;
+        if (
+          data.scope === 'collaborative' &&
+          (!this.currentRoomId || data.roomId !== this.currentRoomId)
+        ) {
+          return;
+        }
 
         if (data.action === 'stroke' && data.stroke) {
           const { stroke, pageId } = data;
@@ -214,11 +237,19 @@ export class WhiteboardService {
     }
   }
 
-  private broadcastLocal(action: string, payload: Record<string, any>): void {
+  private broadcastLocal(
+    action: string,
+    payload: Record<string, any>,
+    scope: WhiteboardPrivacyMode = this.privacyMode
+  ): void {
+    if (this.destroyed) return;
+    if (scope === 'collaborative' && !this.currentRoomId) return;
     if (this.localBus) {
       try {
         this.localBus.postMessage({
           fromInstanceId: this.instanceId,
+          scope,
+          roomId: scope === 'collaborative' ? this.currentRoomId : undefined,
           action,
           ...payload,
         });
@@ -227,15 +258,17 @@ export class WhiteboardService {
   }
 
   public broadcastRuntime(msg: Record<string, any>): void {
+    if (this.destroyed) return;
+    const routedMessage = this.currentRoomId ? { ...msg, roomId: this.currentRoomId } : msg;
     if (typeof chrome !== 'undefined') {
       if (chrome.runtime?.sendMessage) {
-        chrome.runtime.sendMessage(msg).catch(() => {});
+        chrome.runtime.sendMessage(routedMessage).catch(() => {});
       }
       if (chrome.tabs?.query) {
         chrome.tabs.query({}, (tabs) => {
           tabs.forEach((tab) => {
             if (tab.id) {
-              chrome.tabs.sendMessage(tab.id, msg).catch(() => {});
+              chrome.tabs.sendMessage(tab.id, routedMessage).catch(() => {});
             }
           });
         });
@@ -246,7 +279,18 @@ export class WhiteboardService {
   // ─── Chrome Runtime Message Relay (In-Page Floating Widget Shadow DOM & Extension Views) ───
   private setupRuntimeMessageListener(): void {
     if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
-      chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+      this.runtimeMessageListener = (msg, sender, sendResponse) => {
+        if (this.destroyed) return;
+        const isRoomMutation =
+          typeof msg.type === 'string' &&
+          msg.type.startsWith('WHITEBOARD_') &&
+          msg.type.endsWith('_LOCAL');
+        if (
+          isRoomMutation &&
+          !messageBelongsToRoom(msg.roomId, this.currentRoomId)
+        ) {
+          return;
+        }
         if (msg.type === 'WHITEBOARD_GET_SNAPSHOT') {
           sendResponse({
             collabNotebook: this.collabNotebook,
@@ -254,6 +298,8 @@ export class WhiteboardService {
             privacyMode: this.privacyMode,
           });
           return true;
+        } else if (msg.type === 'WHITEBOARD_PRIVACY_LOCAL' && (msg.mode === 'personal' || msg.mode === 'collaborative')) {
+          this.setPrivacyMode(msg.mode);
         } else if (msg.type === 'WHITEBOARD_STROKE_LOCAL' && msg.stroke) {
           const targetPage =
             this.collabNotebook.pages.find((p) => p.id === (msg.pageId || this.collabNotebook.activePageId)) ||
@@ -269,7 +315,11 @@ export class WhiteboardService {
           if (this.privacyMode === 'collaborative') {
             this.notifyListeners();
           }
-          this.broadcastLocal('stroke', { stroke: msg.stroke, pageId: targetPage.id });
+          this.broadcastLocal(
+            'stroke',
+            { stroke: msg.stroke, pageId: targetPage.id },
+            'collaborative'
+          );
         } else if (msg.type === 'WHITEBOARD_STROKES_LOCAL' && Array.isArray(msg.strokes)) {
           const targetPage =
             this.collabNotebook.pages.find((p) => p.id === (msg.pageId || this.collabNotebook.activePageId)) ||
@@ -290,7 +340,11 @@ export class WhiteboardService {
           if (this.privacyMode === 'collaborative') {
             this.notifyListeners();
           }
-          this.broadcastLocal('strokes_batch', { strokes: msg.strokes, pageId: targetPage.id });
+          this.broadcastLocal(
+            'strokes_batch',
+            { strokes: msg.strokes, pageId: targetPage.id },
+            'collaborative'
+          );
         } else if (msg.type === 'WHITEBOARD_UNDO_LOCAL' && msg.strokeId) {
           const targetPage =
             this.collabNotebook.pages.find((p) => p.id === (msg.pageId || this.collabNotebook.activePageId)) ||
@@ -301,7 +355,11 @@ export class WhiteboardService {
           if (this.privacyMode === 'collaborative') {
             this.notifyListeners();
           }
-          this.broadcastLocal('undo', { strokeId: msg.strokeId, pageId: targetPage.id });
+          this.broadcastLocal(
+            'undo',
+            { strokeId: msg.strokeId, pageId: targetPage.id },
+            'collaborative'
+          );
         } else if (msg.type === 'WHITEBOARD_CLEAR_LOCAL') {
           const targetPage =
             this.collabNotebook.pages.find((p) => p.id === (msg.pageId || this.collabNotebook.activePageId)) ||
@@ -313,7 +371,7 @@ export class WhiteboardService {
           if (this.privacyMode === 'collaborative') {
             this.notifyListeners();
           }
-          this.broadcastLocal('clear', { pageId: targetPage.id });
+          this.broadcastLocal('clear', { pageId: targetPage.id }, 'collaborative');
         } else if (msg.type === 'WHITEBOARD_BG_LOCAL' && msg.background) {
           const targetPage =
             this.collabNotebook.pages.find((p) => p.id === (msg.pageId || this.collabNotebook.activePageId)) ||
@@ -326,24 +384,43 @@ export class WhiteboardService {
             this.backgroundListeners.forEach((fn) => fn(targetPage.background));
             if (targetPage.bgColor) this.bgColorListeners.forEach((fn) => fn(targetPage.bgColor!));
           }
-          this.broadcastLocal('background', { background: targetPage.background, bgColor: targetPage.bgColor, pageId: targetPage.id });
+          this.broadcastLocal(
+            'background',
+            {
+              background: targetPage.background,
+              bgColor: targetPage.bgColor,
+              pageId: targetPage.id,
+            },
+            'collaborative'
+          );
         }
-      });
+      };
+      chrome.runtime.onMessage.addListener(this.runtimeMessageListener);
     }
   }
 
   // ─── Storage Persistence ───
   private async loadPrivacyMode() {
-    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-      try {
+    try {
+      if (typeof chrome !== 'undefined' && chrome.storage?.local) {
         const res = await chrome.storage.local.get(['synqto_whiteboard_privacy_mode']);
-        if (res.synqto_whiteboard_privacy_mode) {
+        if (this.destroyed) return;
+        if (
+          !this.privacyModeChangedBeforeHydration &&
+          (res.synqto_whiteboard_privacy_mode === 'personal' ||
+            res.synqto_whiteboard_privacy_mode === 'collaborative')
+        ) {
           this.privacyMode = res.synqto_whiteboard_privacy_mode;
           this.privacyListeners.forEach((fn) => fn(this.privacyMode));
           this.notifyNotebookListeners();
           this.notifyListeners();
         }
-      } catch (e) {}
+      }
+    } catch (e) {
+      // Keep the in-memory/default choice when storage is unavailable.
+    } finally {
+      if (this.destroyed) return;
+      this.privacyModeHydrated = true;
     }
   }
 
@@ -358,19 +435,36 @@ export class WhiteboardService {
   }
 
   private async loadPersonalNotebook() {
-    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-      try {
+    try {
+      if (typeof chrome !== 'undefined' && chrome.storage?.local) {
         const res = await chrome.storage.local.get(['synqto_personal_notebook']);
-        if (res.synqto_personal_notebook && Array.isArray(res.synqto_personal_notebook.pages)) {
-          this.personalNotebook = res.synqto_personal_notebook;
+        if (this.destroyed) return;
+        const stored = res.synqto_personal_notebook;
+        if (stored && Array.isArray(stored.pages) && stored.pages.length > 0) {
+          this.personalNotebook = this.personalDirtyBeforeHydration
+            ? this.mergeNotebooks(stored, this.personalNotebook)
+            : stored;
         }
-      } catch (e) {}
+      }
+    } catch (e) {
+      // Keep the in-memory notebook when storage is unavailable.
+    } finally {
+      if (this.destroyed) return;
+      this.personalNotebookHydrated = true;
+      if (this.personalDirtyBeforeHydration) this.savePersonalNotebook();
+      this.personalDirtyBeforeHydration = false;
+      if (this.privacyMode === 'personal') this.notifyBoardDocumentChange();
     }
   }
 
   private savePersonalNotebook() {
+    if (!this.personalNotebookHydrated) {
+      this.personalDirtyBeforeHydration = true;
+      return;
+    }
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       try {
+        this.markOwnStorageWrite('synqto_personal_notebook', this.personalNotebook);
         chrome.storage.local.set({
           synqto_personal_notebook: this.personalNotebook,
         });
@@ -400,21 +494,39 @@ export class WhiteboardService {
    * rather than merely apparent, and it matches how ChatService already scopes history.
    */
   public async setRoom(roomId: string): Promise<void> {
+    if (this.destroyed) return;
     if (this.currentRoomId === roomId) return;
 
     // Flush the outgoing room's board before switching away from it.
-    if (this.currentRoomId) {
+    // A placeholder whose storage hydration is still pending must never overwrite that room's
+    // real persisted notebook during a rapid A → B switch.
+    if (this.currentRoomId && this.collabRoomHydrated) {
       this.saveCollabNotebook();
     }
 
+    const generation = ++this.roomGeneration;
     this.currentRoomId = roomId;
+    this.collabRoomHydrated = !roomId;
+    this.collabDirtyBeforeHydration = false;
 
     // Start from an empty board so nothing from the previous room can be served to this
     // room's peers in the window before storage resolves.
     const blank = this.createBlankCollabPage();
     this.collabNotebook = { activePageId: blank.id, pages: [blank] };
 
-    await this.loadCollabNotebook();
+    if (roomId) {
+      const stored = await this.loadCollabNotebook(roomId, generation);
+      if (!this.isCurrentRoom(roomId, generation)) return;
+
+      if (stored) {
+        this.collabNotebook = this.collabDirtyBeforeHydration
+          ? this.mergeNotebooks(stored, this.collabNotebook)
+          : stored;
+      }
+      this.collabRoomHydrated = true;
+      if (this.collabDirtyBeforeHydration) this.saveCollabNotebook();
+      this.collabDirtyBeforeHydration = false;
+    }
     this.notifyNotebookListeners();
   }
 
@@ -431,35 +543,175 @@ export class WhiteboardService {
     };
   }
 
-  private async loadCollabNotebook() {
-    if (!this.currentRoomId) return;
+  private async loadCollabNotebook(
+    roomId: string,
+    generation: number
+  ): Promise<WhiteboardNotebook | null> {
+    if (!roomId) return null;
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       try {
-        const key = this.collabStorageKey(this.currentRoomId);
+        const key = this.collabStorageKey(roomId);
         const res = await chrome.storage.local.get([key]);
+        if (!this.isCurrentRoom(roomId, generation)) return null;
         const stored = res[key];
         if (stored && Array.isArray(stored.pages) && stored.pages.length > 0) {
-          this.collabNotebook = stored;
+          return stored;
         }
       } catch (e) {}
     }
+    return null;
   }
 
   private saveCollabNotebook() {
     if (!this.currentRoomId) return;
+    if (!this.collabRoomHydrated) {
+      this.collabDirtyBeforeHydration = true;
+      return;
+    }
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       try {
+        const key = this.collabStorageKey(this.currentRoomId);
+        this.markOwnStorageWrite(key, this.collabNotebook);
         chrome.storage.local.set({
-          [this.collabStorageKey(this.currentRoomId)]: this.collabNotebook,
+          [key]: this.collabNotebook,
         });
       } catch (e) {}
     }
   }
 
+  private isCurrentRoom(roomId: string, generation: number): boolean {
+    return !this.destroyed && this.currentRoomId === roomId && this.roomGeneration === generation;
+  }
+
+  /**
+   * Preserves strokes created during the brief storage-hydration window. The fresh placeholder
+   * page has a unique ID, so it becomes a second page only when the user actually drew before
+   * hydration completed; an untouched placeholder is replaced wholesale by the stored board.
+   */
+  private mergeNotebooks(
+    stored: WhiteboardNotebook,
+    local: WhiteboardNotebook
+  ): WhiteboardNotebook {
+    const pages = stored.pages.map((page) => ({
+      ...page,
+      strokes: [...page.strokes],
+      undoStack: [...(page.undoStack || [])],
+      redoStack: [...(page.redoStack || [])],
+    }));
+
+    for (const localPage of local.pages) {
+      const existing = pages.find((page) => page.id === localPage.id);
+      if (!existing) {
+        pages.push({
+          ...localPage,
+          strokes: [...localPage.strokes],
+          undoStack: [...(localPage.undoStack || [])],
+          redoStack: [...(localPage.redoStack || [])],
+        });
+        continue;
+      }
+      const knownStrokeIds = new Set(existing.strokes.map((stroke) => stroke.id));
+      existing.strokes.push(...localPage.strokes.filter((stroke) => !knownStrokeIds.has(stroke.id)));
+    }
+
+    return { activePageId: local.activePageId, pages };
+  }
+
+  /**
+   * Content-script canvases cannot share the extension-origin BroadcastChannel. Canonical
+   * notebook storage is therefore also the cross-origin local bus for full document state,
+   * including personal pages that must never be sent over the peer network.
+   */
+  private setupStorageListener(): void {
+    if (typeof chrome === 'undefined' || !chrome.storage?.onChanged) return;
+    this.storageChangeListener = (changes, area) => {
+      if (this.destroyed || area !== 'local') return;
+
+      const personal = changes.synqto_personal_notebook?.newValue;
+      if (personal?.pages?.length && !this.consumeOwnStorageWrite('synqto_personal_notebook', personal)) {
+        const hadPreHydrationChanges =
+          !this.personalNotebookHydrated && this.personalDirtyBeforeHydration;
+        this.personalNotebook = hadPreHydrationChanges
+          ? this.mergeNotebooks(personal, this.personalNotebook)
+          : personal;
+        this.personalNotebookHydrated = true;
+        if (hadPreHydrationChanges) this.savePersonalNotebook();
+        this.personalDirtyBeforeHydration = false;
+        if (this.privacyMode === 'personal') this.notifyBoardDocumentChange();
+      }
+
+      const collabKey = this.currentRoomId ? this.collabStorageKey(this.currentRoomId) : '';
+      const collab = collabKey ? changes[collabKey]?.newValue : undefined;
+      if (collab?.pages?.length && !this.consumeOwnStorageWrite(collabKey, collab)) {
+        this.collabNotebook = collab;
+        if (this.privacyMode === 'collaborative') this.notifyBoardDocumentChange();
+      }
+
+      const mode = changes.synqto_whiteboard_privacy_mode?.newValue;
+      if ((mode === 'personal' || mode === 'collaborative') && mode !== this.privacyMode) {
+        this.privacyMode = mode;
+        this.privacyListeners.forEach((fn) => fn(mode));
+        this.notifyBoardDocumentChange();
+      }
+    };
+    chrome.storage.onChanged.addListener(this.storageChangeListener);
+  }
+
+  private onNetwork<T = unknown>(
+    type: PacketType,
+    handler: (payload: T, packet: NetworkPacket) => void
+  ): void {
+    const unsubscribe = this.network.on<T>(type, (payload, packet) => {
+      if (
+        this.destroyed ||
+        !this.currentRoomId ||
+        packet.roomId !== this.currentRoomId
+      ) {
+        return;
+      }
+      handler(payload, packet);
+    });
+    this.networkUnsubscribers.push(unsubscribe);
+  }
+
+  private markOwnStorageWrite(key: string, value: unknown): void {
+    const signature = JSON.stringify(value);
+    const pending = this.pendingStorageWrites.get(key) || [];
+    pending.push({ signature, expiresAt: Date.now() + 5000 });
+    // A failed/overwritten callback must not leave this registry unbounded.
+    this.pendingStorageWrites.set(key, pending.slice(-20));
+  }
+
+  private consumeOwnStorageWrite(key: string, value: unknown): boolean {
+    const now = Date.now();
+    const pending = this.pendingStorageWrites.get(key)?.filter((item) => item.expiresAt > now);
+    if (!pending?.length) {
+      this.pendingStorageWrites.delete(key);
+      return false;
+    }
+    const signature = JSON.stringify(value);
+    const index = pending.findIndex((item) => item.signature === signature);
+    if (index === -1) {
+      this.pendingStorageWrites.set(key, pending);
+      return false;
+    }
+    pending.splice(index, 1);
+    if (pending.length === 0) this.pendingStorageWrites.delete(key);
+    return true;
+  }
+
+  private notifyBoardDocumentChange(): void {
+    this.notifyNotebookListeners();
+    this.notifyListeners();
+    const page = this.getActivePage();
+    this.backgroundListeners.forEach((fn) => fn(page.background));
+    this.bgColorListeners.forEach((fn) => fn(page.bgColor || '#090d16'));
+  }
+
   // ─── Network Protocol Listeners for P2P Mesh Synchronization ───
   private setupNetworkListeners(): void {
     // 0. Automatic Catch-up sync on presence join in collaborative mode
-    this.network.on('presence:join', () => {
+    this.onNetwork('presence:join', () => {
       if (this.privacyMode === 'collaborative') {
         // Always ask. This was gated on the local notebook being EMPTY, so anyone who had
         // drawn even one stroke before joining never requested the room's history and sat
@@ -469,7 +721,7 @@ export class WhiteboardService {
     });
 
     // 0a. Handle incoming full sync request from a newly joined peer
-    this.network.on('whiteboard:sync_request', (_, packet) => {
+    this.onNetwork('whiteboard:sync_request', (_, packet) => {
       if (this.privacyMode !== 'collaborative') return;
       // Never serve a board that is not bound to this room. Without this guard, a client that
       // had drawn in a previous room but not yet been pointed at the current one would answer
@@ -487,7 +739,7 @@ export class WhiteboardService {
     });
 
     // 0b. Handle incoming full sync response from existing peer in room
-    this.network.on<{ notebook: WhiteboardNotebook }>('whiteboard:sync_response', (payload) => {
+    this.onNetwork<{ notebook: WhiteboardNotebook }>('whiteboard:sync_response', (payload) => {
       if (this.privacyMode !== 'collaborative' || !payload?.notebook?.pages) return;
       // MERGE by stroke id rather than replacing the notebook wholesale.
       //
@@ -528,13 +780,13 @@ export class WhiteboardService {
         this.saveCollabNotebook();
         this.notifyNotebookListeners();
         this.notifyListeners();
-        this.broadcastLocal('full_snapshot', { notebook: this.collabNotebook });
+        this.broadcastLocal('full_snapshot', { notebook: this.collabNotebook }, 'collaborative');
         this.broadcastRuntime({ type: 'WHITEBOARD_SNAPSHOT', notebook: this.collabNotebook });
       }
     });
 
     // 1. Receive incoming remote stroke
-    this.network.on<{ pageId?: string; stroke: WhiteboardStroke }>('whiteboard:stroke', (payload) => {
+    this.onNetwork<{ pageId?: string; stroke: WhiteboardStroke }>('whiteboard:stroke', (payload) => {
       const stroke = payload?.stroke || (payload as any);
       if (!stroke || !stroke.id) return;
 
@@ -544,7 +796,7 @@ export class WhiteboardService {
       if (!targetPage.strokes.some((s) => s.id === stroke.id)) {
         targetPage.strokes.push(stroke);
         this.saveCollabNotebook();
-        this.broadcastLocal('stroke', { stroke, pageId: targetPage.id });
+        this.broadcastLocal('stroke', { stroke, pageId: targetPage.id }, 'collaborative');
         this.broadcastRuntime({ type: 'WHITEBOARD_STROKE_LOCAL', stroke, pageId: targetPage.id });
         if (this.privacyMode === 'collaborative' && this.collabNotebook.activePageId === targetPage.id) {
           this.notifyListeners();
@@ -553,7 +805,7 @@ export class WhiteboardService {
     });
 
     // 1b. Receive remote strokes batch (moving/transforming selections)
-    this.network.on<{ pageId?: string; strokes: WhiteboardStroke[] }>('whiteboard:strokes_batch', (payload) => {
+    this.onNetwork<{ pageId?: string; strokes: WhiteboardStroke[] }>('whiteboard:strokes_batch', (payload) => {
       if (!payload || !Array.isArray(payload.strokes) || payload.strokes.length === 0) return;
       const pageId = payload.pageId || this.collabNotebook.activePageId;
       const targetPage = this.collabNotebook.pages.find((p) => p.id === pageId) || this.getActivePage();
@@ -561,7 +813,11 @@ export class WhiteboardService {
       const strokeMap = new Map<string, WhiteboardStroke>(payload.strokes.map((s) => [s.id, s]));
       targetPage.strokes = targetPage.strokes.map((s) => (strokeMap.has(s.id) ? strokeMap.get(s.id)! : s));
       this.saveCollabNotebook();
-      this.broadcastLocal('strokes_batch', { strokes: payload.strokes, pageId: targetPage.id });
+      this.broadcastLocal(
+        'strokes_batch',
+        { strokes: payload.strokes, pageId: targetPage.id },
+        'collaborative'
+      );
       this.broadcastRuntime({ type: 'WHITEBOARD_UPDATE_STROKES_LOCAL', strokes: payload.strokes, pageId: targetPage.id });
       if (this.privacyMode === 'collaborative' && this.collabNotebook.activePageId === targetPage.id) {
         this.notifyListeners();
@@ -569,23 +825,27 @@ export class WhiteboardService {
     });
 
     // 2. Receive temporary disappearing stroke
-    this.network.on<{ stroke: WhiteboardStroke; durationMs: number }>('whiteboard:temp_stroke', (payload) => {
+    this.onNetwork<{ stroke: WhiteboardStroke; durationMs: number }>('whiteboard:temp_stroke', (payload) => {
       if (payload?.stroke && this.privacyMode === 'collaborative') {
         this.tempStrokeListeners.forEach((fn) => fn(payload.stroke, payload.durationMs || 3000));
-        this.broadcastLocal('temp_stroke', { stroke: payload.stroke, durationMs: payload.durationMs || 3000 });
+        this.broadcastLocal(
+          'temp_stroke',
+          { stroke: payload.stroke, durationMs: payload.durationMs || 3000 },
+          'collaborative'
+        );
         this.broadcastRuntime({ type: 'WHITEBOARD_TEMP_STROKE_LOCAL', stroke: payload.stroke, durationMs: payload.durationMs || 3000 });
       }
     });
 
     // 3. Receive remote canvas clear
-    this.network.on<{ pageId?: string; timestamp: number }>('whiteboard:clear', (payload) => {
+    this.onNetwork<{ pageId?: string; timestamp: number }>('whiteboard:clear', (payload) => {
       const pageId = payload?.pageId || this.collabNotebook.activePageId;
       const page = this.collabNotebook.pages.find((p) => p.id === pageId);
       if (page) {
         page.strokes = [];
         page.redoStack = [];
         this.saveCollabNotebook();
-        this.broadcastLocal('clear', { pageId: page.id });
+        this.broadcastLocal('clear', { pageId: page.id }, 'collaborative');
         this.broadcastRuntime({ type: 'WHITEBOARD_CLEAR_LOCAL', pageId: page.id });
         if (this.privacyMode === 'collaborative' && this.collabNotebook.activePageId === page.id) {
           this.notifyListeners();
@@ -594,14 +854,18 @@ export class WhiteboardService {
     });
 
     // 4. Receive remote undo
-    this.network.on<{ pageId?: string; strokeId: string }>('whiteboard:undo', (payload) => {
+    this.onNetwork<{ pageId?: string; strokeId: string }>('whiteboard:undo', (payload) => {
       if (payload?.strokeId) {
         const pageId = payload?.pageId || this.collabNotebook.activePageId;
         const page = this.collabNotebook.pages.find((p) => p.id === pageId);
         if (page) {
           page.strokes = page.strokes.filter((s) => s.id !== payload.strokeId);
           this.saveCollabNotebook();
-          this.broadcastLocal('undo', { strokeId: payload.strokeId, pageId: page.id });
+          this.broadcastLocal(
+            'undo',
+            { strokeId: payload.strokeId, pageId: page.id },
+            'collaborative'
+          );
           this.broadcastRuntime({ type: 'WHITEBOARD_UNDO_LOCAL', strokeId: payload.strokeId, pageId: page.id });
           if (this.privacyMode === 'collaborative' && this.collabNotebook.activePageId === page.id) {
             this.notifyListeners();
@@ -611,13 +875,17 @@ export class WhiteboardService {
     });
 
     // 5. Receive remote background pattern change
-    this.network.on<{ background: WhiteboardBackgroundType; bgColor?: string }>('whiteboard:background', (payload) => {
+    this.onNetwork<{ background: WhiteboardBackgroundType; bgColor?: string }>('whiteboard:background', (payload) => {
       if (payload?.background) {
         const page = this.getActivePage();
         page.background = payload.background;
         if (payload.bgColor) page.bgColor = payload.bgColor;
         this.saveCollabNotebook();
-        this.broadcastLocal('background', { background: page.background, bgColor: page.bgColor, pageId: page.id });
+        this.broadcastLocal(
+          'background',
+          { background: page.background, bgColor: page.bgColor, pageId: page.id },
+          'collaborative'
+        );
         this.broadcastRuntime({ type: 'WHITEBOARD_BG_LOCAL', background: page.background, bgColor: page.bgColor, pageId: page.id });
         this.backgroundListeners.forEach((fn) => fn(page.background));
         if (payload.bgColor) this.bgColorListeners.forEach((fn) => fn(payload.bgColor!));
@@ -625,28 +893,36 @@ export class WhiteboardService {
     });
 
     // 6. Receive remote laser pointer
-    this.network.on<LaserPointerPosition>('whiteboard:laser', (laser) => {
+    this.onNetwork<LaserPointerPosition>('whiteboard:laser', (laser) => {
       if (laser && laser.peerId && this.privacyMode === 'collaborative') {
         this.laserListeners.forEach((fn) => fn(laser));
-        this.broadcastLocal('laser', { laser });
+        this.broadcastLocal('laser', { laser }, 'collaborative');
       }
     });
 
     // 7. Receive remote page creation / page switch in collaborative mode
-    this.network.on<{ action: 'add' | 'switch'; page?: WhiteboardPage; pageId?: string }>('whiteboard:page_sync', (payload) => {
+    this.onNetwork<{ action: 'add' | 'switch'; page?: WhiteboardPage; pageId?: string }>('whiteboard:page_sync', (payload) => {
       if (this.privacyMode !== 'collaborative') return;
 
       if (payload.action === 'add' && payload.page) {
         if (!this.collabNotebook.pages.some((p) => p.id === payload.page!.id)) {
           this.collabNotebook.pages.push(payload.page);
           this.saveCollabNotebook();
-          this.broadcastLocal('page_sync', { pageSyncAction: 'add', page: payload.page });
+          this.broadcastLocal(
+            'page_sync',
+            { pageSyncAction: 'add', page: payload.page },
+            'collaborative'
+          );
           this.notifyNotebookListeners();
         }
       } else if (payload.action === 'switch' && payload.pageId) {
         if (this.collabNotebook.pages.some((p) => p.id === payload.pageId)) {
           this.collabNotebook.activePageId = payload.pageId;
-          this.broadcastLocal('page_sync', { pageSyncAction: 'switch', pageId: payload.pageId });
+          this.broadcastLocal(
+            'page_sync',
+            { pageSyncAction: 'switch', pageId: payload.pageId },
+            'collaborative'
+          );
           this.notifyNotebookListeners();
           this.notifyListeners();
         }
@@ -781,6 +1057,7 @@ export class WhiteboardService {
   // ─── Privacy Mode API ───
 
   public setPrivacyMode(mode: WhiteboardPrivacyMode): void {
+    if (!this.privacyModeHydrated) this.privacyModeChangedBeforeHydration = true;
     this.privacyMode = mode;
     this.savePrivacyMode();
     this.privacyListeners.forEach((fn) => fn(mode));
@@ -1116,6 +1393,7 @@ export class WhiteboardService {
   }
 
   public onStrokesChange(listener: (strokes: WhiteboardStroke[]) => void): () => void {
+    if (this.destroyed) return () => {};
     this.listeners.add(listener);
     listener(this.getStrokes());
     return () => {
@@ -1124,6 +1402,7 @@ export class WhiteboardService {
   }
 
   public onNotebookChange(listener: (notebook: WhiteboardNotebook) => void): () => void {
+    if (this.destroyed) return () => {};
     this.notebookListeners.add(listener);
     listener(this.getActiveNotebook());
     return () => {
@@ -1132,6 +1411,7 @@ export class WhiteboardService {
   }
 
   public onBackgroundChange(listener: (bg: WhiteboardBackgroundType) => void): () => void {
+    if (this.destroyed) return () => {};
     this.backgroundListeners.add(listener);
     listener(this.getBackground());
     return () => {
@@ -1140,6 +1420,7 @@ export class WhiteboardService {
   }
 
   public onBgColorChange(listener: (color: string) => void): () => void {
+    if (this.destroyed) return () => {};
     this.bgColorListeners.add(listener);
     listener(this.getBgColor());
     return () => {
@@ -1148,6 +1429,7 @@ export class WhiteboardService {
   }
 
   public onPrivacyModeChange(listener: (mode: WhiteboardPrivacyMode) => void): () => void {
+    if (this.destroyed) return () => {};
     this.privacyListeners.add(listener);
     listener(this.privacyMode);
     return () => {
@@ -1156,6 +1438,7 @@ export class WhiteboardService {
   }
 
   public onLaser(listener: (laser: LaserPointerPosition) => void): () => void {
+    if (this.destroyed) return () => {};
     this.laserListeners.add(listener);
     return () => {
       this.laserListeners.delete(listener);
@@ -1163,6 +1446,7 @@ export class WhiteboardService {
   }
 
   public onTempStroke(listener: (stroke: WhiteboardStroke, durationMs: number) => void): () => void {
+    if (this.destroyed) return () => {};
     this.tempStrokeListeners.add(listener);
     return () => {
       this.tempStrokeListeners.delete(listener);
@@ -1170,12 +1454,52 @@ export class WhiteboardService {
   }
 
   private notifyListeners(): void {
+    if (this.destroyed) return;
     const list = this.getStrokes();
     this.listeners.forEach((fn) => fn(list));
   }
 
   private notifyNotebookListeners(): void {
+    if (this.destroyed) return;
     const nb = this.getActiveNotebook();
     this.notebookListeners.forEach((fn) => fn(nb));
+  }
+
+  public destroy(): void {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    this.roomGeneration++;
+    this.networkUnsubscribers.splice(0).forEach((unsubscribe) => {
+      try {
+        unsubscribe();
+      } catch {}
+    });
+    if (typeof chrome !== 'undefined') {
+      if (this.runtimeMessageListener && chrome.runtime?.onMessage) {
+        chrome.runtime.onMessage.removeListener(this.runtimeMessageListener);
+      }
+      if (this.storageChangeListener && chrome.storage?.onChanged) {
+        chrome.storage.onChanged.removeListener(this.storageChangeListener);
+      }
+    }
+    this.runtimeMessageListener = null;
+    this.storageChangeListener = null;
+    if (this.localBus) {
+      this.localBus.onmessage = null;
+      try {
+        this.localBus.close();
+      } catch {}
+      this.localBus = null;
+    }
+    this.pendingStorageWrites.clear();
+    this.listeners.clear();
+    this.notebookListeners.clear();
+    this.backgroundListeners.clear();
+    this.bgColorListeners.clear();
+    this.privacyListeners.clear();
+    this.laserListeners.clear();
+    this.tempStrokeListeners.clear();
+    this.currentRoomId = '';
+    if (WhiteboardService.instance === this) WhiteboardService.instance = null;
   }
 }

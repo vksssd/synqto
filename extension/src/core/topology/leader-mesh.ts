@@ -15,8 +15,8 @@ import { RouteResolver } from './route-resolver';
 export class LeaderMesh {
   private leaders: Map<PeerId, LeaderNode> = new Map();
   private peerAssignments: Map<PeerId, PeerAssignment> = new Map();
-  private heartbeatInterval: any = null;
-  private healthCheckInterval: any = null;
+  private heartbeatInterval: ReturnType<typeof setInterval> | null = null;
+  private healthCheckInterval: ReturnType<typeof setInterval> | null = null;
   private digestSeq: number = 0;
 
   public readonly routeResolver: RouteResolver;
@@ -140,8 +140,8 @@ export class LeaderMesh {
   }
 
   public stop(): void {
-    if (this.heartbeatInterval) clearInterval(this.heartbeatInterval);
-    if (this.healthCheckInterval) clearInterval(this.healthCheckInterval);
+    if (this.heartbeatInterval !== null) clearInterval(this.heartbeatInterval);
+    if (this.healthCheckInterval !== null) clearInterval(this.healthCheckInterval);
     this.heartbeatInterval = null;
     this.healthCheckInterval = null;
   }

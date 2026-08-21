@@ -5,6 +5,7 @@ import { BookOpen, Plus, Trash2, Download, Search, Tag, ExternalLink, ChevronDow
 import { DiaryService } from './diary.service';
 import { DiaryBook, DiaryEntry, DiaryMood, DiaryWhiteboardData } from './diary.types';
 import { DiaryWhiteboardCanvas } from './DiaryWhiteboardCanvas';
+import { OwnedTimeouts } from '@/shared/owned-timeouts';
 
 const MOODS: { id: DiaryMood; icon: string; label: string; color: string }[] = [
   { id: 'productive', icon: '🚀', label: 'Productive', color: '#10b981' },
@@ -28,7 +29,16 @@ export const DiaryView: React.FC = () => {
   // Local state for smooth typing without cursor jumping or re-render stutter
   const [localTitle, setLocalTitle] = useState<string>('');
   const [localContent, setLocalContent] = useState<string>('');
-  const saveTimeoutRef = useRef<any>(null);
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingSaveRef = useRef<{
+    diaryId: string;
+    entryId: string;
+    title: string;
+    content: string;
+  } | null>(null);
+  const timeoutsRef = useRef<OwnedTimeouts | null>(null);
+  if (timeoutsRef.current === null) timeoutsRef.current = new OwnedTimeouts();
+  const timeouts = timeoutsRef.current;
 
   // View mode inside entry: 'text' | 'whiteboard' | 'split'
   const [entryMode, setEntryMode] = useState<EntryViewMode>('text');
@@ -65,17 +75,34 @@ export const DiaryView: React.FC = () => {
     });
   }, [diaryService]);
 
+  useEffect(() => () => {
+    timeouts.cancel(saveTimeoutRef.current);
+    saveTimeoutRef.current = null;
+    const pending = pendingSaveRef.current;
+    pendingSaveRef.current = null;
+    if (pending) {
+      diaryService.updateEntry(pending.diaryId, pending.entryId, {
+        title: pending.title,
+        content: pending.content,
+      });
+    }
+    timeouts.clearAll();
+  }, [diaryService, timeouts]);
+
   // Debounced auto-save for typing
   const debouncedSave = useCallback(
     (title: string, content: string) => {
-      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-      saveTimeoutRef.current = setTimeout(() => {
-        if (activeDiary && activeEntry) {
-          diaryService.updateEntry(activeDiary.id, activeEntry.id, { title, content });
-        }
+      if (!activeDiary || !activeEntry) return;
+      const pending = { diaryId: activeDiary.id, entryId: activeEntry.id, title, content };
+      pendingSaveRef.current = pending;
+      saveTimeoutRef.current = timeouts.replace(saveTimeoutRef.current, () => {
+        saveTimeoutRef.current = null;
+        if (pendingSaveRef.current !== pending) return;
+        pendingSaveRef.current = null;
+        diaryService.updateEntry(pending.diaryId, pending.entryId, { title, content });
       }, 350);
     },
-    [activeDiary, activeEntry, diaryService]
+    [activeDiary, activeEntry, diaryService, timeouts]
   );
 
   const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -91,7 +118,9 @@ export const DiaryView: React.FC = () => {
   };
 
   const handleBlur = () => {
-    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    timeouts.cancel(saveTimeoutRef.current);
+    saveTimeoutRef.current = null;
+    pendingSaveRef.current = null;
     if (activeDiary && activeEntry) {
       diaryService.updateEntry(activeDiary.id, activeEntry.id, {
         title: localTitle,
@@ -156,7 +185,8 @@ export const DiaryView: React.FC = () => {
     setLocalContent(updated);
     debouncedSave(localTitle, updated);
 
-    setTimeout(() => {
+    timeouts.schedule(() => {
+      if (!textarea.isConnected) return;
       textarea.focus();
       textarea.setSelectionRange(start + prefix.length, start + prefix.length + (selected.length || 4));
     }, 50);
@@ -169,8 +199,8 @@ export const DiaryView: React.FC = () => {
     const updated = `${baseContent}${templateMarkdown}`;
     setLocalContent(updated);
     debouncedSave(localTitle, updated);
-    setTimeout(() => {
-      if (textarea) {
+    timeouts.schedule(() => {
+      if (textarea?.isConnected) {
         textarea.focus();
         textarea.setSelectionRange(updated.length, updated.length);
       }

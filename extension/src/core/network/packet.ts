@@ -4,6 +4,7 @@
 import { HLC, globalClock } from './hybrid-clock';
 
 export type PacketType =
+  | 'application:hello'
   | 'chat:message'
   | 'chat:ack'
   | 'chat:read'
@@ -17,6 +18,7 @@ export type PacketType =
   | 'presence:leave'
   | 'presence:update'
   | 'voice:offer'
+  | 'voice:presence'
   | 'voice:answer'
   | 'voice:ice'
   | 'voice:hangup'
@@ -486,6 +488,7 @@ export interface CodeCursorPayload {
 }
 
 export interface CodeRunPayload {
+  runId?: string;
   code: string;
   language: string;
   input?: string;
@@ -493,6 +496,7 @@ export interface CodeRunPayload {
 }
 
 export interface CodeRunResultPayload {
+  runId?: string;
   stdout: string;
   stderr?: string;
   executionTimeMs: number;

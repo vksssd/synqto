@@ -1,6 +1,7 @@
 // ─── Live Synchronized Laser Pointer & Click Ripple Overlay (Synqme Stage) ───
 
 import { safeCssColor } from '@/core/security/sanitize';
+import { detectRoutedResource, messageBelongsToRoom } from '@/core/runtime/tab-room-context';
 
 /** Fallbacks used whenever a peer's colour fails validation. Match the app's palette. */
 const DEFAULT_CURSOR_COLOR = '#6366f1';
@@ -39,8 +40,16 @@ export class CursorOverlay {
   private container: HTMLDivElement | null = null;
   private cursorElements: Map<string, HTMLDivElement> = new Map();
   private cursorTimeouts: Map<string, number> = new Map();
+  private rippleTimeouts: Set<number> = new Set();
   private myIdentity: any = null;
   private liveStage: any = null;
+  private destroyed = false;
+  private storageListener: ((changes: Record<string, any>, area: string) => void) | null = null;
+  private runtimeMessageListener: ((msg: any) => void) | null = null;
+
+  private getCurrentRoomId(): string {
+    return detectRoutedResource(window.location.href, document.title)?.roomId || '';
+  }
 
   constructor() {
     this.createContainer();
@@ -59,6 +68,7 @@ export class CursorOverlay {
           'nerd_buddy_live_stage',
           'synqme_live_stage'
         ]);
+        if (this.destroyed) return;
         this.myIdentity = res.synqme_identity || res.nerd_buddy_identity || null;
         this.liveStage = res.synqme_live_stage || res.nerd_buddy_live_stage || null;
         if (!this.liveStage || !this.liveStage.isActive) {
@@ -70,7 +80,8 @@ export class CursorOverlay {
 
   private listenToStorage() {
     if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) {
-      chrome.storage.onChanged.addListener((changes, area) => {
+      this.storageListener = (changes, area) => {
+        if (this.destroyed) return;
         if (area === 'local') {
           if (changes.synqme_identity || changes.nerd_buddy_identity) {
             this.myIdentity = (changes.synqme_identity || changes.nerd_buddy_identity).newValue;
@@ -82,7 +93,8 @@ export class CursorOverlay {
             }
           }
         }
-      });
+      };
+      chrome.storage.onChanged.addListener(this.storageListener);
     }
   }
 
@@ -119,13 +131,15 @@ export class CursorOverlay {
   }
 
   private createContainer(): void {
+    if (this.destroyed) return;
     if (document.getElementById('nerd-buddy-cursor-overlay')) return;
 
     if (!document.body) {
+      this.removeDomReadyListeners();
       if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', () => this.createContainer(), { once: true });
+        document.addEventListener('DOMContentLoaded', this.handleDomReady, { once: true });
       } else {
-        window.addEventListener('load', () => this.createContainer(), { once: true });
+        window.addEventListener('load', this.handleDomReady, { once: true });
       }
       return;
     }
@@ -161,12 +175,34 @@ export class CursorOverlay {
     }
   }
 
+  private handleDomReady = (): void => {
+    this.removeDomReadyListeners();
+    if (!this.destroyed) this.createContainer();
+  };
+
+  private removeDomReadyListeners(): void {
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('DOMContentLoaded', this.handleDomReady);
+    }
+    if (typeof window !== 'undefined') window.removeEventListener('load', this.handleDomReady);
+  }
+
   private listenForMessages(): void {
     if (!isExtensionValid() || !chrome.runtime?.onMessage) return;
 
     try {
-      chrome.runtime.onMessage.addListener((msg) => {
-        if (!isExtensionValid()) return;
+      this.runtimeMessageListener = (msg) => {
+        if (this.destroyed) return;
+        if (!isExtensionValid()) {
+          this.destroy();
+          return;
+        }
+        if (
+          (msg.type === 'NERD_BUDDY_CURSOR_UPDATE' || msg.type === 'NERD_BUDDY_CLICK_PULSE') &&
+          !messageBelongsToRoom(msg.roomId, this.getCurrentRoomId())
+        ) {
+          return;
+        }
 
         if (msg.type === 'NERD_BUDDY_STAGE_ENDED' || msg.type === 'NERD_BUDDY_STAGE_INACTIVE') {
           this.clearAllCursors();
@@ -184,7 +220,8 @@ export class CursorOverlay {
             this.renderClickPulse(click);
           }
         }
-      });
+      };
+      chrome.runtime.onMessage.addListener(this.runtimeMessageListener);
     } catch {}
   }
 
@@ -301,10 +338,12 @@ export class CursorOverlay {
 
     // Clear previous timeout and fade out cursor after 4s
     const oldTimeout = this.cursorTimeouts.get(cursor.peerId);
-    if (oldTimeout) clearTimeout(oldTimeout);
+    if (oldTimeout !== undefined) clearTimeout(oldTimeout);
 
     const newTimeout = window.setTimeout(() => {
-      if (el) el.style.opacity = '0';
+      el?.remove();
+      this.cursorElements.delete(cursor.peerId);
+      this.cursorTimeouts.delete(cursor.peerId);
     }, 4000);
 
     this.cursorTimeouts.set(cursor.peerId, newTimeout);
@@ -341,61 +380,104 @@ export class CursorOverlay {
 
     this.container.appendChild(ripple);
 
-    setTimeout(() => {
+    const rippleTimeout = window.setTimeout(() => {
       ripple.remove();
+      this.rippleTimeouts.delete(rippleTimeout);
     }, 900);
+    this.rippleTimeouts.add(rippleTimeout);
   }
 
   private setupLocalTrackers(): void {
-    let lastMoveSent = 0;
-
     // 1. Mouse move tracker (Broadcasted ONLY if tutor or speaker on stage)
-    window.addEventListener('mousemove', (e) => {
-      if (!isExtensionValid()) return;
-      if (!this.isLocalUserOnStage()) return;
-
-      const now = Date.now();
-      if (now - lastMoveSent < 40) return;
-      lastMoveSent = now;
-
-      const xPct = (e.clientX / window.innerWidth) * 100;
-      const yPct = (e.clientY / window.innerHeight) * 100;
-
-      try {
-        chrome.runtime.sendMessage({
-          type: 'LOCAL_CURSOR_MOVE',
-          xPct,
-          yPct,
-        }).catch(() => {});
-      } catch (err) {}
-    });
+    window.addEventListener('mousemove', this.handleMouseMove);
 
     // 2. Click pulse tracker (Broadcasted + rendered locally on click)
-    window.addEventListener('click', (e) => {
-      if (!isExtensionValid()) return;
-      if (!this.isLocalUserOnStage()) return;
+    window.addEventListener('click', this.handleClick);
+  }
 
-      const xPct = (e.clientX / window.innerWidth) * 100;
-      const yPct = (e.clientY / window.innerHeight) * 100;
+  private lastMoveSent = 0;
 
-      // Render local ripple immediately for tutor's own visual feedback
-      this.renderClickPulse({
-        peerId: this.myIdentity?.peerId || 'local',
-        nickname: this.myIdentity?.nickname || 'You',
+  private handleMouseMove = (e: MouseEvent): void => {
+    if (this.destroyed) return;
+    if (!isExtensionValid()) {
+      this.destroy();
+      return;
+    }
+    if (!this.isLocalUserOnStage()) return;
+
+    const now = Date.now();
+    if (now - this.lastMoveSent < 40) return;
+    this.lastMoveSent = now;
+
+    const xPct = (e.clientX / window.innerWidth) * 100;
+    const yPct = (e.clientY / window.innerHeight) * 100;
+
+    try {
+      chrome.runtime.sendMessage({
+        type: 'LOCAL_CURSOR_MOVE',
+        roomId: this.getCurrentRoomId(),
         xPct,
         yPct,
-        color: this.myIdentity?.color || '#8b5cf6',
-        isTutor: true,
-        timestamp: Date.now(),
-      });
+      }).catch(() => {});
+    } catch (err) {}
+  };
 
-      try {
-        chrome.runtime.sendMessage({
-          type: 'LOCAL_CLICK_PULSE',
-          xPct,
-          yPct,
-        }).catch(() => {});
-      } catch (err) {}
+  private handleClick = (e: MouseEvent): void => {
+    if (this.destroyed) return;
+    if (!isExtensionValid()) {
+      this.destroy();
+      return;
+    }
+    if (!this.isLocalUserOnStage()) return;
+
+    const xPct = (e.clientX / window.innerWidth) * 100;
+    const yPct = (e.clientY / window.innerHeight) * 100;
+
+    // Render local ripple immediately for tutor's own visual feedback
+    this.renderClickPulse({
+      peerId: this.myIdentity?.peerId || 'local',
+      nickname: this.myIdentity?.nickname || 'You',
+      xPct,
+      yPct,
+      color: this.myIdentity?.color || '#8b5cf6',
+      isTutor: true,
+      timestamp: Date.now(),
     });
+
+    try {
+      chrome.runtime.sendMessage({
+        type: 'LOCAL_CLICK_PULSE',
+        roomId: this.getCurrentRoomId(),
+        xPct,
+        yPct,
+      }).catch(() => {});
+    } catch (err) {}
+  };
+
+  public destroy(): void {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    this.removeDomReadyListeners();
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('mousemove', this.handleMouseMove);
+      window.removeEventListener('click', this.handleClick);
+    }
+    try {
+      if (this.storageListener && chrome.storage?.onChanged) {
+        chrome.storage.onChanged.removeListener(this.storageListener);
+      }
+      if (this.runtimeMessageListener && chrome.runtime?.onMessage) {
+        chrome.runtime.onMessage.removeListener(this.runtimeMessageListener);
+      }
+    } catch {
+      // An invalidated extension context can throw while removing Chrome listeners.
+    }
+    this.storageListener = null;
+    this.runtimeMessageListener = null;
+    this.clearAllCursors();
+    this.rippleTimeouts.forEach((timeout) => clearTimeout(timeout));
+    this.rippleTimeouts.clear();
+    this.container?.remove();
+    this.container = null;
   }
 }
